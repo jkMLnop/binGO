@@ -1,0 +1,5 @@
+# Ignore buzzword file
+buzzwords_full.csv
+
+# Compiled program
+binGO
