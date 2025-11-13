@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -163,24 +164,11 @@ func checkWin(marked map[int]bool) bool {
 	return false
 }
 
-// printWinScreen displays the victory screen with party parrots
+// dont worry about it
 func printWinScreen() {
-	ac := "🎉"
-
-	fmt.Println()
-	fmt.Println()
-
-	// B
-	fmt.Println(ac + ac + ac + "    " + ac + "  " + ac + "      " + ac + "  " + ac + ac + ac + ac + "  " + ac + ac + ac + ac + "  " + ac)
-	fmt.Println(ac + "    " + ac + "  " + ac + "  " + ac + ac + "    " + ac + "  " + ac + "    " + "    " + ac + "    " + ac + "  " + ac)
-	fmt.Println(ac + ac + ac + "    " + ac + "  " + ac + "  " + ac + "  " + ac + "  " + ac + "  " + ac + ac + "  " + ac + "    " + ac + "  " + ac)
-	fmt.Println(ac + "    " + ac + "  " + ac + "  " + ac + "    " + ac + ac + "  " + ac + "    " + ac + "  " + ac + "    " + ac + "    ")
-	fmt.Println(ac + ac + ac + "    " + ac + "  " + ac + "      " + ac + "  " + ac + ac + ac + ac + "  " + ac + ac + ac + ac + "  " + ac)
-
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("🎊 YOU WIN! 🎊")
-	fmt.Println()
+	cmd := exec.Command("curl", "parrot.live")
+	cmd.Stdout = os.Stdout
+	cmd.Run()
 }
 
 func main() {
