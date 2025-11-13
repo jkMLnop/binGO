@@ -26,11 +26,11 @@ func centerText(text string, width int, paddingChar ...string) string {
 	rightPadding := totalPadding - leftPadding
 
 	result := ""
-	for i := 0; i < leftPadding; i++ {
+	for range leftPadding {
 		result += padChar
 	}
 	result += text
-	for i := 0; i < rightPadding; i++ {
+	for range rightPadding {
 		result += padChar
 	}
 	return result
@@ -49,7 +49,7 @@ func applyStrikethrough(text string) string {
 func visualLength(text string) int {
 	count := 0
 	for _, char := range text {
-		// Skip combining characters (U+0300 to U+036F range)
+		// Skip combining characters (U+0300 to U+036F range) matters for strikethrough
 		if char < 0x0300 || char > 0x036F {
 			count++
 		}
@@ -71,11 +71,11 @@ func centerTextVisual(text string, width int, paddingChar ...string) string {
 	rightPadding := totalPadding - leftPadding
 
 	result := ""
-	for i := 0; i < leftPadding; i++ {
+	for range leftPadding {
 		result += padChar
 	}
 	result += text
-	for i := 0; i < rightPadding; i++ {
+	for range rightPadding {
 		result += padChar
 	}
 	return result
@@ -86,10 +86,10 @@ func printBoard(matrix [][]string, colWidths []int, marked map[int]bool) {
 	var output []string
 	var rowLength int
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		// Build the row string with | separators and centered padding
 		rowStr := "| "
-		for j := 0; j < 3; j++ {
+		for j := range 3 {
 			// Get the cell number based on the mapping: [[7,8,9],[4,5,6],[1,2,3]]
 			cellNum := (2-i)*3 + j + 1
 
@@ -166,6 +166,9 @@ func checkWin(marked map[int]bool) bool {
 
 // dont worry about it
 func printWinScreen() {
+	// Set terminal window title
+	fmt.Print("\033]0;BINGO!!!\007")
+
 	cmd := exec.Command("curl", "--max-time", "30", "parrot.live")
 	cmd.Stdout = os.Stdout
 	cmd.Run()
@@ -201,18 +204,18 @@ func main() {
 
 	// Populate the 3x3 matrix
 	matrix := make([][]string, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		matrix[i] = make([]string, 3)
-		for j := 0; j < 3; j++ {
+		for j := range 3 {
 			matrix[i][j] = selectedRows[i*3+j][0]
 		}
 	}
 
 	// Calculate the maximum width for each column
 	colWidths := make([]int, 3)
-	for j := 0; j < 3; j++ {
+	for j := range 3 {
 		maxWidth := 0
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if len(matrix[i][j]) > maxWidth {
 				maxWidth = len(matrix[i][j])
 			}
