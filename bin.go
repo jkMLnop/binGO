@@ -10,147 +10,22 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/jkMLnop/binGO-CLI/shared"
 )
-
-// centerText returns the text centered within the given width using the specified padding character
-// If no padding character is provided, defaults to space
-func centerText(text string, width int, paddingChar ...string) string {
-	// Default to space if no padding character provided
-	padChar := " "
-	if len(paddingChar) > 0 {
-		padChar = paddingChar[0]
-	}
-
-	totalPadding := width - visualLength(text)
-	leftPadding := totalPadding / 2
-	rightPadding := totalPadding - leftPadding
-
-	result := ""
-	for range leftPadding {
-		result += padChar
-	}
-	result += text
-	for range rightPadding {
-		result += padChar
-	}
-	return result
-}
-
-// applyStrikethrough adds strikethrough formatting to text using Unicode combining character
-func applyStrikethrough(text string) string {
-	result := ""
-	for _, char := range text {
-		result += string(char) + "\u0336"
-	}
-	return result
-}
-
-// visualLength returns the visual length of text (ignoring combining characters)
-func visualLength(text string) int {
-	count := 0
-	for _, char := range text {
-		// Skip combining characters (U+0300 to U+036F range) matters for strikethrough
-		if char < 0x0300 || char > 0x036F {
-			count++
-		}
-	}
-	return count
-}
-
-// printBoard displays the bingo board with optional strikethrough for marked cells
-func printBoard(matrix [][]string, colWidths []int, marked map[int]bool) {
-	var output []string
-	var rowLength int
-
-	for i := range 3 {
-		// Build the row string with | separators and centered padding
-		rowStr := "| "
-		for j := range 3 {
-			// Get the cell number based on the mapping: [[7,8,9],[4,5,6],[1,2,3]]
-			cellNum := (2-i)*3 + j + 1
-
-			cellText := matrix[i][j]
-			// Apply strikethrough if marked
-			if marked[cellNum] {
-				cellText = applyStrikethrough(cellText)
-			}
-
-			// Center the text within the column width, accounting for visual length
-			rowStr += centerText(cellText, colWidths[j])
-			if j < 2 {
-				rowStr += " | "
-			}
-		}
-		rowStr += " |"
-
-		// Store row length from first row
-		if i == 0 {
-			rowLength = len(rowStr)
-
-			// Add "BINGO!" centered above top separator with ~ padding
-			bingoLine := centerText(" BINGO! ", rowLength, "~")
-			output = append(output, bingoLine)
-
-			// Add top separator
-			separator := ""
-			for k := 0; k < rowLength; k++ {
-				separator += "_"
-			}
-			output = append(output, separator)
-		}
-
-		output = append(output, rowStr)
-
-		// Add underscores separator after each row
-		separator := ""
-		for k := 0; k < rowLength; k++ {
-			separator += "_"
-		}
-		output = append(output, separator)
-	}
-
-	// Print the formatted matrix
-	for _, line := range output {
-		fmt.Println(line)
-	}
-}
-
-// checkWin checks if there's a winning combination (3 in a row)
-func checkWin(marked map[int]bool) bool {
-	// Winning combinations
-	winPatterns := [][]int{
-		// Horizontal
-		{1, 2, 3}, // Bottom row
-		{4, 5, 6}, // Middle row
-		{7, 8, 9}, // Top row
-		// Vertical
-		{1, 4, 7}, // Left column
-		{2, 5, 8}, // Middle column
-		{3, 6, 9}, // Right column
-		// Diagonal
-		{1, 5, 9}, // Top-left to bottom-right
-		{3, 5, 7}, // Top-right to bottom-left
-	}
-
-	for _, pattern := range winPatterns {
-		if marked[pattern[0]] && marked[pattern[1]] && marked[pattern[2]] {
-			return true
-		}
-	}
-	return false
-}
 
 // dont worry about it
 func printWinScreen() {
 	// Set terminal window title
 	fmt.Print("\033]0;BINGO!!!\007")
-
+	// TODO: can we make it wait for response to cut to the animation? and in meantime countdown indefinitely? 3..2..1..0..-1..-2..-3.. etc
 	cmd := exec.Command("curl", "--max-time", "30", "parrot.live")
 	cmd.Stdout = os.Stdout
 	cmd.Run()
 }
 
 func main() {
+	// TODO: rewrite this manually to make sure you get it
 	// Open the CSV file
 	file, err := os.Open("buzzwords.csv")
 	if err != nil {
@@ -187,23 +62,11 @@ func main() {
 		}
 	}
 
-	// Calculate the maximum width for each column
-	colWidths := make([]int, 3)
-	for j := range 3 {
-		maxWidth := 0
-		for i := range 3 {
-			if len(matrix[i][j]) > maxWidth {
-				maxWidth = len(matrix[i][j])
-			}
-		}
-		colWidths[j] = maxWidth
-	}
-
-	// Track marked cells
-	marked := make(map[int]bool)
+	// Create board
+	board := shared.NewBoard(matrix)
 
 	// Display initial board
-	printBoard(matrix, colWidths, marked)
+	shared.PrintBoard(board)
 
 	// Interactive loop
 	scanner := bufio.NewScanner(os.Stdin)
@@ -231,19 +94,19 @@ func main() {
 		}
 
 		// Mark the cell
-		marked[num] = true
+		board.MarkCell(num)
 
 		// Clear screen (works on Unix-like systems)
 		fmt.Print("\033[H\033[2J")
 
 		// Check for win
-		if checkWin(marked) {
+		if board.HasWon() {
 			printWinScreen()
 			break
 		}
 
 		// Redraw the board
-		printBoard(matrix, colWidths, marked)
+		shared.PrintBoard(board)
 		fmt.Println("\nEnter a number (1-9) to mark a cell, or 'q' to quit:")
 	}
 }
