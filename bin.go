@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // centerText returns the text centered within the given width using the specified padding character
@@ -166,7 +168,10 @@ func checkWin(marked map[int]bool) bool {
 
 // dont worry about it
 func printWinScreen() {
-	cmd := exec.Command("curl", "parrot.live")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "curl", "parrot.live")
 	cmd.Stdout = os.Stdout
 	cmd.Run()
 }
