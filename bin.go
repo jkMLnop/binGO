@@ -21,7 +21,7 @@ func centerText(text string, width int, paddingChar ...string) string {
 		padChar = paddingChar[0]
 	}
 
-	totalPadding := width - len(text)
+	totalPadding := width - visualLength(text)
 	leftPadding := totalPadding / 2
 	rightPadding := totalPadding - leftPadding
 
@@ -57,30 +57,6 @@ func visualLength(text string) int {
 	return count
 }
 
-// centerTextVisual centers text within the given width, accounting for visual length
-func centerTextVisual(text string, width int, paddingChar ...string) string {
-	// Default to space if no padding character provided
-	padChar := " "
-	if len(paddingChar) > 0 {
-		padChar = paddingChar[0]
-	}
-
-	visLen := visualLength(text)
-	totalPadding := width - visLen
-	leftPadding := totalPadding / 2
-	rightPadding := totalPadding - leftPadding
-
-	result := ""
-	for range leftPadding {
-		result += padChar
-	}
-	result += text
-	for range rightPadding {
-		result += padChar
-	}
-	return result
-}
-
 // printBoard displays the bingo board with optional strikethrough for marked cells
 func printBoard(matrix [][]string, colWidths []int, marked map[int]bool) {
 	var output []string
@@ -100,7 +76,7 @@ func printBoard(matrix [][]string, colWidths []int, marked map[int]bool) {
 			}
 
 			// Center the text within the column width, accounting for visual length
-			rowStr += centerTextVisual(cellText, colWidths[j])
+			rowStr += centerText(cellText, colWidths[j])
 			if j < 2 {
 				rowStr += " | "
 			}
