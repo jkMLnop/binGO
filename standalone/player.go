@@ -15,10 +15,10 @@ type Game struct {
 	session *shared.GameSession
 }
 
-// NewGame creates a new standalone game
+// NewGame creates a new standalone game (3x3 speed bingo)
 func NewGame(buzzwords [][]string) *Game {
-	// Create a shared game session (same logic used by server later)
-	session := shared.NewGameSession(buzzwords)
+	// Create a shared game session with 3x3 dimensions
+	session := shared.NewGameSession(buzzwords, 3, 3)
 
 	return &Game{
 		session: session,
@@ -55,8 +55,14 @@ func (g *Game) Start() {
 			continue
 		}
 
+		// Convert numeric input to cell ID for 3x3
+		cellID := strconv.Itoa(num)
+
 		// Mark the cell
-		g.session.Board.MarkCell(num)
+		if err := g.session.Board.MarkCell(cellID); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			continue
+		}
 
 		// Clear screen (works on Unix-like systems)
 		fmt.Print("\033[H\033[2J")

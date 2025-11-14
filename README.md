@@ -63,6 +63,9 @@ go run . -mode standalone
 `buzzwords.csv` is included as a sample dataset. If you replace it with your own file, keep the same CSV format (one phrase per row, first column used).
 
 ## TODO
+- Streamline display.go and (for speed bingo) add 2 left/right spaces to each card cell while keeping number left-aligned
+- Implement calssic bingo
+- Add dynamic countdown that serves animation once it's ready
 - Implement WebSocket server mode
 - Implement WebSocket client mode
 - Add support for web clients (HTML/JavaScript)

@@ -59,45 +59,105 @@ func PrintBoard(board *Board) {
 	matrix := board.Matrix
 	colWidths := board.ColWidths
 	marked := board.Marked
+	rows := board.Rows
+	cols := board.Cols
+	isSpeedBingo := rows == 3 && cols == 3
 
-	for i := range 3 {
-		// Build the row string with | separators and centered padding
-		rowStr := "| "
-		for j := range 3 {
-			// Get the cell number based on the mapping: [[7,8,9],[4,5,6],[1,2,3]]
-			cellNum := (2-i)*3 + j + 1
+	for i := range rows {
+		// For speed bingo, show 3 lines per cell (number, phrase, padding)
+		if isSpeedBingo {
+			// Line 1: Cell numbers
+			numberLine := "| "
+			for j := range cols {
+				cellID := board.CellID(i, j)
+				numberLine += cellID
+				// Pad to column width
+				for k := len(cellID); k < colWidths[j]; k++ {
+					numberLine += " "
+				}
+				if j < cols-1 {
+					numberLine += " | "
+				}
+			}
+			numberLine += " |"
 
-			cellText := matrix[i][j]
-			// Apply strikethrough if marked
-			if marked[cellNum] {
-				cellText = ApplyStrikethrough(cellText)
+			if i == 0 {
+				rowLength = len(numberLine)
+				// Add "BINGO!" centered above top separator with ~ padding
+				bingoLine := CenterText(" BINGO! ", rowLength, "~")
+				output = append(output, bingoLine)
+
+				// Add top separator
+				separator := ""
+				for k := 0; k < rowLength; k++ {
+					separator += "_"
+				}
+				output = append(output, separator)
 			}
 
-			// Center the text within the column width, accounting for visual length
-			rowStr += CenterText(cellText, colWidths[j])
-			if j < 2 {
-				rowStr += " | "
+			output = append(output, numberLine)
+
+			// Line 2: Phrases (centered)
+			phraseStr := "| "
+			for j := range cols {
+				cellID := board.CellID(i, j)
+				cellText := matrix[i][j]
+				// Apply strikethrough if marked
+				if marked[cellID] {
+					cellText = ApplyStrikethrough(cellText)
+				}
+				phraseStr += CenterText(cellText, colWidths[j])
+				if j < cols-1 {
+					phraseStr += " | "
+				}
 			}
+			phraseStr += " |"
+			output = append(output, phraseStr)
+
+			// Line 3: Padding
+			paddingStr := "| "
+			for j := range cols {
+				for k := 0; k < colWidths[j]; k++ {
+					paddingStr += " "
+				}
+				if j < cols-1 {
+					paddingStr += " | "
+				}
+			}
+			paddingStr += " |"
+			output = append(output, paddingStr)
+		} else {
+			// For non-speed bingo, use regular layout
+			rowStr := "| "
+			for j := range cols {
+				cellID := board.CellID(i, j)
+				cellText := matrix[i][j]
+				// Apply strikethrough if marked
+				if marked[cellID] {
+					cellText = ApplyStrikethrough(cellText)
+				}
+				rowStr += CenterText(cellText, colWidths[j])
+				if j < cols-1 {
+					rowStr += " | "
+				}
+			}
+			rowStr += " |"
+
+			if i == 0 {
+				rowLength = len(rowStr)
+				// Add "BINGO!" centered above top separator with ~ padding
+				bingoLine := CenterText(" BINGO! ", rowLength, "~")
+				output = append(output, bingoLine)
+
+				// Add top separator
+				separator := ""
+				for k := 0; k < rowLength; k++ {
+					separator += "_"
+				}
+				output = append(output, separator)
+			}
+			output = append(output, rowStr)
 		}
-		rowStr += " |"
-
-		// Store row length from first row
-		if i == 0 {
-			rowLength = len(rowStr)
-
-			// Add "BINGO!" centered above top separator with ~ padding
-			bingoLine := CenterText(" BINGO! ", rowLength, "~")
-			output = append(output, bingoLine)
-
-			// Add top separator
-			separator := ""
-			for k := 0; k < rowLength; k++ {
-				separator += "_"
-			}
-			output = append(output, separator)
-		}
-
-		output = append(output, rowStr)
 
 		// Add underscores separator after each row
 		separator := ""
