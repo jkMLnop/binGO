@@ -53,7 +53,7 @@ go run . -mode standalone
 ### Standalone Mode (Speed Bingo - 3x3)
 - The program reads `buzzwords.csv` in the project root and uses the first column of each row.
 - Each cell displays its numpad number (1-9) in the top-left, with the phrase centered below.
-- Enter a number 1-9 on numpad to mark the corresponding cell; enter `q` to quit.
+- Enter a number 1-9 to mark the corresponding cell; enter `q` to quit.
 - Win by marking three in a row (horizontal, vertical, or diagonal).
 
 ### Multiplayer Modes (In Development)
@@ -65,6 +65,22 @@ go run . -mode standalone
 - **3x3 Speed Bingo** (current): Quick 9-cell game with numpad numbers 1-9
 - **5x5 Classic Bingo** (planned): Traditional 25-cell board with B-I-N-G-O letters
 
+## Architecture
+
+```
+binGO-CLI/
+├── bin.go                 # Main entry point
+├── shared/                # Shared game logic
+│   ├── types.go          # Type definitions
+│   ├── board.go          # Board management
+│   ├── game.go           # Game session & win logic
+│   ├── display.go        # Terminal rendering
+│   └── utils.go          # Utilities
+├── standalone/           # Single-player mode
+│   └── player.go         # Game loop & input
+└── buzzwords.csv         # Sample dataset
+```
+
 ## Data
 `buzzwords.csv` is included as a sample dataset. If you replace it with your own file, keep the same CSV format (one phrase per row, first column used).
 
@@ -72,6 +88,7 @@ go run . -mode standalone
 - Streamline display.go and (for speed bingo) add 2 left/right spaces to each card cell while keeping number left-aligned
 - Implement 5x5 classic bingo mode
 - Add dynamic countdown that serves animation once it's ready
+- Implement multiple cards per player
 - Implement WebSocket server mode
 - Implement WebSocket client mode
 - Add support for web clients (HTML/JavaScript)

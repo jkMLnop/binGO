@@ -19,14 +19,15 @@ type ClientMessage struct {
 
 // ServerMessage represents messages sent from server to client
 type ServerMessage struct {
-	Type     string          `json:"type"` // "welcome", "board_update", "player_joined", "game_ended", "error"
+	Type     string          `json:"type"`      // "welcome", "board_update", "player_joined", "game_ended", "error"
 	GameID   string          `json:"game_id"`
 	PlayerID string          `json:"player_id"`
-	Board    [][]string      `json:"board"`   // player's random board (only sent on join/welcome)
-	Rows     int             `json:"rows"`    // board dimensions
+	CardID   string          `json:"card_id"`   // Which card this message relates to (for multi-card support)
+	Board    [][]string      `json:"board"`     // player's random board (only sent on join/welcome)
+	Rows     int             `json:"rows"`      // board dimensions
 	Cols     int             `json:"cols"`
-	Marked   map[string]bool `json:"marked"`  // player's marked cells
-	Players  []string        `json:"players"` // list of connected player IDs
-	Winner   string          `json:"winner"`  // player ID who won (only in game_ended)
-	Message  string          `json:"message"` // error or info messages
+	Marked   map[string]bool `json:"marked"`    // player's marked cells
+	Players  []string        `json:"players"`   // list of connected player IDs
+	Winner   string          `json:"winner"`    // player ID who won (only in game_ended)
+	Message  string          `json:"message"`   // error or info messages
 }
