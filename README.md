@@ -86,10 +86,10 @@ binGO-CLI/
 
 ## TODO
 - Streamline display.go and (for speed bingo) add 2 left/right spaces to each card cell while keeping number left-aligned
+- Add coverage for shared/board.go and game.go
 - Implement 5x5 classic bingo mode
 - Add dynamic countdown that serves animation once it's ready
 - Implement multiple cards per player
-- Implement WebSocket server mode
 - Implement WebSocket client mode
 - Add support for web clients (HTML/JavaScript)
 - Add support for mobile clients (iOS/Android via WebSocket)
