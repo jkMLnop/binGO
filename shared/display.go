@@ -2,6 +2,8 @@ package shared
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 )
 
 // CenterText returns the text centered within the given width using the specified padding character
@@ -109,4 +111,15 @@ func PrintBoard(board *Board) {
 	for _, line := range output {
 		fmt.Println(line)
 	}
+}
+
+// DisplayWinScreen displays the win animation with terminal title
+func DisplayWinScreen() {
+	// Set terminal window title
+	fmt.Print("\033]0;BINGO!!!\007")
+
+	// Display the parrot animation
+	cmd := exec.Command("curl", "--max-time", "30", "parrot.live")
+	cmd.Stdout = os.Stdout
+	cmd.Run()
 }
