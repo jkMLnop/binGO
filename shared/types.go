@@ -7,19 +7,20 @@ type Board struct {
 	Marked    map[int]bool
 }
 
-// Message types for client-server communication (future use)
-type GameMessage struct {
-	Action string      `json:"action"`
-	Data   interface{} `json:"data"`
+// ClientMessage represents messages sent from client to server
+type ClientMessage struct {
+	Action string `json:"action"` // "mark" or "quit"
+	Cell   int    `json:"cell"`   // 1-9 (only for "mark")
 }
 
-type MarkCellMessage struct {
-	Cell int `json:"cell"`
-}
-
-type BoardStateMessage struct {
-	Matrix    [][]string   `json:"matrix"`
-	ColWidths []int        `json:"colWidths"`
-	Marked    map[int]bool `json:"marked"`
-	Winner    bool         `json:"winner"`
+// ServerMessage represents messages sent from server to client
+type ServerMessage struct {
+	Type     string       `json:"type"` // "welcome", "board_update", "player_joined", "game_ended", "error"
+	GameID   string       `json:"game_id"`
+	PlayerID string       `json:"player_id"`
+	Board    [][]string   `json:"board"`   // player's random board (only sent on join/welcome)
+	Marked   map[int]bool `json:"marked"`  // player's marked cells
+	Players  []string     `json:"players"` // list of connected player IDs
+	Winner   string       `json:"winner"`  // player ID who won (only in game_ended)
+	Message  string       `json:"message"` // error or info messages
 }
