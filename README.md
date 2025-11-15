@@ -70,15 +70,21 @@ go run . -mode standalone
 ```
 binGO-CLI/
 ├── bin.go                 # Main entry point
-├── shared/                # Shared game logic
-│   ├── types.go          # Type definitions
-│   ├── board.go          # Board management
-│   ├── game.go           # Game session & win logic
-│   ├── display.go        # Terminal rendering
-│   └── utils.go          # Utilities
-├── standalone/           # Single-player mode
-│   └── player.go         # Game loop & input
-└── buzzwords.csv         # Sample dataset
+├── shared/                # Shared game logic (all modes)
+│   ├── types.go           # Type definitions (ClientMessage, ServerMessage, Board, GameSession)
+│   ├── board.go           # Board management & cell marking
+│   ├── game.go            # Game session & win detection
+│   ├── display.go         # Terminal rendering
+│   └── utils.go           # CSV loading utilities
+├── standalone/            # Single-player mode
+│   └── player.go          # Game loop & input handling
+├── server/                # Multiplayer WebSocket server
+│   ├── server.go          # WebSocket handler, game coordination, mark handling
+│   ├── game.go            # Player & Game structs with thread-safe operations
+│   └── server_test.go     # Unit tests
+├── client/                # Multiplayer CLI client
+│   └── player.go          # (In development)
+├── buzzwords.csv          # Sample dataset
 ```
 
 ## Data
@@ -89,8 +95,7 @@ binGO-CLI/
 - Add coverage for shared/board.go and game.go
 - Implement 5x5 classic bingo mode
 - Add dynamic countdown that serves animation once it's ready
-- Implement multiple cards per player
 - Implement WebSocket client mode
 - Add support for web clients (HTML/JavaScript)
 - Add support for mobile clients (iOS/Android via WebSocket)
-- Consider adding GitHub Actions workflow to run `go vet`/`go test` on PRs
+- Add GitHub Actions workflow to run `go vet`/`go test` on PRs

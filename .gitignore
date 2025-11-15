@@ -1,5 +1,8 @@
 # Ignore buzzword file
 buzzwords_full.csv
 
+# test client
+cmd/test-client
+
 # Compiled program
 binGO

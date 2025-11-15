@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/jkMLnop/binGO-CLI/shared"
+	"golang.org/x/net/websocket"
 )
 
 // Server manages the WebSocket server and game sessions
@@ -41,7 +42,8 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 
 // Start begins listening for connections
 func (s *Server) Start() error {
-	http.HandleFunc("/ws", s.handleConnection)
+	// Register WebSocket handler
+	http.Handle("/ws", websocket.Handler(s.wsHandler))
 	http.HandleFunc("/status", s.handleStatus)
 
 	s.Server = &http.Server{
@@ -73,25 +75,38 @@ func (s *Server) createNewGame() {
 	log.Printf("Created new game: %s", gameID)
 }
 
-// handleConnection handles incoming WebSocket connections
-func (s *Server) handleConnection(w http.ResponseWriter, r *http.Request) {
-	// For Phase 1, we'll use a simple polling mechanism instead of WebSocket
-	// This avoids external dependencies while maintaining the same interface
+// wsHandler handles incoming WebSocket connections (Phase 2)
+func (s *Server) wsHandler(ws *websocket.Conn) {
+	r := ws.Request()
 
-	playerID := r.URL.Query().Get("id")
-	if playerID == "" {
-		// Generate new player ID
-		newID := atomic.AddInt64(&s.PlayerCounter, 1)
-		playerID = fmt.Sprintf("player-%d", newID)
-	}
+	// Extract gameId from query params, or use current game
+	gameID := r.URL.Query().Get("gameId")
 
 	s.GamesMu.RLock()
-	game := s.CurrentGame
+	var game *Game
+	if gameID != "" {
+		game = s.Games[gameID]
+	}
+	if game == nil {
+		game = s.CurrentGame
+	}
 	s.GamesMu.RUnlock()
 
 	if game == nil {
-		http.Error(w, "No active game", http.StatusServiceUnavailable)
+		errMsg := shared.ServerMessage{
+			Type:    "error",
+			Message: "No active game",
+		}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
 		return
+	}
+
+	// Generate player ID
+	playerID := r.URL.Query().Get("id")
+	if playerID == "" {
+		newID := atomic.AddInt64(&s.PlayerCounter, 1)
+		playerID = fmt.Sprintf("player-%d", newID)
 	}
 
 	// Create player
@@ -99,31 +114,117 @@ func (s *Server) handleConnection(w http.ResponseWriter, r *http.Request) {
 
 	// Add player to game
 	if err := game.AddPlayer(player); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		errMsg := shared.ServerMessage{
+			Type:    "error",
+			Message: err.Error(),
+		}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
 		return
 	}
 
-	log.Printf("Player %s joined game %s", playerID, game.ID)
+	log.Printf("Player %s joined game %s via WebSocket", playerID, game.ID)
 
-	// Send welcome message with initial board state
+	// Send welcome message
 	welcomeMsg := shared.ServerMessage{
 		Type:     "welcome",
 		GameID:   game.ID,
 		PlayerID: playerID,
-		CardID:   "0", // First card
+		CardID:   "0",
 		Board:    player.GetFirstCard().Board.Matrix,
 		Rows:     s.Rows,
 		Cols:     s.Cols,
 		Marked:   player.GetFirstCard().Board.Marked,
 		Players:  game.GetPlayerList(),
-		Message:  fmt.Sprintf("Welcome %s! Connected players: %d", playerID, game.PlayerCount()),
+		Message:  fmt.Sprintf("Welcome %s! Players in game: %d", playerID, game.PlayerCount()),
 	}
 
-	msgBytes, _ := json.Marshal(welcomeMsg)
-	fmt.Fprintf(w, "%s\n", string(msgBytes))
-	w.(http.Flusher).Flush()
+	if err := websocket.JSON.Send(ws, welcomeMsg); err != nil {
+		log.Printf("Error sending welcome message: %v", err)
+		game.RemovePlayer(playerID)
+		ws.Close()
+		return
+	}
 
 	log.Printf("Sent welcome message to %s", playerID)
+
+	// Listen for incoming messages from player (Phase 3+)
+	for {
+		var msg shared.ClientMessage
+		if err := websocket.JSON.Receive(ws, &msg); err != nil {
+			log.Printf("Player %s disconnected: %v", playerID, err)
+			game.RemovePlayer(playerID)
+			break
+		}
+
+		// Phase 3: Handle mark actions
+		if msg.Action == "mark" {
+			log.Printf("Received mark from %s: cell=%s, cardID=%s", playerID, msg.Cell, msg.CardID)
+
+			// Get card ID (default to "0" if not specified)
+			cardID := msg.CardID
+			if cardID == "" {
+				cardID = "0"
+			}
+
+			// Handle the mark
+			if err := s.HandleMark(game.ID, playerID, cardID, msg.Cell); err != nil {
+				// Send error response
+				errResp := shared.ServerMessage{
+					Type:     "mark_error",
+					GameID:   game.ID,
+					PlayerID: playerID,
+					CardID:   cardID,
+					Message:  err.Error(),
+				}
+				websocket.JSON.Send(ws, errResp)
+				log.Printf("Mark error for %s: %v", playerID, err)
+				continue
+			}
+
+			// Get updated player state
+			player, exists := game.GetPlayer(playerID)
+			if !exists || player == nil {
+				errResp := shared.ServerMessage{
+					Type:     "mark_error",
+					GameID:   game.ID,
+					PlayerID: playerID,
+					Message:  "Player not found",
+				}
+				websocket.JSON.Send(ws, errResp)
+				log.Printf("Player %s not found after mark", playerID)
+				continue
+			}
+
+			card := player.GetCard(0) // TODO: support multiple cards
+			if card == nil {
+				errResp := shared.ServerMessage{
+					Type:     "mark_error",
+					GameID:   game.ID,
+					PlayerID: playerID,
+					Message:  "Card not found",
+				}
+				websocket.JSON.Send(ws, errResp)
+				log.Printf("Card 0 not found for player %s", playerID)
+				continue
+			}
+
+			// Send confirmation with updated board state
+			confirmResp := shared.ServerMessage{
+				Type:     "mark_confirmed",
+				GameID:   game.ID,
+				PlayerID: playerID,
+				CardID:   cardID,
+				Board:    card.Board.Matrix,
+				Rows:     game.Rows,
+				Cols:     game.Cols,
+				Marked:   card.Board.Marked,
+				Message:  fmt.Sprintf("Cell %s marked", msg.Cell),
+			}
+			websocket.JSON.Send(ws, confirmResp)
+			log.Printf("Mark confirmed for %s on cell %s", playerID, msg.Cell)
+		}
+	}
 }
 
 // handleStatus returns server status

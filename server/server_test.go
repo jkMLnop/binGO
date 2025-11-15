@@ -1,12 +1,12 @@
 package server
 
 import (
-"encoding/json"
-"net/http"
-"net/http/httptest"
-"testing"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
-"github.com/jkMLnop/binGO-CLI/shared"
+	"github.com/jkMLnop/binGO-CLI/shared"
 )
 
 // Helper function to create test buzzwords in the expected format
