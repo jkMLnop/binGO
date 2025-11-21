@@ -144,6 +144,16 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 
 	log.Printf("Sent welcome message to %s", playerID)
 
+	// Spawn goroutine to forward messages from the player's message channel to WebSocket
+	go func() {
+		for msg := range player.Messages.Send {
+			if err := websocket.JSON.Send(ws, msg); err != nil {
+				log.Printf("Error sending message to %s: %v", playerID, err)
+				return
+			}
+		}
+	}()
+
 	// Listen for incoming messages from player (win announcements)
 	for {
 		var msg ClientMessage
@@ -156,8 +166,29 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 		// Handle win announcement from player
 		if msg.Action == "win" {
 			log.Printf("Player %s announced a win!", playerID)
-			// TODO: Phase 4 - Broadcast win to all players
-			// For now, just acknowledge
+
+			// Verify player exists in game
+			_, exists := game.GetPlayer(playerID)
+			if !exists {
+				log.Printf("Player %s not found in game", playerID)
+				continue
+			}
+
+			// Update game state
+			game.IsActive = false
+			game.Winner = playerID
+
+			// Create win announcement message
+			winMsg := ServerMessage{
+				Type:    "game_ended",
+				GameID:  game.ID,
+				Winner:  playerID,
+				Message: fmt.Sprintf("Player %s has won!", playerID),
+			}
+
+			// Broadcast to all players in game
+			s.BroadcastToGame(game.ID, winMsg)
+			log.Printf("Broadcasted win for player %s to all players in game %s", playerID, game.ID)
 		}
 	}
 }
@@ -191,7 +222,14 @@ func (s *Server) BroadcastToGame(gameID string, msg interface{}) error {
 		return fmt.Errorf("game %s not found", gameID)
 	}
 
+	game.PlayersMu.RLock()
+	playersCopy := make([]*Player, 0, len(game.Players))
 	for _, player := range game.Players {
+		playersCopy = append(playersCopy, player)
+	}
+	game.PlayersMu.RUnlock()
+
+	for _, player := range playersCopy {
 		_ = player.SendMessage(msg) // Non-blocking send
 	}
 

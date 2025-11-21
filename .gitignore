@@ -2,7 +2,7 @@
 buzzwords_full.csv
 
 # test client
-cmd/test-client
+cmd/
 
 # Compiled program
 binGO
