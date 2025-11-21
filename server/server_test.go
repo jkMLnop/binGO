@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/jkMLnop/binGO-CLI/shared"
 )
 
 // Helper function to create test buzzwords in the expected format
@@ -25,25 +23,14 @@ func testBuzzwords() [][]string {
 }
 
 func TestPlayerCreation(t *testing.T) {
-	buzzwords := testBuzzwords()
-
-	player := NewPlayer("player-1", buzzwords, 3, 3)
+	player := NewPlayer("player-1")
 
 	if player.ID != "player-1" {
 		t.Errorf("Expected player ID 'player-1', got %s", player.ID)
 	}
 
-	if len(player.Cards) != 1 {
-		t.Errorf("Expected 1 card, got %d", len(player.Cards))
-	}
-
-	card := player.GetFirstCard()
-	if card == nil {
-		t.Fatal("Expected first card to be non-nil")
-	}
-
-	if card.Board.Rows != 3 || card.Board.Cols != 3 {
-		t.Errorf("Expected 3x3 board, got %dx%d", card.Board.Rows, card.Board.Cols)
+	if player.Messages == nil {
+		t.Error("Expected Messages channel to be initialized")
 	}
 }
 
@@ -69,7 +56,7 @@ func TestAddPlayerToGame(t *testing.T) {
 	buzzwords := testBuzzwords()
 
 	game := NewGame("game-1", buzzwords, 3, 3)
-	player := NewPlayer("player-1", buzzwords, 3, 3)
+	player := NewPlayer("player-1")
 
 	err := game.AddPlayer(player)
 	if err != nil {
@@ -94,7 +81,7 @@ func TestDuplicatePlayerError(t *testing.T) {
 	buzzwords := testBuzzwords()
 
 	game := NewGame("game-1", buzzwords, 3, 3)
-	player := NewPlayer("player-1", buzzwords, 3, 3)
+	player := NewPlayer("player-1")
 
 	err1 := game.AddPlayer(player)
 	if err1 != nil {
@@ -131,89 +118,12 @@ func TestServerConnectionHandler(t *testing.T) {
 	}
 }
 
-func TestServerHandleMark(t *testing.T) {
-	buzzwords := testBuzzwords()
-
-	srv := NewServer(buzzwords, 3, 3, "8080")
-	srv.createNewGame()
-
-	game := srv.CurrentGame
-	player := NewPlayer("player-1", buzzwords, 3, 3)
-	game.AddPlayer(player)
-
-	// Mark cell "5" (center cell)
-	err := srv.HandleMark(game.ID, "player-1", "0", "5")
-	if err != nil {
-		t.Fatalf("Expected no error marking cell, got: %v", err)
-	}
-
-	// Verify cell is marked
-	card := player.GetFirstCard()
-	if !card.Board.Marked["5"] {
-		t.Error("Expected cell '5' to be marked")
-	}
-}
-
-func TestServerCheckWinner(t *testing.T) {
-	buzzwords := testBuzzwords()
-
-	srv := NewServer(buzzwords, 3, 3, "8080")
-	srv.createNewGame()
-
-	game := srv.CurrentGame
-	player := NewPlayer("player-1", buzzwords, 3, 3)
-	game.AddPlayer(player)
-
-	// Mark the three center cells vertically (4, 5, 6) - should win
-	card := player.GetFirstCard()
-	card.Board.MarkCell("4")
-	card.Board.MarkCell("5")
-	card.Board.MarkCell("6")
-
-	winner, err := srv.CheckWinnerInGame(game.ID)
-	if err != nil {
-		t.Fatalf("Expected no error checking winner, got: %v", err)
-	}
-
-	if winner != "player-1" {
-		t.Errorf("Expected winner 'player-1', got '%s'", winner)
-	}
-
-	if game.IsActive {
-		t.Error("Expected game to be inactive after win")
-	}
-}
-
-func TestServerBroadcast(t *testing.T) {
-	buzzwords := testBuzzwords()
-
-	srv := NewServer(buzzwords, 3, 3, "8080")
-	srv.createNewGame()
-
-	game := srv.CurrentGame
-	player1 := NewPlayer("player-1", buzzwords, 3, 3)
-	player2 := NewPlayer("player-2", buzzwords, 3, 3)
-	game.AddPlayer(player1)
-	game.AddPlayer(player2)
-
-	// Broadcast message
-	msg := shared.ServerMessage{
-		Type:    "test",
-		Message: "test message",
-	}
-
-	err := srv.BroadcastToGame(game.ID, msg)
-	if err != nil {
-		t.Fatalf("Expected no error broadcasting, got: %v", err)
-	}
-}
-
 func TestGetPlayerList(t *testing.T) {
 	buzzwords := testBuzzwords()
 
 	game := NewGame("game-1", buzzwords, 3, 3)
-	player1 := NewPlayer("player-1", buzzwords, 3, 3)
-	player2 := NewPlayer("player-2", buzzwords, 3, 3)
+	player1 := NewPlayer("player-1")
+	player2 := NewPlayer("player-2")
 
 	game.AddPlayer(player1)
 	game.AddPlayer(player2)

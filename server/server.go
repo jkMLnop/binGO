@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
-	"github.com/jkMLnop/binGO-CLI/shared"
 	"golang.org/x/net/websocket"
 )
 
@@ -75,7 +73,7 @@ func (s *Server) createNewGame() {
 	log.Printf("Created new game: %s", gameID)
 }
 
-// wsHandler handles incoming WebSocket connections (Phase 2)
+// wsHandler handles incoming WebSocket connections
 func (s *Server) wsHandler(ws *websocket.Conn) {
 	r := ws.Request()
 
@@ -93,7 +91,7 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 	s.GamesMu.RUnlock()
 
 	if game == nil {
-		errMsg := shared.ServerMessage{
+		errMsg := ServerMessage{
 			Type:    "error",
 			Message: "No active game",
 		}
@@ -110,11 +108,11 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 	}
 
 	// Create player
-	player := NewPlayer(playerID, s.Buzzwords, s.Rows, s.Cols)
+	player := NewPlayer(playerID)
 
 	// Add player to game
 	if err := game.AddPlayer(player); err != nil {
-		errMsg := shared.ServerMessage{
+		errMsg := ServerMessage{
 			Type:    "error",
 			Message: err.Error(),
 		}
@@ -125,18 +123,16 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 
 	log.Printf("Player %s joined game %s via WebSocket", playerID, game.ID)
 
-	// Send welcome message
-	welcomeMsg := shared.ServerMessage{
-		Type:     "welcome",
-		GameID:   game.ID,
-		PlayerID: playerID,
-		CardID:   "0",
-		Board:    player.GetFirstCard().Board.Matrix,
-		Rows:     s.Rows,
-		Cols:     s.Cols,
-		Marked:   player.GetFirstCard().Board.Marked,
-		Players:  game.GetPlayerList(),
-		Message:  fmt.Sprintf("Welcome %s! Players in game: %d", playerID, game.PlayerCount()),
+	// Send welcome message with buzzwords (client will generate board locally)
+	welcomeMsg := ServerMessage{
+		Type:      "welcome",
+		GameID:    game.ID,
+		PlayerID:  playerID,
+		Buzzwords: s.Buzzwords,
+		Rows:      s.Rows,
+		Cols:      s.Cols,
+		Players:   game.GetPlayerList(),
+		Message:   fmt.Sprintf("Welcome %s! Players in game: %d", playerID, game.PlayerCount()),
 	}
 
 	if err := websocket.JSON.Send(ws, welcomeMsg); err != nil {
@@ -148,81 +144,20 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 
 	log.Printf("Sent welcome message to %s", playerID)
 
-	// Listen for incoming messages from player (Phase 3+)
+	// Listen for incoming messages from player (win announcements)
 	for {
-		var msg shared.ClientMessage
+		var msg ClientMessage
 		if err := websocket.JSON.Receive(ws, &msg); err != nil {
 			log.Printf("Player %s disconnected: %v", playerID, err)
 			game.RemovePlayer(playerID)
 			break
 		}
 
-		// Phase 3: Handle mark actions
-		if msg.Action == "mark" {
-			log.Printf("Received mark from %s: cell=%s, cardID=%s", playerID, msg.Cell, msg.CardID)
-
-			// Get card ID (default to "0" if not specified)
-			cardID := msg.CardID
-			if cardID == "" {
-				cardID = "0"
-			}
-
-			// Handle the mark
-			if err := s.HandleMark(game.ID, playerID, cardID, msg.Cell); err != nil {
-				// Send error response
-				errResp := shared.ServerMessage{
-					Type:     "mark_error",
-					GameID:   game.ID,
-					PlayerID: playerID,
-					CardID:   cardID,
-					Message:  err.Error(),
-				}
-				websocket.JSON.Send(ws, errResp)
-				log.Printf("Mark error for %s: %v", playerID, err)
-				continue
-			}
-
-			// Get updated player state
-			player, exists := game.GetPlayer(playerID)
-			if !exists || player == nil {
-				errResp := shared.ServerMessage{
-					Type:     "mark_error",
-					GameID:   game.ID,
-					PlayerID: playerID,
-					Message:  "Player not found",
-				}
-				websocket.JSON.Send(ws, errResp)
-				log.Printf("Player %s not found after mark", playerID)
-				continue
-			}
-
-			card := player.GetCard(0) // TODO: support multiple cards
-			if card == nil {
-				errResp := shared.ServerMessage{
-					Type:     "mark_error",
-					GameID:   game.ID,
-					PlayerID: playerID,
-					Message:  "Card not found",
-				}
-				websocket.JSON.Send(ws, errResp)
-				log.Printf("Card 0 not found for player %s", playerID)
-				continue
-			}
-
-			// Send confirmation with updated board state
-			confirmResp := shared.ServerMessage{
-				Type:     "mark_confirmed",
-				GameID:   game.ID,
-				PlayerID: playerID,
-				CardID:   cardID,
-				Board:    card.Board.Matrix,
-				Rows:     game.Rows,
-				Cols:     game.Cols,
-				Marked:   card.Board.Marked,
-				Message:  fmt.Sprintf("Cell %s marked", msg.Cell),
-			}
-			websocket.JSON.Send(ws, confirmResp)
-			log.Printf("Mark confirmed for %s on cell %s", playerID, msg.Cell)
+		// Handle win announcement from player
+		if msg.Action == "win" {
+			log.Printf("Player %s announced a win!", playerID)
+			// TODO: Phase 4 - Broadcast win to all players
+			// For now, just acknowledge
 		}
 	}
 }
@@ -244,65 +179,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(statusData)
-}
-
-// HandleMark processes a mark action from a player
-func (s *Server) HandleMark(gameID, playerID, cardID, cellID string) error {
-	s.GamesMu.RLock()
-	game, exists := s.Games[gameID]
-	s.GamesMu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("game %s not found", gameID)
-	}
-
-	player, exists := game.GetPlayer(playerID)
-	if !exists {
-		return fmt.Errorf("player %s not found in game", playerID)
-	}
-
-	cardIndex, err := strconv.Atoi(cardID)
-	if err != nil {
-		return fmt.Errorf("invalid card ID: %s", cardID)
-	}
-
-	card := player.GetCard(cardIndex)
-	if card == nil {
-		return fmt.Errorf("card %d not found for player %s", cardIndex, playerID)
-	}
-
-	// Mark the cell
-	if err := card.Board.MarkCell(cellID); err != nil {
-		return err
-	}
-
-	log.Printf("Player %s marked cell %s on card %d", playerID, cellID, cardIndex)
-
-	return nil
-}
-
-// CheckWinnerInGame checks if any player has won
-func (s *Server) CheckWinnerInGame(gameID string) (string, error) {
-	s.GamesMu.RLock()
-	game, exists := s.Games[gameID]
-	s.GamesMu.RUnlock()
-
-	if !exists {
-		return "", fmt.Errorf("game %s not found", gameID)
-	}
-
-	for playerID, player := range game.Players {
-		for cardIdx, card := range player.Cards {
-			if card.CheckWin() {
-				log.Printf("Player %s (card %d) won game %s!", playerID, cardIdx, gameID)
-				game.Winner = playerID
-				game.IsActive = false
-				return playerID, nil
-			}
-		}
-	}
-
-	return "", nil
 }
 
 // BroadcastToGame sends a message to all players in a game
