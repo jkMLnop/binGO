@@ -90,6 +90,15 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 	}
 	s.GamesMu.RUnlock()
 
+	// If current game is inactive, create a new game
+	if game == s.CurrentGame && !game.IsActive {
+		s.createNewGame()
+		s.GamesMu.RLock()
+		game = s.CurrentGame
+		s.GamesMu.RUnlock()
+		log.Printf("Current game was inactive, created new game: %s", game.ID)
+	}
+
 	if game == nil {
 		errMsg := ServerMessage{
 			Type:    "error",
@@ -144,7 +153,7 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 
 	log.Printf("Sent welcome message to %s", playerID)
 
-	// Spawn goroutine to forward messages from the player's message channel to WebSocket
+	// Spawn goroutine to forward messages from each player's message channel to their WebSocket connection
 	go func() {
 		for msg := range player.Messages.Send {
 			if err := websocket.JSON.Send(ws, msg); err != nil {
