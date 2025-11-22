@@ -1,13 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/jkMLnop/binGO-CLI/client"
 	"github.com/jkMLnop/binGO-CLI/server"
 	"github.com/jkMLnop/binGO-CLI/shared"
 	"github.com/jkMLnop/binGO-CLI/standalone"
@@ -25,7 +31,7 @@ func main() {
 	case "server":
 		runServer(*port)
 	case "client":
-		log.Fatal("Client mode not yet implemented (connect to server: " + *serverAddr + ")")
+		runClient(*serverAddr)
 	case "both":
 		log.Fatal("Both mode not yet implemented")
 	default:
@@ -70,4 +76,134 @@ func runServer(port string) {
 		log.Printf("Shutdown error: %v", err)
 	}
 	log.Println("Server stopped")
+}
+
+func runClient(serverAddr string) {
+	rand.Seed(time.Now().UnixNano())
+
+	// Connect to server via WebSocket
+	wsURL := "ws://" + serverAddr + "/ws"
+	player := client.NewPlayer(wsURL)
+	if err := player.Connect(); err != nil {
+		log.Fatalf("Connection failed: %v", err)
+	}
+	defer player.Close()
+
+	// Channel to signal when game ends (from server message listener)
+	gameDone := make(chan bool, 1)
+
+	// Channel for user input (so we can select on it)
+	inputChan := make(chan string, 1)
+
+	// Spawn goroutine to listen for server messages
+	go func() {
+		if err := player.ListenForMessages(); err != nil {
+			log.Printf("Server disconnected: %v", err)
+		}
+		gameDone <- true
+	}()
+
+	// Spawn goroutine to read user input (non-blocking)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			input, _ := reader.ReadString('\n')
+			inputChan <- strings.TrimSpace(input)
+		}
+	}()
+
+	// Command loop using select for non-blocking I/O
+	fmt.Println("\nEnter a number (1-9) to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+
+	for {
+		fmt.Print("> ")
+
+		// Wait for either user input or game end
+		select {
+		case <-gameDone:
+			// Game ended (winner announced)
+			os.Exit(0)
+
+		case input := <-inputChan:
+			if input == "" {
+				continue
+			}
+
+			// Check for text commands first
+			switch input {
+			case "q", "quit":
+				fmt.Println("Goodbye!")
+				os.Exit(0)
+
+			case "board":
+				fmt.Print("\033[H\033[2J") // Clear screen
+				shared.PrintBoard(player.GameSession.Board)
+				fmt.Println("\nEnter a number (1-9) to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+				continue
+
+			case "win":
+				if err := player.AnnounceWin(); err != nil {
+					fmt.Printf("❌ %v\n", err)
+					continue
+				}
+				fmt.Println("🎉 Announcing win to server...")
+				// Wait for game_ended message from server
+				<-gameDone
+				os.Exit(0)
+
+			case "help":
+				printClientHelp()
+				continue
+			}
+
+			// Try to parse as numeric cell ID (1-9 for 3x3)
+			cellNum, err := strconv.Atoi(input)
+			if err != nil || cellNum < 1 || cellNum > 9 {
+				fmt.Println("Invalid input. Please enter a number between 1-9, 'board', 'win', or 'q'.")
+				continue
+			}
+
+			// Convert numeric input to cell ID for 3x3 board
+			cellID := strconv.Itoa(cellNum)
+
+			// Mark the cell using shared board logic
+			if err := player.GameSession.Board.MarkCell(cellID); err != nil {
+				fmt.Printf("Error: %v\n", err)
+				continue
+			}
+
+			// Clear screen and redraw board
+			fmt.Print("\033[H\033[2J")
+			shared.PrintBoard(player.GameSession.Board)
+
+			// Check for win
+			if player.GameSession.CheckWin() {
+				shared.DisplayWinScreen()
+
+				// Announce win to server
+				if err := player.AnnounceWin(); err != nil {
+					fmt.Printf("Error announcing win: %v\n", err)
+				} else {
+					fmt.Println("Announcing win to server...")
+					// Wait for game_ended message from server before exiting
+					<-gameDone
+				}
+				os.Exit(0)
+			}
+
+			fmt.Println("\nEnter a number (1-9) to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+
+			// Small delay to allow messages from server to be printed
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+func printClientHelp() {
+	fmt.Println("\n📝 Commands:")
+	fmt.Println("  'mark <row> <col>' - Mark a cell (e.g., mark 0 1)")
+	fmt.Println("  'board' - Redisplay the board")
+	fmt.Println("  'win' - Announce you've won (must have winning pattern)")
+	fmt.Println("  'help' - Show this help")
+	fmt.Println("  'quit' - Exit game")
 }

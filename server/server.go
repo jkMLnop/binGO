@@ -186,6 +186,7 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 			// Update game state
 			game.IsActive = false
 			game.Winner = playerID
+			log.Printf("🏆 Player %s WON game %s!", playerID, game.ID)
 
 			// Create win announcement message
 			winMsg := ServerMessage{
