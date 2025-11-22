@@ -178,16 +178,18 @@ func runClient(serverAddr string) {
 
 			// Check for win
 			if player.GameSession.CheckWin() {
-				shared.DisplayWinScreen()
-
-				// Announce win to server
+				// Announce win to server immediately (broadcasts game_ended to all players)
 				if err := player.AnnounceWin(); err != nil {
 					fmt.Printf("Error announcing win: %v\n", err)
-				} else {
-					fmt.Println("Announcing win to server...")
-					// Wait for game_ended message from server before exiting
-					<-gameDone
+					os.Exit(0)
 				}
+
+				fmt.Println("🎉 Announcing win to server...")
+				// Wait for game_ended message from server (all players get kicked)
+				<-gameDone
+
+				// Now show the win animation for the winner
+				shared.DisplayWinScreen()
 				os.Exit(0)
 			}
 
