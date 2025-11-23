@@ -21,7 +21,7 @@ import (
 
 func main() {
 	mode := flag.String("mode", "standalone", "standalone, server, client, or both")
-	serverAddr := flag.String("server", "localhost:8080", "server address for client mode")
+	serverAddr := flag.String("server", "localhost:8080", "server address for client mode (e.g., localhost:8080, 192.168.1.100:8080)")
 	port := flag.String("port", "8080", "port for server mode")
 	flag.Parse()
 
