@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/jkMLnop/binGO-CLI/shared"
 	"golang.org/x/net/websocket"
@@ -26,14 +27,27 @@ func NewPlayer(serverURL string) *Player {
 
 // Connect establishes WebSocket connection to server
 func (p *Player) Connect() error {
-	origin := "http://localhost:8080"
-	ws, err := websocket.Dial(p.ServerURL, "", origin)
+	origin := "http://localhost"
+
+	// Construct WS URL from server address
+	wsURL := p.ServerURL
+
+	// For all connections, use ws:// (plain WebSocket)
+	// ngrok free tier doesn't support wss:// anyway
+	if !strings.HasPrefix(wsURL, "ws://") && !strings.HasPrefix(wsURL, "wss://") {
+		wsURL = "ws://" + wsURL + "/ws"
+	}
+
+	log.Printf("Attempting to connect to: %s", wsURL)
+
+	// Dial WebSocket
+	ws, err := websocket.Dial(wsURL, "", origin)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
 	p.WS = ws
-	log.Printf("Connected to server")
+	log.Printf("Connected to server at %s", wsURL)
 
 	// Receive welcome message
 	var welcomeMsg ServerMessage
@@ -90,6 +104,8 @@ func (p *Player) ListenForMessages() error {
 			fmt.Printf("   %s\n\n", msg.Message)
 			if msg.Winner == p.PlayerID {
 				fmt.Println("🎊 You won!")
+				// Show win animation for the winner
+				shared.DisplayWinScreen()
 			}
 			return nil
 		}
@@ -102,4 +118,17 @@ func (p *Player) Close() error {
 		return p.WS.Close()
 	}
 	return nil
+}
+
+// constructWSURL converts a server address to a WSS (secure WebSocket) URL
+func constructWSURL(addr string) string {
+	// If it already has a scheme, replace ws:// with wss://
+	if len(addr) > 5 && addr[:3] == "ws:" {
+		return "wss:" + addr[3:]
+	}
+	if len(addr) > 6 && addr[:6] == "wss://" {
+		return addr // Already wss
+	}
+	// Otherwise, add wss://
+	return "wss://" + addr
 }

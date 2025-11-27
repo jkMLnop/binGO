@@ -38,7 +38,7 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	return srv
 }
 
-// Start begins listening for connections
+// Start begins listening for connections with TLS
 func (s *Server) Start() error {
 	// Register WebSocket handler
 	http.Handle("/ws", websocket.Handler(s.wsHandler))
@@ -49,6 +49,9 @@ func (s *Server) Start() error {
 	}
 
 	log.Printf("Server starting on port %s", s.Port)
+
+	// For now, use plain HTTP - TLS will be enabled when domain is ready
+	log.Printf("Running without TLS (using plain HTTP for testing)")
 	return s.Server.ListenAndServe()
 }
 
@@ -75,6 +78,7 @@ func (s *Server) createNewGame() {
 
 // wsHandler handles incoming WebSocket connections
 func (s *Server) wsHandler(ws *websocket.Conn) {
+	log.Printf("New WebSocket connection from %s", ws.Request().RemoteAddr)
 	r := ws.Request()
 
 	// Extract gameId from query params, or use current game

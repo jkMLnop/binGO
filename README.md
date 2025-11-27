@@ -5,10 +5,23 @@ A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and 
 ## Why this repo
 - Quick fun CLI for meetings and random bingo-style phrases
 - Single-player mode (no dependencies)
-- Multiplayer support via WebSocket (in development)
+- Multiplayer support via WebSocket
 
 ## Requirements
 - Go 1.25+ (the project `go.mod` currently specifies `go 1.25.3`)
+- OR use pre-built binaries (see below)
+
+## Quick Start - Prebuilt Binaries
+
+Pre-compiled binaries are available in this repo for:
+- **macOS Intel**: `binGO-CLI-intel-mac`
+- **Linux x86_64**: `binGO-CLI-linux`
+
+Download the appropriate binary and run:
+```bash
+chmod +x binGO-CLI-*
+./binGO-CLI-intel-mac -mode standalone
+```
 
 ## Build & Run
 
@@ -16,8 +29,8 @@ A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and 
 
 ```bash
 cd /path/to/binGO-CLI
-go build -o binGO
-./binGO -mode standalone
+go build -o binGO-CLI
+./binGO-CLI -mode standalone
 ```
 
 ### Run directly:
@@ -30,22 +43,17 @@ go run . -mode standalone
 
 - **`standalone`** (default): Single-player game, no networking
   ```bash
-  go run . -mode standalone
+  ./binGO-CLI -mode standalone
   ```
 
 - **`server`**: Start WebSocket server (multiplayer)
   ```bash
-  go run . -mode server
+  ./binGO-CLI -mode server -port 8080
   ```
 
 - **`client`**: Connect to a WebSocket server and play multiplayer
   ```bash
-  go run . -mode client -server localhost:8080
-  ```
-
-- **`both`**: Dev mode - start server and client on the same machine
-  ```bash
-  go run . -mode both
+  ./binGO-CLI -mode client -server localhost:8080
   ```
 
 ## Usage
@@ -56,10 +64,61 @@ go run . -mode standalone
 - Enter a number 1-9 to mark the corresponding cell; enter `q` to quit.
 - Win by marking three in a row (horizontal, vertical, or diagonal).
 
-### Multiplayer Modes (In Development)
-- Server manages game state and broadcasts updates to all connected clients.
-- When one player wins, the game ends for all players.
-- Each player gets their own random board
+### Multiplayer Mode (Client/Server)
+
+#### Option 1: Local Network
+1. **On the server machine:**
+   ```bash
+   ./binGO-CLI -mode server -port 8080
+   ```
+
+2. **On client machines (same WiFi):**
+   ```bash
+   ./binGO-CLI -mode client -server <server-ip>:8080
+   ```
+   Find your server's local IP with `ifconfig | grep "inet "` (macOS) or `hostname -I` (Linux)
+
+#### Option 2: Internet via ngrok (for testing with remote friends)
+
+ngrok creates a public tunnel to your local server. Perfect for testing multiplayer across the internet without cloud hosting.
+
+1. **Install ngrok** (free account required):
+   ```bash
+   brew install ngrok  # macOS
+   # or visit https://ngrok.com/download
+   ```
+
+2. **Create free account** at https://dashboard.ngrok.com/signup and get your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken
+
+3. **Add authtoken:**
+   ```bash
+   ngrok config add-authtoken YOUR_TOKEN_HERE
+   ```
+
+4. **Start your server:**
+   ```bash
+   ./binGO-CLI -mode server -port 8080
+   ```
+
+5. **In another terminal, expose with ngrok:**
+   ```bash
+   ngrok http 8080
+   ```
+   You'll see output like:
+   ```
+   Forwarding    http://abc123xyz.ngrok-free.dev -> http://localhost:8080
+   ```
+
+6. **Share the ngrok URL with friends.** They connect with:**
+   ```bash
+   ./binGO-CLI -mode client -server abc123xyz.ngrok-free.dev
+   ```
+
+### Gameplay
+- Enter a number (1-9) to mark a cell
+- Enter `board` to redisplay the board
+- First player to get 3 in a row (horizontal, vertical, diagonal) wins
+- Winner sees a celebration animation, all players exit
 
 ## Board Sizes (Planned)
 - **3x3 Speed Bingo** (current): Quick 9-cell game with numpad numbers 1-9
@@ -71,7 +130,7 @@ go run . -mode standalone
 binGO-CLI/
 ├── bin.go                 # Main entry point
 ├── shared/                # Shared game logic (all modes)
-│   ├── types.go           # Type definitions (ClientMessage, ServerMessage, Board, GameSession)
+│   ├── types.go           # Type definitions
 │   ├── board.go           # Board management & cell marking
 │   ├── game.go            # Game session & win detection
 │   ├── display.go         # Terminal rendering
@@ -79,23 +138,38 @@ binGO-CLI/
 ├── standalone/            # Single-player mode
 │   └── player.go          # Game loop & input handling
 ├── server/                # Multiplayer WebSocket server
-│   ├── server.go          # WebSocket handler, game coordination, mark handling
+│   ├── server.go          # WebSocket handler, game coordination
 │   ├── game.go            # Player & Game structs with thread-safe operations
 │   └── server_test.go     # Unit tests
 ├── client/                # Multiplayer CLI client
-│   └── player.go          # (In development)
+│   └── player.go          # Connection, board sync, input handling
 ├── buzzwords.csv          # Sample dataset
+├── cert.pem               # Self-signed SSL cert (testing)
+├── key.pem                # SSL key (testing)
+└── binGO-CLI-*            # Prebuilt binaries
 ```
 
 ## Data
 `buzzwords.csv` is included as a sample dataset. If you replace it with your own file, keep the same CSV format (one phrase per row, first column used).
 
+## Security Notes
+
+**Current (testing):**
+- Uses plain HTTP WebSocket (ws://)
+- Works on local network and ngrok
+- No authentication required
+
+**Production (coming soon):**
+- Will use HTTPS WebSocket (wss://)
+- Let's Encrypt SSL certificates
+- Authentication & rate limiting
+
 ## TODO
+- Phase 7.2: Authentication (JWT tokens, player login)
+- Phase 7.3: Game access control (join codes, private games)
+- Phase 7.4: Rate limiting & DDoS protection
+- Phase 7.5: Server-side win validation
+- Phase 8: Features (leaderboards, classic 5x5 mode, chat)
 - Streamline display.go and (for speed bingo) add 2 left/right spaces to each card cell while keeping number left-aligned
 - Add coverage for shared/board.go and game.go
-- Implement 5x5 classic bingo mode
-- Add dynamic countdown that serves animation once it's ready
-- Implement WebSocket client mode
-- Add support for web clients (HTML/JavaScript)
-- Add support for mobile clients (iOS/Android via WebSocket)
 - Add GitHub Actions workflow to run `go vet`/`go test` on PRs

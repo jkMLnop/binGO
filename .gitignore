@@ -5,4 +5,4 @@ buzzwords_full.csv
 cmd/
 
 # Compiled program
-binGO*
+# binGO*
