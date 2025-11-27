@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -19,6 +20,39 @@ import (
 	"github.com/jkMLnop/binGO-CLI/standalone"
 )
 
+// InputProvider abstracts where input comes from (stdin or test)
+type InputProvider interface {
+	ReadInput() (string, error)
+}
+
+// StdinProvider reads from standard input
+type StdinProvider struct{}
+
+func (s *StdinProvider) ReadInput() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	return strings.TrimSpace(input), nil
+}
+
+// TestProvider provides pre-programmed inputs for testing
+type TestProvider struct {
+	inputs []string
+	index  int
+}
+
+func NewTestProvider(inputs []string) *TestProvider {
+	return &TestProvider{inputs: inputs, index: 0}
+}
+
+func (t *TestProvider) ReadInput() (string, error) {
+	if t.index >= len(t.inputs) {
+		return "", io.EOF
+	}
+	input := t.inputs[t.index]
+	t.index++
+	return input, nil
+}
+
 func main() {
 	mode := flag.String("mode", "standalone", "standalone, server, client, or both")
 	serverAddr := flag.String("server", "localhost:8080", "server address for client mode (e.g., localhost:8080, 192.168.1.100:8080)")
@@ -31,7 +65,7 @@ func main() {
 	case "server":
 		runServer(*port)
 	case "client":
-		runClient(*serverAddr)
+		runClient(*serverAddr, &StdinProvider{})
 	case "both":
 		log.Fatal("Both mode not yet implemented")
 	default:
@@ -78,7 +112,7 @@ func runServer(port string) {
 	log.Println("Server stopped")
 }
 
-func runClient(serverAddr string) {
+func runClient(serverAddr string, inputProvider InputProvider) {
 	rand.Seed(time.Now().UnixNano())
 
 	// Connect to server via WebSocket
@@ -105,10 +139,12 @@ func runClient(serverAddr string) {
 
 	// Spawn goroutine to read user input (non-blocking)
 	go func() {
-		reader := bufio.NewReader(os.Stdin)
 		for {
-			input, _ := reader.ReadString('\n')
-			inputChan <- strings.TrimSpace(input)
+			input, err := inputProvider.ReadInput()
+			if err != nil {
+				return // Stop reading on error (e.g., EOF)
+			}
+			inputChan <- input
 		}
 	}()
 

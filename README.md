@@ -152,6 +152,33 @@ binGO-CLI/
 ## Data
 `buzzwords.csv` is included as a sample dataset. If you replace it with your own file, keep the same CSV format (one phrase per row, first column used).
 
+## Testing
+
+### Unit Tests
+```bash
+go test ./server -v -race
+go test ./...
+```
+
+### End-to-End Testing (CI/CD Ready)
+
+The client supports dependency injection for input via the `InputProvider` interface:
+- `StdinProvider`: Reads from user input (default, for interactive play)
+- `TestProvider`: Accepts pre-programmed inputs (for automated E2E testing)
+
+This allows E2E tests to:
+1. Start a server
+2. Connect multiple clients with pre-programmed moves
+3. Verify game flow (marking cells, win detection, player exit)
+4. Assert animation display and proper disconnection
+
+**Example:** A test client marked cells 1, 2, 3 in sequence would automatically win, trigger animation, and exit without manual input.
+
+**CI/CD Integration (TODO):**
+- [ ] Add GitHub Actions workflow for E2E tests
+- [ ] Automate: Start server → Connect 2 clients → Client 1 marks 1,2,3 (wins) → Client 2 exits → Verify outputs
+- [ ] Run on every PR to catch multiplayer regressions
+
 ## Security Notes
 
 **Current (testing):**
@@ -165,11 +192,10 @@ binGO-CLI/
 - Authentication & rate limiting
 
 ## TODO
+- **CI/CD Integration**: Add GitHub Actions workflow for E2E testing
 - Phase 7.2: Authentication (JWT tokens, player login)
 - Phase 7.3: Game access control (join codes, private games)
 - Phase 7.4: Rate limiting & DDoS protection
 - Phase 7.5: Server-side win validation
 - Phase 8: Features (leaderboards, classic 5x5 mode, chat)
-- Streamline display.go and (for speed bingo) add 2 left/right spaces to each card cell while keeping number left-aligned
 - Add coverage for shared/board.go and game.go
-- Add GitHub Actions workflow to run `go vet`/`go test` on PRs
