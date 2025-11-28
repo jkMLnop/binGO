@@ -26,7 +26,7 @@ func NewPlayer(serverURL string) *Player {
 }
 
 // Connect establishes WebSocket connection to server and performs handshake
-func (p *Player) Connect() error {
+func (p *Player) Connect() (ServerMessage, error) {
 	origin := "http://localhost"
 
 	// Construct WS URL from server address
@@ -43,7 +43,7 @@ func (p *Player) Connect() error {
 	// Dial WebSocket
 	ws, err := websocket.Dial(wsURL, "", origin)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return ServerMessage{}, fmt.Errorf("failed to connect: %w", err)
 	}
 
 	p.WS = ws
@@ -52,23 +52,17 @@ func (p *Player) Connect() error {
 	// Receive welcome message
 	var welcomeMsg ServerMessage
 	if err := websocket.JSON.Receive(ws, &welcomeMsg); err != nil {
-		return fmt.Errorf("failed to receive welcome: %w", err)
+		return ServerMessage{}, fmt.Errorf("failed to receive welcome: %w", err)
 	}
 
 	if welcomeMsg.Type != "welcome" {
-		return fmt.Errorf("unexpected message type: %s", welcomeMsg.Type)
+		return ServerMessage{}, fmt.Errorf("unexpected message type: %s", welcomeMsg.Type)
 	}
 
 	p.GameID = welcomeMsg.GameID
 	p.PlayerID = welcomeMsg.PlayerID
 
-	// Initialize and display welcome as part of connection setup
-	if err := p.Initialize(welcomeMsg); err != nil {
-		return err
-	}
-	p.DisplayWelcome(welcomeMsg)
-
-	return nil
+	return welcomeMsg, nil
 }
 
 // Initialize sets up the game session from the welcome message

@@ -82,10 +82,17 @@ func runClient(serverAddr string) {
 	// Connect to server via WebSocket
 	wsURL := "ws://" + serverAddr + "/ws"
 	player := client.NewPlayer(wsURL)
-	if err := player.Connect(); err != nil {
+	welcomeMsg, err := player.Connect()
+	if err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}
 	defer player.Close()
+
+	// Initialize game session and display welcome
+	if err := player.Initialize(welcomeMsg); err != nil {
+		log.Fatalf("Failed to initialize game: %v", err)
+	}
+	player.DisplayWelcome(welcomeMsg)
 
 	// Channel to signal when game ends (from server message listener)
 	gameDone := make(chan bool, 1)
