@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"os"
@@ -20,41 +19,8 @@ import (
 	"github.com/jkMLnop/binGO-CLI/standalone"
 )
 
-// InputProvider abstracts where input comes from (stdin or test)
-type InputProvider interface {
-	ReadInput() (string, error)
-}
-
-// StdinProvider reads from standard input
-type StdinProvider struct{}
-
-func (s *StdinProvider) ReadInput() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input), nil
-}
-
-// TestProvider provides pre-programmed inputs for testing
-type TestProvider struct {
-	inputs []string
-	index  int
-}
-
-func NewTestProvider(inputs []string) *TestProvider {
-	return &TestProvider{inputs: inputs, index: 0}
-}
-
-func (t *TestProvider) ReadInput() (string, error) {
-	if t.index >= len(t.inputs) {
-		return "", io.EOF
-	}
-	input := t.inputs[t.index]
-	t.index++
-	return input, nil
-}
-
 func main() {
-	mode := flag.String("mode", "standalone", "standalone, server, client, or both")
+	mode := flag.String("mode", "standalone", "standalone, server, or client")
 	serverAddr := flag.String("server", "localhost:8080", "server address for client mode (e.g., localhost:8080, 192.168.1.100:8080)")
 	port := flag.String("port", "8080", "port for server mode")
 	flag.Parse()
@@ -65,11 +31,9 @@ func main() {
 	case "server":
 		runServer(*port)
 	case "client":
-		runClient(*serverAddr, &StdinProvider{})
-	case "both":
-		log.Fatal("Both mode not yet implemented")
+		runClient(*serverAddr)
 	default:
-		log.Fatalf("Unknown mode: %s. Use 'standalone', 'server', 'client', or 'both'", *mode)
+		log.Fatalf("Unknown mode: %s. Use 'standalone', 'server', or 'client'", *mode)
 	}
 }
 
@@ -112,7 +76,7 @@ func runServer(port string) {
 	log.Println("Server stopped")
 }
 
-func runClient(serverAddr string, inputProvider InputProvider) {
+func runClient(serverAddr string) {
 	rand.Seed(time.Now().UnixNano())
 
 	// Connect to server via WebSocket
@@ -139,11 +103,10 @@ func runClient(serverAddr string, inputProvider InputProvider) {
 
 	// Spawn goroutine to read user input (non-blocking)
 	go func() {
+		reader := bufio.NewReader(os.Stdin)
 		for {
-			input, err := inputProvider.ReadInput()
-			if err != nil {
-				return // Stop reading on error (e.g., EOF)
-			}
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(input)
 			inputChan <- input
 		}
 	}()

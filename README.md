@@ -14,13 +14,14 @@ A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and 
 ## Quick Start - Prebuilt Binaries
 
 Pre-compiled binaries are available in this repo for:
-- **macOS Intel**: `binGO-CLI-intel-mac`
+- **macOS Intel**: `binGO-CLI` or `binGO-CLI-intel-mac` (symlink to base binary)
 - **Linux x86_64**: `binGO-CLI-linux`
 
 Download the appropriate binary and run:
 ```bash
-chmod +x binGO-CLI-*
-./binGO-CLI-intel-mac -mode standalone
+chmod +x binGO-CLI*
+./binGO-CLI -mode standalone          # macOS Intel
+./binGO-CLI-linux -mode standalone    # Linux
 ```
 
 ## Build & Run
@@ -157,27 +158,44 @@ binGO-CLI/
 ### Unit Tests
 ```bash
 go test ./server -v -race
-go test ./...
+go test ./... -v
 ```
 
-### End-to-End Testing (CI/CD Ready)
+### Multiplayer Test (Server + 2 Connected Clients)
 
-The client supports dependency injection for input via the `InputProvider` interface:
-- `StdinProvider`: Reads from user input (default, for interactive play)
-- `TestProvider`: Accepts pre-programmed inputs (for automated E2E testing)
+The `TestMultiplayerGameFlow` test verifies the complete multiplayer experience:
+- Starts a WebSocket server
+- Connects 2 clients simultaneously
+- Player 1 marks cells 7, 8, 9 (top row) to win
+- Player 2 marks cells 1, 2 (no win)
+- Verifies Player 1 is declared winner
+- Verifies both players receive game_ended broadcast
+- Confirms losers don't incorrectly win
 
-This allows E2E tests to:
-1. Start a server
-2. Connect multiple clients with pre-programmed moves
-3. Verify game flow (marking cells, win detection, player exit)
-4. Assert animation display and proper disconnection
+**Run:**
+```bash
+go test ./tests -tags=integration -run TestMultiplayerGameFlow -v
+```
 
-**Example:** A test client marked cells 1, 2, 3 in sequence would automatically win, trigger animation, and exit without manual input.
+**What it tests:**
+- Server game coordination (player joining, game state)
+- Client win detection logic (CheckWin)
+- Win announcement (client sends action:"win" to server)
+- Broadcasting (game_ended sent to all connected players)
+- Correct winner identification
+
+**Test Organization:**
+- Unit tests: `./server`, `./shared` directories
+- Integration tests: `./tests` directory (run with `-tags=integration`)
+- All tests: `go test ./...` (unit tests only)
+- All tests + integration: `go test -tags=integration ./...`
 
 **CI/CD Integration (TODO):**
-- [ ] Add GitHub Actions workflow for E2E tests
-- [ ] Automate: Start server → Connect 2 clients → Client 1 marks 1,2,3 (wins) → Client 2 exits → Verify outputs
-- [ ] Run on every PR to catch multiplayer regressions
+- [ ] Add GitHub Actions workflow
+- [ ] Run `go test ./...` on every PR (unit tests only)
+- [ ] Run `go test -tags=integration ./tests -v` before merge (integration tests)
+- [ ] Catch multiplayer regressions automatically
+- [ ] Report coverage for shared/board.go and game.go
 
 ## Security Notes
 

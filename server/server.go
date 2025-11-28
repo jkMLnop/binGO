@@ -23,16 +23,19 @@ type Server struct {
 	PlayerCounter int64 // Atomic counter for unique player IDs
 	Port          string
 	Server        *http.Server
+	Mux           *http.ServeMux // Custom mux for this server
 }
 
 // NewServer creates a new bingo server
 func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
+	mux := http.NewServeMux()
 	srv := &Server{
 		Games:     make(map[string]*Game),
 		Buzzwords: buzzwords,
 		Rows:      rows,
 		Cols:      cols,
 		Port:      port,
+		Mux:       mux,
 	}
 	srv.createNewGame()
 	return srv
@@ -40,12 +43,13 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 
 // Start begins listening for connections with TLS
 func (s *Server) Start() error {
-	// Register WebSocket handler
-	http.Handle("/ws", websocket.Handler(s.wsHandler))
-	http.HandleFunc("/status", s.handleStatus)
+	// Register WebSocket handler with custom mux
+	s.Mux.Handle("/ws", websocket.Handler(s.wsHandler))
+	s.Mux.HandleFunc("/status", s.handleStatus)
 
 	s.Server = &http.Server{
-		Addr: ":" + s.Port,
+		Addr:    ":" + s.Port,
+		Handler: s.Mux,
 	}
 
 	log.Printf("Server starting on port %s", s.Port)

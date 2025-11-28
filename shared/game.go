@@ -12,6 +12,7 @@ type GameSession struct {
 // NewGameSession creates a new game session from buzzwords
 // rows/cols: 3 for speed bingo, 5 for classic bingo
 // This logic is shared between standalone and server modes
+// NOTE: 5x5 support exists but is not currently used or tested
 func NewGameSession(buzzwords [][]string, rows, cols int) *GameSession {
 	// Calculate how many buzzwords we need
 	totalCells := rows * cols

@@ -37,6 +37,7 @@ func NewBoard(matrix [][]string, rows, cols int) *Board {
 //	 [1,2,3]]
 //
 // For 5x5 (classic bingo): uses BINGO letters "B1"-"O5"
+// NOTE: 5x5 support exists but is not currently used or tested
 func (b *Board) CellID(row, col int) string {
 	if b.Rows == 3 && b.Cols == 3 {
 		// For 3x3: map to numpad layout (1-9)
@@ -58,6 +59,8 @@ func (b *Board) CellID(row, col int) string {
 }
 
 // ParseCellID converts a cell ID like "B1" or "3" back to row/col
+// Supports both 3x3 numeric format ("1"-"9") and 5x5 BINGO format ("B1"-"O5")
+// NOTE: 5x5 support exists but is not currently used or tested
 func ParseCellID(cellID string, cols int) (row, col int, err error) {
 	// Try parsing as numeric (3x3)
 	if len(cellID) == 1 {
@@ -102,6 +105,10 @@ func (b *Board) MarkCell(cellID string) error {
 	}
 	if row < 0 || row >= b.Rows || col < 0 || col >= b.Cols {
 		return fmt.Errorf("cell out of bounds: %s", cellID)
+	}
+	// Check if already marked
+	if b.Marked[cellID] {
+		return fmt.Errorf("cell already marked: %s", cellID)
 	}
 	b.Marked[cellID] = true
 	return nil
