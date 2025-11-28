@@ -25,7 +25,7 @@ func NewPlayer(serverURL string) *Player {
 	}
 }
 
-// Connect establishes WebSocket connection to server
+// Connect establishes WebSocket connection to server and performs handshake
 func (p *Player) Connect() error {
 	origin := "http://localhost"
 
@@ -34,7 +34,7 @@ func (p *Player) Connect() error {
 
 	// For all connections, use ws:// (plain WebSocket)
 	// ngrok free tier doesn't support wss:// anyway
-	if !strings.HasPrefix(wsURL, "ws://") && !strings.HasPrefix(wsURL, "wss://") {
+	if !strings.HasPrefix(wsURL, "ws://") {
 		wsURL = "ws://" + wsURL + "/ws"
 	}
 
@@ -62,17 +62,29 @@ func (p *Player) Connect() error {
 	p.GameID = welcomeMsg.GameID
 	p.PlayerID = welcomeMsg.PlayerID
 
+	// Initialize and display welcome as part of connection setup
+	if err := p.Initialize(welcomeMsg); err != nil {
+		return err
+	}
+	p.DisplayWelcome(welcomeMsg)
+
+	return nil
+}
+
+// Initialize sets up the game session from the welcome message
+func (p *Player) Initialize(welcomeMsg ServerMessage) error {
+	p.GameSession = shared.NewGameSession(welcomeMsg.Buzzwords, welcomeMsg.Rows, welcomeMsg.Cols)
+	return nil
+}
+
+// DisplayWelcome displays the welcome message and board to the player
+func (p *Player) DisplayWelcome(welcomeMsg ServerMessage) {
 	fmt.Printf("\n🎲 Welcome %s!\n", p.PlayerID)
 	fmt.Printf("   Game: %s\n", p.GameID)
 	fmt.Printf("   Players in game: %v\n", welcomeMsg.Players)
 
-	// Generate board from buzzwords using shared game logic
-	p.GameSession = shared.NewGameSession(welcomeMsg.Buzzwords, welcomeMsg.Rows, welcomeMsg.Cols)
-
 	fmt.Println("\n📋 Your Bingo Board:")
 	shared.PrintBoard(p.GameSession.Board)
-
-	return nil
 }
 
 // HasWon checks if the player has a winning pattern using shared game logic
@@ -118,17 +130,4 @@ func (p *Player) Close() error {
 		return p.WS.Close()
 	}
 	return nil
-}
-
-// constructWSURL converts a server address to a WSS (secure WebSocket) URL
-func constructWSURL(addr string) string {
-	// If it already has a scheme, replace ws:// with wss://
-	if len(addr) > 5 && addr[:3] == "ws:" {
-		return "wss:" + addr[3:]
-	}
-	if len(addr) > 6 && addr[:6] == "wss://" {
-		return addr // Already wss
-	}
-	// Otherwise, add wss://
-	return "wss://" + addr
 }

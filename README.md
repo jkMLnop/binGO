@@ -81,7 +81,7 @@ go run . -mode standalone
 
 #### Option 2: Internet via ngrok (for testing with remote friends)
 
-ngrok creates a public tunnel to your local server. Perfect for testing multiplayer across the internet without cloud hosting.
+ngrok creates a public tunnel to your local server using a reverse proxy. Your machine initiates an outgoing connection to ngrok's servers, which then routes inbound traffic from the internet back through that connection—bypassing ISP firewalls that block direct inbound connections. Perfect for testing multiplayer across the internet without cloud hosting.
 
 1. **Install ngrok** (free account required):
    ```bash

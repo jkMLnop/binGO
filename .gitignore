@@ -4,6 +4,8 @@ buzzwords_full.csv
 # Ignore OS generated files
 .DS_Store
 
+.vscode/
+
 # Ignore test output files
 coverage.out
 
