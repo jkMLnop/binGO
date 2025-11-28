@@ -1,8 +1,11 @@
 # Ignore buzzword file
 buzzwords_full.csv
 
-# test client
-cmd/
+# Ignore OS generated files
+.DS_Store
+
+# Ignore test output files
+coverage.out
 
 # Compiled program
 # binGO*

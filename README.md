@@ -130,24 +130,28 @@ ngrok creates a public tunnel to your local server. Perfect for testing multipla
 ```
 binGO-CLI/
 ├── bin.go                 # Main entry point
-├── shared/                # Shared game logic (all modes)
-│   ├── types.go           # Type definitions
-│   ├── board.go           # Board management & cell marking
-│   ├── game.go            # Game session & win detection
-│   ├── display.go         # Terminal rendering
-│   └── utils.go           # CSV loading utilities
-├── standalone/            # Single-player mode
-│   └── player.go          # Game loop & input handling
+├── client/                # Multiplayer CLI client
+│   └── player.go          # Connection, board sync, input handling
 ├── server/                # Multiplayer WebSocket server
 │   ├── server.go          # WebSocket handler, game coordination
 │   ├── game.go            # Player & Game structs with thread-safe operations
 │   └── server_test.go     # Unit tests
-├── client/                # Multiplayer CLI client
-│   └── player.go          # Connection, board sync, input handling
+├── shared/                # Shared game logic (all modes)
+│   ├── board.go           # Board management & cell marking
+│   ├── display.go         # Terminal rendering
+│   ├── game.go            # Game session & win detection
+│   ├── shared_test.go     # 37 unit tests (board, win detection, display)
+│   ├── types.go           # Type definitions
+│   └── utils.go           # CSV loading utilities
+├── standalone/            # Single-player mode
+│   └── player.go          # Game loop & input handling
+├── tests/                 # Integration tests
+│   ├── multiplayer_test.go # 5 integration tests (game flow, edge cases)
+│   └── README.md          # Test documentation
 ├── buzzwords.csv          # Sample dataset
+├── binGO-CLI*             # Prebuilt binaries (macOS, Linux)
 ├── cert.pem               # Self-signed SSL cert (testing)
-├── key.pem                # SSL key (testing)
-└── binGO-CLI-*            # Prebuilt binaries
+└── key.pem                # SSL key (testing)
 ```
 
 ## Data
@@ -213,7 +217,6 @@ go test ./tests -tags=integration -run TestMultiplayerGameFlow -v
 - **CI/CD Integration**: Add GitHub Actions workflow for E2E testing
 - Phase 7.2: Authentication (JWT tokens, player login)
 - Phase 7.3: Game access control (join codes, private games)
-- Phase 7.4: Rate limiting & DDoS protection
+- Phase 7.4: Rate limiting & DDoS protection (in multiplayer testing ngrok handles this for now)
 - Phase 7.5: Server-side win validation
 - Phase 8: Features (leaderboards, classic 5x5 mode, chat)
-- Add coverage for shared/board.go and game.go
