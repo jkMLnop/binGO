@@ -28,7 +28,6 @@ func NewInputHandler(maxCellNum int, promptMessage string) *InputHandler {
 // ProcessInput reads a line from input and returns the parsed command
 // Returns: cellID (or empty), commandName, error
 func (h *InputHandler) ProcessInput() (string, string, error) {
-	fmt.Print("> ")
 	if !h.scanner.Scan() {
 		return "", "", h.scanner.Err()
 	}

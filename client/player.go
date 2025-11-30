@@ -96,3 +96,37 @@ func (p *Player) Close() error {
 	}
 	return nil
 }
+
+// HandleMark processes a mark command: validate, mark cell, check win
+// Returns true if player won, false otherwise
+func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, maxCellNum int) (bool, error) {
+	// Mark the cell
+	if err := p.GameSession.Board.MarkCell(cellID); err != nil {
+		return false, err
+	}
+
+	// Clear screen and redraw board
+	fmt.Print("\033[H\033[2J")
+	shared.PrintBoard(p.GameSession.Board)
+
+	// Check for win
+	if p.GameSession.CheckWin() {
+		return true, nil
+	}
+
+	// Prompt for next move
+	fmt.Println("\n" + inputHandler.PromptMessage())
+	return false, nil
+}
+
+// HandleBoard redisplays the current board
+func (p *Player) HandleBoard(inputHandler *shared.InputHandler) {
+	fmt.Print("\033[H\033[2J")
+	shared.PrintBoard(p.GameSession.Board)
+	fmt.Println("\n" + inputHandler.PromptMessage())
+}
+
+// HandleInvalidInput displays an error message for invalid input
+func (p *Player) HandleInvalidInput(inputHandler *shared.InputHandler, maxCellNum int) {
+	fmt.Println(inputHandler.InvalidInputMessage(maxCellNum))
+}

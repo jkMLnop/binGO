@@ -39,9 +39,9 @@ func runStandalone() {
 	// Load buzzwords from CSV
 	buzzwords := shared.LoadBuzzwords("buzzwords.csv")
 
-	// Create and start a new standalone game
+	// Create and run a new standalone game
 	game := standalone.NewGame(buzzwords)
-	game.Start()
+	game.RunGame()
 }
 
 func runServer(port string) {
@@ -158,9 +158,7 @@ func runClient(serverAddr string) {
 				os.Exit(0)
 
 			case "board":
-				fmt.Print("\033[H\033[2J")
-				shared.PrintBoard(player.GameSession.Board)
-				fmt.Println("\n" + inputHandler.PromptMessage())
+				player.HandleBoard(inputHandler)
 				continue
 
 			case "win":
@@ -178,22 +176,18 @@ func runClient(serverAddr string) {
 				continue
 
 			case "invalid":
-				fmt.Println(inputHandler.InvalidInputMessage(maxCellNum))
+				player.HandleInvalidInput(inputHandler, maxCellNum)
 				continue
 
 			case "mark":
-				// Mark the cell using shared board logic
-				if err := player.GameSession.Board.MarkCell(cellID); err != nil {
+				won, err := player.HandleMark(cellID, inputHandler, maxCellNum)
+				if err != nil {
 					fmt.Printf("Error: %v\n", err)
 					continue
 				}
 
-				// Clear screen and redraw board
-				fmt.Print("\033[H\033[2J")
-				shared.PrintBoard(player.GameSession.Board)
-
-				// Check for win
-				if player.GameSession.CheckWin() {
+				// Check if player won
+				if won {
 					// Announce win to server immediately (broadcasts game_ended to all players)
 					if err := player.AnnounceWin(); err != nil {
 						fmt.Printf("Error announcing win: %v\n", err)
@@ -208,8 +202,6 @@ func runClient(serverAddr string) {
 					shared.DisplayWinScreen()
 					os.Exit(0)
 				}
-
-				fmt.Println("\n" + inputHandler.PromptMessage())
 
 				// Small delay to allow messages from server to be printed
 				time.Sleep(100 * time.Millisecond)
