@@ -65,22 +65,6 @@ func (p *Player) Connect() (ServerMessage, error) {
 	return welcomeMsg, nil
 }
 
-// Initialize sets up the game session from the welcome message
-func (p *Player) Initialize(welcomeMsg ServerMessage) error {
-	p.GameSession = shared.NewGameSession(welcomeMsg.Buzzwords, welcomeMsg.Rows, welcomeMsg.Cols)
-	return nil
-}
-
-// DisplayWelcome displays the welcome message and board to the player
-func (p *Player) DisplayWelcome(welcomeMsg ServerMessage) {
-	fmt.Printf("\n🎲 Welcome %s!\n", p.PlayerID)
-	fmt.Printf("   Game: %s\n", p.GameID)
-	fmt.Printf("   Players in game: %v\n", welcomeMsg.Players)
-
-	fmt.Println("\n📋 Your Bingo Board:")
-	shared.PrintBoard(p.GameSession.Board)
-}
-
 // HasWon checks if the player has a winning pattern using shared game logic
 func (p *Player) HasWon() bool {
 	return p.GameSession.CheckWin()
@@ -96,26 +80,13 @@ func (p *Player) AnnounceWin() error {
 	return websocket.JSON.Send(p.WS, winMsg)
 }
 
-// ListenForMessages listens for messages from the server (blocking)
-func (p *Player) ListenForMessages() error {
-	for {
-		var msg ServerMessage
-		if err := websocket.JSON.Receive(p.WS, &msg); err != nil {
-			return err
-		}
-
-		switch msg.Type {
-		case "game_ended":
-			fmt.Printf("\n\n🏆 Game Ended! Winner: %s\n", msg.Winner)
-			fmt.Printf("   %s\n\n", msg.Message)
-			if msg.Winner == p.PlayerID {
-				fmt.Println("🎊 You won!")
-				// Show win animation for the winner
-				shared.DisplayWinScreen()
-			}
-			return nil
-		}
+// ReceiveMessage receives a single message from the server
+func (p *Player) ReceiveMessage() (ServerMessage, error) {
+	var msg ServerMessage
+	if err := websocket.JSON.Receive(p.WS, &msg); err != nil {
+		return ServerMessage{}, err
 	}
+	return msg, nil
 }
 
 // Close closes the WebSocket connection

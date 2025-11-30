@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"os/signal"
 	"strconv"
@@ -77,8 +75,6 @@ func runServer(port string) {
 }
 
 func runClient(serverAddr string) {
-	rand.Seed(time.Now().UnixNano())
-
 	// Connect to server via WebSocket
 	wsURL := "ws://" + serverAddr + "/ws"
 	player := client.NewPlayer(wsURL)
@@ -88,11 +84,10 @@ func runClient(serverAddr string) {
 	}
 	defer player.Close()
 
-	// Initialize game session and display welcome
-	if err := player.Initialize(welcomeMsg); err != nil {
-		log.Fatalf("Failed to initialize game: %v", err)
-	}
+	// Initialize game session from welcome message
+	player.GameSession = shared.NewGameSession(welcomeMsg.Buzzwords, welcomeMsg.Rows, welcomeMsg.Cols)
 	player.DisplayWelcome(welcomeMsg)
+	shared.PrintBoard(player.GameSession.Board)
 
 	// Channel to signal when game ends (from server message listener)
 	gameDone := make(chan bool, 1)
@@ -100,26 +95,44 @@ func runClient(serverAddr string) {
 	// Channel for user input (so we can select on it)
 	inputChan := make(chan string, 1)
 
+	// Create input handler for the board dimensions
+	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
+	inputHandler := shared.NewInputHandler(maxCellNum, "\nEnter a number (1-"+strconv.Itoa(maxCellNum)+") to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+
 	// Spawn goroutine to listen for server messages
 	go func() {
-		if err := player.ListenForMessages(); err != nil {
-			log.Printf("Server disconnected: %v", err)
+		for {
+			msg, err := player.ReceiveMessage()
+			if err != nil {
+				log.Printf("Server disconnected: %v", err)
+				gameDone <- true
+				return
+			}
+
+			switch msg.Type {
+			case "game_ended":
+				player.DisplayGameEnd(msg)
+				gameDone <- true
+				return
+			}
 		}
-		gameDone <- true
 	}()
 
 	// Spawn goroutine to read user input (non-blocking)
 	go func() {
-		reader := bufio.NewReader(os.Stdin)
 		for {
-			input, _ := reader.ReadString('\n')
-			input = strings.TrimSpace(input)
-			inputChan <- input
+			cellID, command, _ := inputHandler.ProcessInput()
+			// Encode the result as "command:cellID" or just "command"
+			if command == "mark" {
+				inputChan <- "mark:" + cellID
+			} else {
+				inputChan <- command
+			}
 		}
 	}()
 
 	// Command loop using select for non-blocking I/O
-	fmt.Println("\nEnter a number (1-9) to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+	fmt.Println(inputHandler.PromptMessage())
 
 	for {
 		fmt.Print("> ")
@@ -131,20 +144,23 @@ func runClient(serverAddr string) {
 			os.Exit(0)
 
 		case input := <-inputChan:
-			if input == "" {
-				continue
+			// Parse command:cellID format
+			parts := strings.SplitN(input, ":", 2)
+			command := parts[0]
+			var cellID string
+			if len(parts) > 1 {
+				cellID = parts[1]
 			}
 
-			// Check for text commands first
-			switch input {
+			switch command {
 			case "q", "quit":
 				fmt.Println("Goodbye!")
 				os.Exit(0)
 
 			case "board":
-				fmt.Print("\033[H\033[2J") // Clear screen
+				fmt.Print("\033[H\033[2J")
 				shared.PrintBoard(player.GameSession.Board)
-				fmt.Println("\nEnter a number (1-9) to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+				fmt.Println("\n" + inputHandler.PromptMessage())
 				continue
 
 			case "win":
@@ -160,49 +176,44 @@ func runClient(serverAddr string) {
 			case "help":
 				printClientHelp()
 				continue
-			}
 
-			// Try to parse as numeric cell ID (1-9 for 3x3)
-			cellNum, err := strconv.Atoi(input)
-			if err != nil || cellNum < 1 || cellNum > 9 {
-				fmt.Println("Invalid input. Please enter a number between 1-9, 'board', 'win', or 'q'.")
+			case "invalid":
+				fmt.Println(inputHandler.InvalidInputMessage(maxCellNum))
 				continue
-			}
 
-			// Convert numeric input to cell ID for 3x3 board
-			cellID := strconv.Itoa(cellNum)
+			case "mark":
+				// Mark the cell using shared board logic
+				if err := player.GameSession.Board.MarkCell(cellID); err != nil {
+					fmt.Printf("Error: %v\n", err)
+					continue
+				}
 
-			// Mark the cell using shared board logic
-			if err := player.GameSession.Board.MarkCell(cellID); err != nil {
-				fmt.Printf("Error: %v\n", err)
-				continue
-			}
+				// Clear screen and redraw board
+				fmt.Print("\033[H\033[2J")
+				shared.PrintBoard(player.GameSession.Board)
 
-			// Clear screen and redraw board
-			fmt.Print("\033[H\033[2J")
-			shared.PrintBoard(player.GameSession.Board)
+				// Check for win
+				if player.GameSession.CheckWin() {
+					// Announce win to server immediately (broadcasts game_ended to all players)
+					if err := player.AnnounceWin(); err != nil {
+						fmt.Printf("Error announcing win: %v\n", err)
+						os.Exit(0)
+					}
 
-			// Check for win
-			if player.GameSession.CheckWin() {
-				// Announce win to server immediately (broadcasts game_ended to all players)
-				if err := player.AnnounceWin(); err != nil {
-					fmt.Printf("Error announcing win: %v\n", err)
+					fmt.Println("🎉 Announcing win to server...")
+					// Wait for game_ended message from server (all players get kicked)
+					<-gameDone
+
+					// Now show the win animation for the winner
+					shared.DisplayWinScreen()
 					os.Exit(0)
 				}
 
-				fmt.Println("🎉 Announcing win to server...")
-				// Wait for game_ended message from server (all players get kicked)
-				<-gameDone
+				fmt.Println("\n" + inputHandler.PromptMessage())
 
-				// Now show the win animation for the winner
-				shared.DisplayWinScreen()
-				os.Exit(0)
+				// Small delay to allow messages from server to be printed
+				time.Sleep(100 * time.Millisecond)
 			}
-
-			fmt.Println("\nEnter a number (1-9) to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
-
-			// Small delay to allow messages from server to be printed
-			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
