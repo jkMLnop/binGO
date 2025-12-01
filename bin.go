@@ -37,7 +37,10 @@ func main() {
 
 func runStandalone() {
 	// Load buzzwords from CSV
-	buzzwords := shared.LoadBuzzwords("buzzwords.csv")
+	buzzwords, err := shared.LoadBuzzwords("buzzwords.csv")
+	if err != nil {
+		log.Fatalf("Failed to load buzzwords: %v", err)
+	}
 
 	// Create and run a new standalone game
 	game := standalone.NewGame(buzzwords)
@@ -46,7 +49,10 @@ func runStandalone() {
 
 func runServer(port string) {
 	// Load buzzwords from CSV
-	buzzwords := shared.LoadBuzzwords("buzzwords.csv")
+	buzzwords, err := shared.LoadBuzzwords("buzzwords.csv")
+	if err != nil {
+		log.Fatalf("Failed to load buzzwords: %v", err)
+	}
 
 	// Create server (3x3 for speed bingo mode)
 	srv := server.NewServer(buzzwords, 3, 3, port)
@@ -74,7 +80,9 @@ func runServer(port string) {
 	log.Println("Server stopped")
 }
 
+// god method but also controller orchestrating model operations pattern
 func runClient(serverAddr string) {
+	// === Setup Client Connection ===
 	// Connect to server via WebSocket
 	wsURL := "ws://" + serverAddr + "/ws"
 	player := client.NewPlayer(wsURL)
@@ -89,6 +97,7 @@ func runClient(serverAddr string) {
 	player.DisplayWelcome(welcomeMsg)
 	shared.PrintBoard(player.GameSession.Board)
 
+	// === Setup Communication Channels ===
 	// Channel to signal when game ends (from server message listener)
 	gameDone := make(chan bool, 1)
 
@@ -99,6 +108,7 @@ func runClient(serverAddr string) {
 	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
 	inputHandler := shared.NewInputHandler(maxCellNum, "\nEnter a number (1-"+strconv.Itoa(maxCellNum)+") to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
 
+	// === Setup Server Listener ===
 	// Spawn goroutine to listen for server messages
 	go func() {
 		for {
@@ -118,6 +128,7 @@ func runClient(serverAddr string) {
 		}
 	}()
 
+	// === Setup Input Listener ===
 	// Spawn goroutine to read user input (non-blocking)
 	go func() {
 		for {
@@ -131,6 +142,7 @@ func runClient(serverAddr string) {
 		}
 	}()
 
+	// === Command Loop ===
 	// Command loop using select for non-blocking I/O
 	fmt.Println(inputHandler.PromptMessage())
 

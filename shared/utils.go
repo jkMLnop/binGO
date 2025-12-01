@@ -2,27 +2,28 @@ package shared
 
 import (
 	"encoding/csv"
-	"log"
+	"fmt"
 	"os"
 )
 
 // LoadBuzzwords reads buzzwords from a CSV file and returns them as a slice of strings
-func LoadBuzzwords(filename string) [][]string {
+// Returns error if file cannot be opened, parsed, or contains insufficient rows
+func LoadBuzzwords(filename string) ([][]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("Failed to open file: %v", err)
+		return nil, err
 	}
 	defer file.Close()
 
 	reader := csv.NewReader(file)
 	rows, err := reader.ReadAll()
 	if err != nil {
-		log.Fatalf("Failed to read CSV file: %v", err)
+		return nil, err
 	}
 
 	if len(rows) < 9 {
-		log.Fatalf("Not enough rows in the CSV file to populate a 3x3 matrix")
+		return nil, fmt.Errorf("not enough rows in CSV file: have %d, need at least 9", len(rows))
 	}
 
-	return rows
+	return rows, nil
 }

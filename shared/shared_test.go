@@ -17,8 +17,8 @@ func loadTestBuzzwords(t *testing.T) [][]string {
 
 	for _, path := range buzzwordPaths {
 		if _, err := os.Stat(path); err == nil {
-			buzzwords := LoadBuzzwords(path)
-			if len(buzzwords) > 0 {
+			buzzwords, err := LoadBuzzwords(path)
+			if err == nil && len(buzzwords) > 0 {
 				return buzzwords
 			}
 		}

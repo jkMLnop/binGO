@@ -30,8 +30,8 @@ func findBuzzwordsFile() ([][]string, error) {
 
 	for _, path := range buzzwordPaths {
 		if _, err := os.Stat(path); err == nil {
-			buzzwords := shared.LoadBuzzwords(path)
-			if len(buzzwords) > 0 {
+			buzzwords, err := shared.LoadBuzzwords(path)
+			if err == nil && len(buzzwords) > 0 {
 				return buzzwords, nil
 			}
 		}
