@@ -51,8 +51,9 @@ func VisualLength(text string) int {
 	return count
 }
 
-// PrintBoard displays the bingo board with optional strikethrough for marked cells
-func PrintBoard(board *Board) {
+// FormatBoard returns formatted board lines without printing
+// This allows for testable board rendering and reuse (logging, file output, etc.)
+func FormatBoard(board *Board) []string {
 	var output []string
 	var rowLength int
 
@@ -167,8 +168,12 @@ func PrintBoard(board *Board) {
 		output = append(output, separator)
 	}
 
-	// Print the formatted matrix
-	for _, line := range output {
+	return output
+}
+
+// PrintBoard displays the bingo board with optional strikethrough for marked cells
+func PrintBoard(board *Board) {
+	for _, line := range FormatBoard(board) {
 		fmt.Println(line)
 	}
 }
