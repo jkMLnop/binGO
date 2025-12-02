@@ -12,14 +12,15 @@ import (
 
 // Player represents a bingo player client
 type Player struct {
-	ServerURL   string
-	ClientIP    string // Client's local IP (for session tracking)
-	WS          *websocket.Conn
-	GameID      string
-	PlayerID    string
-	Username    string
-	Token       string              // JWT token for re-authentication
-	GameSession *shared.GameSession // Use shared game logic (includes Board with Rows/Cols)
+	ServerURL    string
+	ClientIP     string // Client's local IP (for session tracking)
+	WS           *websocket.Conn
+	GameID       string
+	PlayerID     string
+	Username     string
+	Token        string              // JWT token for re-authentication
+	GameSession  *shared.GameSession // Use shared game logic (includes Board with Rows/Cols)
+	DisplayWidth int                 // Cached display width for consistent rendering
 }
 
 // NewPlayer creates a new player client
@@ -204,12 +205,15 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 		return false, err
 	}
 
-	// Clear screen and redraw board
+	// Clear screen and redraw banner + board
 	fmt.Print("\033[H\033[2J")
+	shared.DisplayBannerWithWidth(p.DisplayWidth)
 	shared.PrintBoard(p.GameSession.Board)
 
 	// Check for win
 	if p.GameSession.CheckWin() {
+		// Banner + board already displayed together above
+		fmt.Println("\n🎉 YOU WIN! 🎉")
 		return true, nil
 	}
 
@@ -221,6 +225,7 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 // HandleBoard redisplays the current board
 func (p *Player) HandleBoard(inputHandler *shared.InputHandler) {
 	fmt.Print("\033[H\033[2J")
+	shared.DisplayBannerWithWidth(p.DisplayWidth)
 	shared.PrintBoard(p.GameSession.Board)
 	fmt.Println("\n" + inputHandler.PromptMessage())
 }

@@ -6,6 +6,61 @@ import (
 	"os/exec"
 )
 
+// CalculateBoardWidth calculates the total width needed for the board given column widths
+func CalculateBoardWidth(cols int, colWidths []int) int {
+	// Format: | cell | cell | cell |
+	// That's: | + (content + " | ") * cols, then replace last " | " with " |"
+	width := 1 // opening "|"
+	for j := range cols {
+		width += colWidths[j] // cell content
+		width += 3            // " | " separator
+	}
+	// Last " | " has 3 chars but we only need " |" at end (2 chars), so subtract 1
+	return width
+}
+
+// DisplayBanner prints the binGO-CLI ASCII art banner centered with tilde borders
+// Uses provided totalWidth to match the board width
+func DisplayBannerWithWidth(totalWidth int) {
+	bannerLines := []string{
+		" /$$       /$$            /$$$$$$   /$$$$$$ ",
+		"| $$      |__/           /$$__  $$ /$$__  $$",
+		"| $$$$$$$  /$$ /$$$$$$$ | $$  \\__/| $$  \\ $$",
+		"| $$__  $$| $$| $$__  $$| $$ /$$$$| $$  | $$",
+		"| $$  \\ $$| $$| $$  \\ $$| $$|_  $$| $$  | $$",
+		"| $$  | $$| $$| $$  | $$| $$  \\ $$| $$  | $$",
+		"| $$$$$$$/| $$| $$  | $$|  $$$$$$/|  $$$$$$/",
+		"|_______/ |__/|__/  |__/ \\______/  \\______/ ",
+	}
+
+	// Get the width of the banner (all lines are same width)
+	bannerWidth := VisualLength(bannerLines[0])
+
+	// Calculate padding
+	totalPadding := totalWidth - bannerWidth
+	leftPadding := totalPadding / 2
+	rightPadding := totalPadding - leftPadding
+
+	// Print each banner line centered with tildes on sides
+	for _, line := range bannerLines {
+		centered := ""
+		for i := 0; i < leftPadding; i++ {
+			centered += "~"
+		}
+		centered += line
+		for i := 0; i < rightPadding; i++ {
+			centered += "~"
+		}
+		fmt.Println(centered)
+	}
+}
+
+// DisplayBanner prints the binGO-CLI ASCII art banner (uses default width)
+func DisplayBanner() {
+	// Default width - will be overridden by DisplayBannerWithWidth when called from game
+	DisplayBannerWithWidth(116)
+}
+
 // CenterText returns the text centered within the given width using the specified padding character
 // If no padding character is provided, defaults to space
 func CenterText(text string, width int, paddingChar ...string) string {
@@ -84,10 +139,6 @@ func FormatBoard(board *Board) []string {
 
 			if i == 0 {
 				rowLength = len(numberLine)
-				// Add "BINGO!" centered above top separator with ~ padding
-				bingoLine := CenterText(" BINGO! ", rowLength, "~")
-				output = append(output, bingoLine)
-
 				// Add top separator
 				separator := ""
 				for k := 0; k < rowLength; k++ {
@@ -146,10 +197,6 @@ func FormatBoard(board *Board) []string {
 
 			if i == 0 {
 				rowLength = len(rowStr)
-				// Add "BINGO!" centered above top separator with ~ padding
-				bingoLine := CenterText(" BINGO! ", rowLength, "~")
-				output = append(output, bingoLine)
-
 				// Add top separator
 				separator := ""
 				for k := 0; k < rowLength; k++ {
@@ -169,6 +216,25 @@ func FormatBoard(board *Board) []string {
 	}
 
 	return output
+}
+
+// PrintBoardWithWidth displays the bingo board and banner at a consistent width
+func PrintBoardWithWidth(board *Board) {
+	// Calculate the board's natural width
+	boardWidth := CalculateBoardWidth(board.Cols, board.ColWidths)
+	
+	// Banner width is always 42 + padding
+	bannerWidth := 42
+	
+	// Use whichever is wider
+	totalWidth := boardWidth
+	if bannerWidth+10 > boardWidth {
+		totalWidth = boardWidth
+	}
+	
+	// Display banner and board at the calculated width
+	DisplayBannerWithWidth(totalWidth)
+	PrintBoard(board)
 }
 
 // PrintBoard displays the bingo board with optional strikethrough for marked cells

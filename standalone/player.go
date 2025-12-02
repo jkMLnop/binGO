@@ -2,22 +2,28 @@ package standalone
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/jkMLnop/binGO-CLI/shared"
 )
 
 // Game represents a standalone game session
 type Game struct {
-	session *shared.GameSession
+	session    *shared.GameSession
+	displayWidth int // Cached display width for consistent banner/board rendering
 }
 
 // NewGame creates a new standalone game (3x3 speed bingo)
 func NewGame(buzzwords [][]string) *Game {
 	// Create a shared game session with 3x3 dimensions
 	session := shared.NewGameSession(buzzwords, 3, 3)
+	
+	// Calculate display width based on board size
+	boardWidth := shared.CalculateBoardWidth(session.Board.Cols, session.Board.ColWidths)
 
 	return &Game{
 		session: session,
+		displayWidth: boardWidth,
 	}
 }
 
@@ -41,11 +47,16 @@ func (g *Game) playRound(inputHandler *shared.InputHandler, maxCells int) bool {
 			return true // Continue to next round
 		}
 
-		// Clear screen and redraw board
+		// Clear screen and redraw banner + board
 		fmt.Print("\033[H\033[2J")
+		shared.DisplayBannerWithWidth(g.displayWidth)
 
 		// Check for win
 		if g.session.CheckWin() {
+			// Banner + board already displayed together above
+			shared.PrintBoard(g.session.Board)
+			fmt.Println("\n🎉 YOU WIN! 🎉")
+			time.Sleep(2 * time.Second) // Let player see winning board + banner
 			shared.DisplayWinScreen()
 			return false // Exit after win
 		}
@@ -66,7 +77,8 @@ func (g *Game) playRound(inputHandler *shared.InputHandler, maxCells int) bool {
 
 // RunGame orchestrates the game loop
 func (g *Game) RunGame() {
-	// Display initial board
+	// Display banner and initial board
+	shared.DisplayBannerWithWidth(g.displayWidth)
 	shared.PrintBoard(g.session.Board)
 
 	// Create input handler for 3x3 board (cells 1-9)
