@@ -1,3 +1,4 @@
+```bash
 ~~~~~~~~~~~~~~~~ /$$       /$$            /$$$$$$   /$$$$$$ ~~~~~~~~~~~~~~~~
 ~~~~~~~~~~~~~~~~| $$      |__/           /$$__  $$ /$$__  $$~~~~~~~~~~~~~~~~
 ~~~~~~~~~~~~~~~~| $$$$$$$  /$$ /$$$$$$$ | $$  \__/| $$  \ $$~~~~~~~~~~~~~~~~
@@ -7,6 +8,7 @@
 ~~~~~~~~~~~~~~~~| $$$$$$$/| $$| $$  | $$|  $$$$$$/|  $$$$$$/~~~~~~~~~~~~~~~~
 ~~~~~~~~~~~~~~~~|_______/ |__/|__/  |__/ \______/  \______/ ~~~~~~~~~~~~~~~~
 
+```
 # binGO-CLI
 
 A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and displays a 3x3 bingo board. Supports both single-player standalone mode and multiplayer mode via WebSocket.
