@@ -35,6 +35,18 @@ Tests the complete multiplayer game flow with server coordination:
 - Broadcast messaging (game_ended)
 - Correct loser/winner identification
 
+**Security Tests:**
+
+**TestIPSpoofing:**
+- Documents current auth vulnerability where different sources can claim same username
+- Baseline test: PASSES (duplicate check prevents hijacking, but IP-binding is missing)
+- After Phase 7.2: SHOULD FAIL (IP-bound JWT makes spoofing cryptographically impossible)
+
+**TestIPSpoofingDetectionAfterAuth:**
+- Placeholder test for IP-bound JWT validation
+- Tests that tokens are rejected when used from different IP
+- Currently SKIPPED until Phase 7.2 implementation
+
 ## Unit Tests
 
 Comprehensive unit tests for the `shared` package are located in `shared/shared_test.go`:

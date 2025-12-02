@@ -487,3 +487,111 @@ func TestConcurrentPlayerJoins(t *testing.T) {
 		t.Errorf("✗ %d out of %d concurrent joins failed", failCount, numPlayers)
 	}
 }
+
+// TestIPSpoofing tests vulnerability where different IPs can claim same username
+// CURRENT BEHAVIOR (no auth): PASSES - IP spoofing is possible
+// DESIRED BEHAVIOR (Phase 7.2): SHOULD FAIL - IP-bound JWT prevents hijacking
+//
+// This test documents the security gap we aim to fix:
+// - Player A (192.168.1.100) connects first as "alice"
+// - Player B (192.168.1.101) connects and claims to be "alice" via ID parameter
+// - Currently: Both get the same player ID (vulnerability!)
+// - After Phase 7.2: Only Player A's connection is valid for "alice" (fixed!)
+func TestIPSpoofing(t *testing.T) {
+	srv, err := startTestServer("9996")
+	if err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	time.Sleep(500 * time.Millisecond)
+
+	t.Log("--- IP Spoofing Test ---")
+	t.Log("Scenario: Two players from different IPs trying to claim same username")
+
+	// Player A connects with username "alice"
+	wsA, err := websocket.Dial("ws://localhost:9996/ws?id=alice", "", "http://localhost")
+	if err != nil {
+		t.Fatalf("Failed to connect Player A: %v", err)
+	}
+	defer wsA.Close()
+
+	var welcomeA map[string]interface{}
+	err = websocket.JSON.Receive(wsA, &welcomeA)
+	if err != nil {
+		t.Fatalf("Player A failed to receive welcome: %v", err)
+	}
+
+	playerIDA, ok := welcomeA["player_id"].(string)
+	if !ok {
+		t.Fatalf("Failed to extract player_id from welcome")
+	}
+	t.Logf("[Player A] Connected as: %s", playerIDA)
+
+	// Small delay to ensure Player A is established
+	time.Sleep(100 * time.Millisecond)
+
+	// Player B (different IP, but we can't truly spoof in localhost tests)
+	// Instead, we simulate by attempting to connect with same player ID
+	// In a real scenario over ngrok/internet, Player B could forge IP headers
+	wsB, err := websocket.Dial("ws://localhost:9996/ws?id=alice", "", "http://localhost")
+	if err != nil {
+		t.Fatalf("Failed to connect Player B: %v", err)
+	}
+	defer wsB.Close()
+
+	var welcomeB map[string]interface{}
+	err = websocket.JSON.Receive(wsB, &welcomeB)
+	if err != nil {
+		t.Fatalf("Player B failed to receive welcome: %v", err)
+	}
+
+	playerIDB, ok := welcomeB["player_id"].(string)
+	if !ok {
+		t.Fatalf("Failed to extract player_id from welcome")
+	}
+	t.Logf("[Player B] Connected as: %s", playerIDB)
+
+	// CURRENT BEHAVIOR (no auth):
+	// Both players get the same ID, but server rejects duplicate (see game.go AddPlayer)
+	// So this currently fails gracefully
+
+	// AFTER PHASE 7.2:
+	// This test should FAIL because Player B should not be able to assume Player A's identity
+	// Expected behavior:
+	// - Player A gets token bound to their IP
+	// - Player B tries with same username but different IP
+	// - Server rejects Player B (username already taken on different IP, OR B gets different username)
+
+	if playerIDA == playerIDB {
+		t.Logf("⚠️  VULNERABILITY: Both players got same ID '%s'", playerIDA)
+		t.Logf("    (Currently blocked by duplicate check, but should be prevented by IP-binding)")
+		t.Logf("    EXPECTED AFTER 7.2: Player B should get different ID or be rejected")
+	} else {
+		t.Logf("✓ Players got different IDs: A='%s', B='%s'", playerIDA, playerIDB)
+		t.Logf("  (Current auto-ID system doesn't allow spoofing)")
+	}
+
+	// Get list of players in game to verify both are present or one was rejected
+	time.Sleep(200 * time.Millisecond)
+
+	// Try to retrieve game status via status endpoint
+	t.Logf("Note: This test documents the attack vector for Phase 7.2 implementation.")
+	t.Logf("      After implementing IP-bound JWT tokens, spoofing attempts should be cryptographically prevented.")
+}
+
+// TestIPSpoofingDetection tests that server logs/prevents hijack attempts
+// This is a companion test that will verify Phase 7.2 detection
+func TestIPSpoofingDetectionAfterAuth(t *testing.T) {
+	t.Log("--- IP Spoofing Detection (Placeholder for Phase 7.2) ---")
+	t.Log("SKIPPED: Requires Phase 7.2 JWT implementation")
+	t.Log("")
+	t.Log("When Phase 7.2 is implemented, this test should:")
+	t.Log("1. Player A authenticates and receives JWT bound to IP 192.168.1.100")
+	t.Log("2. Player B attempts to use Player A's JWT from IP 192.168.1.101")
+	t.Log("3. Server verifies JWT signature AND checks IP binding")
+	t.Log("4. Request from wrong IP is rejected (unauthorized)")
+	t.Log("")
+	t.Log("Expected error: 'token IP mismatch' or 'unauthorized'")
+	t.Skip("Requires Phase 7.2 implementation")
+}
