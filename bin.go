@@ -86,7 +86,9 @@ func runClient(serverAddr string) {
 	// Connect to server via WebSocket
 	wsURL := "ws://" + serverAddr + "/ws"
 	player := client.NewPlayer(wsURL)
-	welcomeMsg, err := player.Connect()
+
+	// Use the full auth flow with token/username prompts and local storage
+	welcomeMsg, err := player.ConnectWithAuth()
 	if err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}

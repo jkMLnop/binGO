@@ -5,6 +5,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -182,6 +183,17 @@ func playMultiplayerGame(t *testing.T, playerName string, serverAddr string, mov
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// Send login message with username
+	loginMsg := map[string]interface{}{
+		"action":   "login",
+		"username": playerName,
+	}
+	err = websocket.JSON.Send(ws, loginMsg)
+	if err != nil {
+		t.Errorf("[%s] Failed to send login: %v", playerName, err)
+		return false, false
+	}
+
 	// Receive welcome message from server
 	var welcomeMsg map[string]interface{}
 	err = websocket.JSON.Receive(ws, &welcomeMsg)
@@ -296,6 +308,13 @@ func TestClientDisconnectMidGame(t *testing.T) {
 	}
 	defer ws1.Close()
 
+	// Send login
+	loginMsg := map[string]interface{}{"action": "login", "username": "Player1"}
+	err = websocket.JSON.Send(ws1, loginMsg)
+	if err != nil {
+		t.Fatalf("Failed to send login: %v", err)
+	}
+
 	// Receive welcome
 	var msg map[string]interface{}
 	err = websocket.JSON.Receive(ws1, &msg)
@@ -309,6 +328,13 @@ func TestClientDisconnectMidGame(t *testing.T) {
 		t.Fatalf("Failed to connect player 2: %v", err)
 	}
 	defer ws2.Close()
+
+	// Send login
+	loginMsg = map[string]interface{}{"action": "login", "username": "Player2"}
+	err = websocket.JSON.Send(ws2, loginMsg)
+	if err != nil {
+		t.Fatalf("Failed to send login: %v", err)
+	}
 
 	// Receive welcome
 	err = websocket.JSON.Receive(ws2, &msg)
@@ -328,6 +354,22 @@ func TestClientDisconnectMidGame(t *testing.T) {
 		return
 	}
 	defer ws3.Close()
+
+	// Send login for ws3
+	loginMsg3 := map[string]interface{}{"action": "login", "username": "Player3"}
+	err = websocket.JSON.Send(ws3, loginMsg3)
+	if err != nil {
+		t.Errorf("Failed to send login: %v", err)
+		return
+	}
+
+	// Receive welcome
+	var msg3 map[string]interface{}
+	err = websocket.JSON.Receive(ws3, &msg3)
+	if err != nil {
+		t.Errorf("Failed to receive welcome: %v", err)
+		return
+	}
 
 	t.Logf("✓ Server survived client disconnect and still accepts connections")
 }
@@ -351,6 +393,13 @@ func TestWinBroadcasting(t *testing.T) {
 		}
 		players[i] = ws
 		defer ws.Close()
+
+		// Send login
+		loginMsg := map[string]interface{}{"action": "login", "username": fmt.Sprintf("Player%d", i+1)}
+		err = websocket.JSON.Send(ws, loginMsg)
+		if err != nil {
+			t.Fatalf("Failed to send login player %d: %v", i+1, err)
+		}
 
 		// Receive welcome
 		var msg map[string]interface{}
@@ -407,6 +456,13 @@ func TestPlayerReconnection(t *testing.T) {
 		t.Fatalf("Failed to connect player 1: %v", err)
 	}
 
+	// Send login
+	loginMsg := map[string]interface{}{"action": "login", "username": "Player1"}
+	err = websocket.JSON.Send(ws1, loginMsg)
+	if err != nil {
+		t.Fatalf("Failed to send login: %v", err)
+	}
+
 	var msg map[string]interface{}
 	err = websocket.JSON.Receive(ws1, &msg)
 	if err != nil {
@@ -424,6 +480,14 @@ func TestPlayerReconnection(t *testing.T) {
 		return
 	}
 	defer ws2.Close()
+
+	// Send login for reconnection
+	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player1Reconnect"}
+	err = websocket.JSON.Send(ws2, loginMsg2)
+	if err != nil {
+		t.Errorf("Failed to send login on reconnect: %v", err)
+		return
+	}
 
 	err = websocket.JSON.Receive(ws2, &msg)
 	if err != nil {
@@ -459,6 +523,14 @@ func TestConcurrentPlayerJoins(t *testing.T) {
 				return
 			}
 			defer ws.Close()
+
+			// Send login
+			loginMsg := map[string]interface{}{"action": "login", "username": fmt.Sprintf("Player%d", playerNum)}
+			err = websocket.JSON.Send(ws, loginMsg)
+			if err != nil {
+				results <- err
+				return
+			}
 
 			var msg map[string]interface{}
 			err = websocket.JSON.Receive(ws, &msg)
@@ -516,6 +588,13 @@ func TestIPSpoofing(t *testing.T) {
 	}
 	defer wsA.Close()
 
+	// Send login
+	loginMsg := map[string]interface{}{"action": "login", "username": "alice"}
+	err = websocket.JSON.Send(wsA, loginMsg)
+	if err != nil {
+		t.Fatalf("Failed to send login Player A: %v", err)
+	}
+
 	var welcomeA map[string]interface{}
 	err = websocket.JSON.Receive(wsA, &welcomeA)
 	if err != nil {
@@ -539,6 +618,13 @@ func TestIPSpoofing(t *testing.T) {
 		t.Fatalf("Failed to connect Player B: %v", err)
 	}
 	defer wsB.Close()
+
+	// Send login attempt with same username
+	loginMsgB := map[string]interface{}{"action": "login", "username": "alice"}
+	err = websocket.JSON.Send(wsB, loginMsgB)
+	if err != nil {
+		t.Fatalf("Failed to send login Player B: %v", err)
+	}
 
 	var welcomeB map[string]interface{}
 	err = websocket.JSON.Receive(wsB, &welcomeB)
@@ -594,4 +680,109 @@ func TestIPSpoofingDetectionAfterAuth(t *testing.T) {
 	t.Log("")
 	t.Log("Expected error: 'token IP mismatch' or 'unauthorized'")
 	t.Skip("Requires Phase 7.2 implementation")
+}
+
+// TestTokenPersistenceOnReconnect tests that player can reconnect with same token
+// Verifies the full reconnection flow:
+// 1. Player connects and receives JWT token bound to their IP
+// 2. Player disconnects
+// 3. Player reconnects and token is loaded from local storage
+// 4. Server validates token (signature + IP binding) and accepts reconnect
+func TestTokenPersistenceOnReconnect(t *testing.T) {
+	srv, err := startTestServer("9993")
+	if err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	time.Sleep(500 * time.Millisecond)
+
+	// --- INITIAL CONNECTION ---
+	t.Log("Step 1: Player connects and receives token")
+
+	ws1, err := websocket.Dial("ws://localhost:9993/ws", "", "http://localhost")
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+
+	// Send login
+	loginMsg := map[string]interface{}{"action": "login", "username": "PersistenceTest"}
+	err = websocket.JSON.Send(ws1, loginMsg)
+	if err != nil {
+		t.Fatalf("Failed to send login: %v", err)
+	}
+
+	// Receive welcome with token
+	var welcomeMsg1 map[string]interface{}
+	err = websocket.JSON.Receive(ws1, &welcomeMsg1)
+	if err != nil {
+		t.Fatalf("Failed to receive welcome: %v", err)
+	}
+
+	token1, ok := welcomeMsg1["token"].(string)
+	if !ok || token1 == "" {
+		t.Fatalf("Server did not return token in welcome message")
+	}
+	t.Logf("✓ Received token: %s...", token1[:20])
+
+	playerID1, ok := welcomeMsg1["player_id"].(string)
+	if !ok {
+		t.Fatalf("Failed to extract player_id from welcome")
+	}
+	t.Logf("✓ Connected as player: %s", playerID1)
+
+	// --- DISCONNECT ---
+	t.Log("Step 2: Player disconnects")
+	ws1.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	// --- RECONNECT WITH SAME TOKEN ---
+	t.Log("Step 3: Player reconnects and sends saved token")
+
+	ws2, err := websocket.Dial("ws://localhost:9993/ws", "", "http://localhost")
+	if err != nil {
+		t.Fatalf("Failed to reconnect: %v", err)
+	}
+	defer ws2.Close()
+
+	// Send login with same token
+	reconnectMsg := map[string]interface{}{
+		"action":   "login",
+		"username": "PersistenceTest",
+		"token":    token1,
+	}
+	err = websocket.JSON.Send(ws2, reconnectMsg)
+	if err != nil {
+		t.Fatalf("Failed to send reconnection message: %v", err)
+	}
+
+	// Receive welcome on reconnection
+	var welcomeMsg2 map[string]interface{}
+	err = websocket.JSON.Receive(ws2, &welcomeMsg2)
+	if err != nil {
+		t.Fatalf("Failed to receive welcome on reconnect: %v", err)
+	}
+
+	playerID2, ok := welcomeMsg2["player_id"].(string)
+	if !ok {
+		t.Fatalf("Failed to extract player_id from reconnection welcome")
+	}
+	t.Logf("✓ Reconnected as player: %s", playerID2)
+
+	// --- VERIFY ---
+	t.Log("Step 4: Verify token was accepted")
+
+	// Token should still be valid (server accepted the reconnection)
+	token2, ok := welcomeMsg2["token"].(string)
+	if !ok || token2 == "" {
+		t.Fatalf("Server did not return token on reconnection")
+	}
+
+	if playerID1 == playerID2 {
+		t.Logf("✓ Same player ID maintained: %s", playerID1)
+	} else {
+		t.Logf("⚠️  Different player IDs (might be expected): %s → %s", playerID1, playerID2)
+	}
+
+	t.Logf("✓ Token persistence test passed")
 }

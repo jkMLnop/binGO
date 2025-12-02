@@ -5,6 +5,8 @@ type ServerMessage struct {
 	Type      string     `json:"type"`
 	GameID    string     `json:"game_id"`
 	PlayerID  string     `json:"player_id"`
+	Username  string     `json:"username,omitempty"`
+	Token     string     `json:"token,omitempty"`
 	Buzzwords [][]string `json:"buzzwords"`
 	Rows      int        `json:"rows"`
 	Cols      int        `json:"cols"`
@@ -15,7 +17,9 @@ type ServerMessage struct {
 
 // ClientMessage matches server/types.go
 type ClientMessage struct {
-	Action string `json:"action"`
-	Cell   string `json:"cell,omitempty"`
-	CardID string `json:"cardId,omitempty"`
+	Action   string `json:"action"`
+	Username string `json:"username,omitempty"`
+	Token    string `json:"token,omitempty"`
+	Cell     string `json:"cell,omitempty"`
+	CardID   string `json:"cardId,omitempty"`
 }

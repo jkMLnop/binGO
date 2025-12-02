@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"log"
+	"net"
 	"strings"
 
 	"github.com/jkMLnop/binGO-CLI/shared"
@@ -12,9 +13,12 @@ import (
 // Player represents a bingo player client
 type Player struct {
 	ServerURL   string
+	ClientIP    string // Client's local IP (for session tracking)
 	WS          *websocket.Conn
 	GameID      string
 	PlayerID    string
+	Username    string
+	Token       string              // JWT token for re-authentication
 	GameSession *shared.GameSession // Use shared game logic (includes Board with Rows/Cols)
 }
 
@@ -25,8 +29,86 @@ func NewPlayer(serverURL string) *Player {
 	}
 }
 
-// Connect establishes WebSocket connection to server and performs handshake
-func (p *Player) Connect() (ServerMessage, error) {
+// GetLocalIP retrieves the client's local IP address
+func (p *Player) GetLocalIP() string {
+	if p.ClientIP != "" {
+		return p.ClientIP
+	}
+
+	// Try to get local IP by connecting to a remote server (doesn't actually connect)
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err == nil {
+		defer conn.Close()
+		p.ClientIP = conn.LocalAddr().(*net.UDPAddr).IP.String()
+		return p.ClientIP
+	}
+
+	// Fallback
+	p.ClientIP = "localhost"
+	return p.ClientIP
+}
+
+// ConnectWithAuth handles the full authentication flow with token/username prompts
+// This is the main entry point for client connections
+func (p *Player) ConnectWithAuth() (ServerMessage, error) {
+	// Initialize auth manager
+	authMgr := NewAuthManager()
+
+	// Get local IP for session tracking
+	p.GetLocalIP()
+
+	// Try to load saved session
+	lastUsername, lastToken, _ := authMgr.LoadSession(p.ClientIP)
+
+	var username, token string
+
+	if lastToken != "" && lastUsername != "" {
+		// Ask if they want to reconnect
+		reuse, err := authMgr.PromptForReconnect(lastUsername)
+		if err != nil {
+			return ServerMessage{}, err
+		}
+
+		if reuse {
+			username = lastUsername
+			token = lastToken
+			log.Printf("Reconnecting as %s with saved token", username)
+		} else {
+			// User wants new username
+			newUsername, err := authMgr.PromptForUsername("")
+			if err != nil {
+				return ServerMessage{}, err
+			}
+			username = newUsername
+			token = "" // New login
+		}
+	} else {
+		// No saved session, prompt for username
+		newUsername, err := authMgr.PromptForUsername(lastUsername)
+		if err != nil {
+			return ServerMessage{}, err
+		}
+		username = newUsername
+		token = ""
+	}
+
+	// Connect to server
+	welcomeMsg, err := p.Connect(username, token)
+	if err != nil {
+		return ServerMessage{}, err
+	}
+
+	// Save session for future use
+	if err := authMgr.SaveSession(p.ClientIP, p.Username, p.Token); err != nil {
+		log.Printf("Warning: failed to save session: %v", err)
+	}
+
+	return welcomeMsg, nil
+}
+
+// Connect establishes WebSocket connection to server and performs authentication handshake
+// If token is provided, uses it for reconnection. Otherwise requires username.
+func (p *Player) Connect(username string, token string) (ServerMessage, error) {
 	origin := "http://localhost"
 
 	// Construct WS URL from server address
@@ -49,18 +131,35 @@ func (p *Player) Connect() (ServerMessage, error) {
 	p.WS = ws
 	log.Printf("Connected to server at %s", wsURL)
 
+	// Send login message with username or token
+	loginMsg := ClientMessage{
+		Action:   "login",
+		Username: username,
+		Token:    token,
+	}
+	if err := websocket.JSON.Send(ws, loginMsg); err != nil {
+		ws.Close()
+		return ServerMessage{}, fmt.Errorf("failed to send login: %w", err)
+	}
+
 	// Receive welcome message
 	var welcomeMsg ServerMessage
 	if err := websocket.JSON.Receive(ws, &welcomeMsg); err != nil {
+		ws.Close()
 		return ServerMessage{}, fmt.Errorf("failed to receive welcome: %w", err)
 	}
 
 	if welcomeMsg.Type != "welcome" {
-		return ServerMessage{}, fmt.Errorf("unexpected message type: %s", welcomeMsg.Type)
+		ws.Close()
+		return ServerMessage{}, fmt.Errorf("unexpected message type: %s, message: %s", welcomeMsg.Type, welcomeMsg.Message)
 	}
 
 	p.GameID = welcomeMsg.GameID
 	p.PlayerID = welcomeMsg.PlayerID
+	p.Username = welcomeMsg.Username
+	p.Token = welcomeMsg.Token
+
+	log.Printf("Successfully authenticated as %s, received JWT token", p.Username)
 
 	return welcomeMsg, nil
 }

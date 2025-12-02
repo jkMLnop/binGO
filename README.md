@@ -131,10 +131,14 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
 binGO-CLI/
 ├── bin.go                 # Main entry point
 ├── client/                # Multiplayer CLI client
-│   └── player.go          # Connection, board sync, input handling
+│   ├── auth.go            # Local session management (token storage, username prompts)
+│   ├── player.go          # Connection, board sync, input handling
+│   └── types.go           # Client message types
 ├── server/                # Multiplayer WebSocket server
+│   ├── auth.go            # JWT token generation & validation (IP-bound)
 │   ├── server.go          # WebSocket handler, game coordination
 │   ├── game.go            # Player & Game structs with thread-safe operations
+│   ├── types.go           # Message types
 │   └── server_test.go     # Unit tests
 ├── shared/                # Shared game logic (all modes)
 │   ├── board.go           # Board management & cell marking
@@ -146,7 +150,7 @@ binGO-CLI/
 ├── standalone/            # Single-player mode
 │   └── player.go          # Game loop & input handling
 ├── tests/                 # Integration tests
-│   ├── multiplayer_test.go # 5 integration tests (game flow, edge cases)
+│   ├── multiplayer_test.go # 7 integration tests (game flow, edge cases, security)
 │   └── README.md          # Test documentation
 ├── buzzwords.csv          # Sample dataset
 ├── binGO-CLI*             # Prebuilt binaries (macOS, Linux)
@@ -203,19 +207,30 @@ go test ./tests -tags=integration -run TestMultiplayerGameFlow -v
 
 ## Security Notes
 
-**Current (testing):**
-- Uses plain HTTP WebSocket (ws://)
-- Works on local network and ngrok
-- No authentication required
+**Phase 7.2 (Current - IP-Bound JWT Authentication):**
+- ✅ Implements JWT tokens bound to client IP address
+- ✅ Prevents IP spoofing attacks (tokens rejected if used from different IP)
+- ✅ Automatic username generation (or manual entry)
+- ✅ Local session persistence (~/.config/binGO-CLI/)
+- ✅ Reconnection support with saved credentials
+- Uses plain HTTP WebSocket (ws://) for now
 
-**Production (coming soon):**
+**Phase 7.2 Flow:**
+1. Client connects and prompts for username (or uses saved session)
+2. Server generates JWT token bound to client's IP
+3. Token stored locally for future reconnections
+4. On reconnect, prompt: "Use previous username? (y/n)"
+5. Token verified server-side (signature + IP binding)
+
+**Production (7.3+):**
 - Will use HTTPS WebSocket (wss://)
 - Let's Encrypt SSL certificates
-- Authentication & rate limiting
+- Join codes & game access control
+- Rate limiting & DDoS protection
+- Server-side win validation
 
 ## TODO
 - **CI/CD Integration**: Add GitHub Actions workflow for E2E testing
-- Phase 7.2: Authentication (JWT tokens, player login)
 - Phase 7.3: Game access control (join codes, private games)
 - Phase 7.4: Rate limiting & DDoS protection (in multiplayer testing ngrok handles this for now)
 - Phase 7.5: Server-side win validation

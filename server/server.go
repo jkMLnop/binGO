@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/net/websocket"
 )
@@ -23,19 +25,31 @@ type Server struct {
 	PlayerCounter int64 // Atomic counter for unique player IDs
 	Port          string
 	Server        *http.Server
-	Mux           *http.ServeMux // Custom mux for this server
+	Mux           *http.ServeMux            // Custom mux for this server
+	TokenManager  *TokenManager             // JWT token manager
+	Sessions      map[string]*ClientSession // IP -> ClientSession for tracking usernames
+	SessionsMu    sync.RWMutex
+}
+
+// ClientSession tracks an authenticated client by IP
+type ClientSession struct {
+	IP       string
+	Username string
+	IssuedAt time.Time
 }
 
 // NewServer creates a new bingo server
 func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
-		Games:     make(map[string]*Game),
-		Buzzwords: buzzwords,
-		Rows:      rows,
-		Cols:      cols,
-		Port:      port,
-		Mux:       mux,
+		Games:        make(map[string]*Game),
+		Buzzwords:    buzzwords,
+		Rows:         rows,
+		Cols:         cols,
+		Port:         port,
+		Mux:          mux,
+		TokenManager: NewTokenManager(""), // Will generate random secret
+		Sessions:     make(map[string]*ClientSession),
 	}
 	srv.createNewGame()
 	return srv
@@ -119,6 +133,55 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	log.Printf("New WebSocket connection from %s", ws.Request().RemoteAddr)
 	r := ws.Request()
 
+	// Extract client IP
+	clientIP := s.extractClientIP(r)
+
+	// Receive login message with username or token
+	var loginMsg ClientMessage
+	if err := websocket.JSON.Receive(ws, &loginMsg); err != nil {
+		errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Failed to receive login: %v", err)}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
+		return nil, nil, fmt.Errorf("failed to receive login: %w", err)
+	}
+
+	// Authenticate player and get username
+	var username string
+	var err error
+
+	if loginMsg.Token != "" {
+		// Token-based authentication (reconnect)
+		username, err = s.TokenManager.VerifyToken(loginMsg.Token, clientIP)
+		if err != nil {
+			errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Invalid token: %v", err)}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return nil, nil, fmt.Errorf("invalid token: %w", err)
+		}
+		log.Printf("Player %s re-authenticated with token from IP %s", username, clientIP)
+	} else if loginMsg.Username != "" {
+		// Username-based login
+		username = loginMsg.Username
+		log.Printf("Player logging in with username: %s from IP %s", username, clientIP)
+	} else {
+		errMsg := ServerMessage{Type: "error", Message: "Username or token required"}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
+		return nil, nil, fmt.Errorf("no username or token provided")
+	}
+
+	// Update session for this IP
+	s.storeSession(clientIP, username)
+
+	// Issue new token
+	token, err := s.TokenManager.IssueToken(username, clientIP, 24) // 24 hour expiration
+	if err != nil {
+		errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Failed to issue token: %v", err)}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
+		return nil, nil, fmt.Errorf("failed to issue token: %w", err)
+	}
+
 	// Get or create game
 	game, err := s.getOrCreateGame(r.URL.Query().Get("gameId"))
 	if err != nil {
@@ -128,11 +191,8 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, err
 	}
 
-	// Extract or generate player ID
-	playerID := s.extractPlayerID(r)
-
-	// Create and add player to game
-	player, err := s.createPlayerInGame(game, playerID)
+	// Create and add player to game (use username as playerID)
+	player, err := s.createPlayerInGame(game, username)
 	if err != nil {
 		errMsg := ServerMessage{Type: "error", Message: err.Error()}
 		websocket.JSON.Send(ws, errMsg)
@@ -140,12 +200,12 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, err
 	}
 
-	log.Printf("Player %s joined game %s via WebSocket", playerID, game.ID)
+	log.Printf("Player %s joined game %s from IP %s via WebSocket", username, game.ID, clientIP)
 
-	// Send welcome message
-	if err := s.sendWelcomeMessage(ws, game, player); err != nil {
+	// Send welcome message with token
+	if err := s.sendWelcomeMessage(ws, game, player, token); err != nil {
 		log.Printf("Error sending welcome message: %v", err)
-		game.RemovePlayer(playerID)
+		game.RemovePlayer(username)
 		ws.Close()
 		return nil, nil, err
 	}
@@ -153,7 +213,41 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	return player, game, nil
 }
 
-// extractPlayerID gets player ID from request or generates a new one
+// extractClientIP extracts the client IP from the request
+func (s *Server) extractClientIP(r *http.Request) string {
+	// Try X-Forwarded-For header first (for proxied connections like ngrok)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return xff
+	}
+	// Fall back to RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// storeSession stores or updates a client session for the given IP and username
+func (s *Server) storeSession(clientIP, username string) {
+	s.SessionsMu.Lock()
+	defer s.SessionsMu.Unlock()
+	s.Sessions[clientIP] = &ClientSession{
+		IP:       clientIP,
+		Username: username,
+		IssuedAt: time.Now(),
+	}
+}
+
+// getStoredUsername retrieves the stored username for an IP, or empty string if not found
+func (s *Server) getStoredUsername(clientIP string) string {
+	s.SessionsMu.RLock()
+	defer s.SessionsMu.RUnlock()
+	if session, exists := s.Sessions[clientIP]; exists {
+		return session.Username
+	}
+	return ""
+}
+
+// extractPlayerID gets player ID from request or generates a new one (deprecated, kept for compatibility)
 func (s *Server) extractPlayerID(r *http.Request) string {
 	playerID := r.URL.Query().Get("id")
 	if playerID == "" {
@@ -172,12 +266,14 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 	return player, nil
 }
 
-// sendWelcomeMessage sends the welcome message to a newly connected player
-func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player) error {
+// sendWelcomeMessage sends the welcome message to a newly connected player with JWT token
+func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player, token string) error {
 	welcomeMsg := ServerMessage{
 		Type:      "welcome",
 		GameID:    game.ID,
 		PlayerID:  player.ID,
+		Username:  player.ID, // username is the player ID
+		Token:     token,     // Include JWT token
 		Buzzwords: s.Buzzwords,
 		Rows:      s.Rows,
 		Cols:      s.Cols,
@@ -189,7 +285,7 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 		return err
 	}
 
-	log.Printf("Sent welcome message to %s", player.ID)
+	log.Printf("Sent welcome message to %s with JWT token", player.ID)
 	return nil
 }
 
