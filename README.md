@@ -70,7 +70,7 @@ go run . -mode standalone
 
 ## Usage
 
-### Standalone Mode (Speed Bingo - 3x3)
+### Standalone Mode
 - The program reads `buzzwords.csv` in the project root and uses the first column of each row.
 - Each cell displays its numpad number (1-9) in the top-left, with the phrase centered below.
 - Enter a number 1-9 to mark the corresponding cell; enter `q` to quit.
@@ -132,9 +132,9 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
 - First player to get 3 in a row (horizontal, vertical, diagonal) wins
 - Winner sees a celebration animation, all players exit
 
-## Board Sizes (Planned)
+## Board Sizes
 - **3x3 Speed Bingo** (current): Quick 9-cell game with numpad numbers 1-9
-- **5x5 Classic Bingo** (planned): Traditional 25-cell board with B-I-N-G-O letters
+- **5x5 Classic Bingo** (planned): Traditional 25-cell board with B-I-N-G-O letters and numbers 1-5
 
 ## Architecture
 
