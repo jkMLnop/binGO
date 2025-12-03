@@ -164,50 +164,14 @@ binGO-CLI/
 │   ├── multiplayer_test.go # 7 integration tests (game flow, edge cases, security)
 │   └── README.md          # Test documentation
 ├── buzzwords.csv          # Sample dataset
-├── binGO-CLI*             # Prebuilt binaries (macOS, Linux)
-├── cert.pem               # Self-signed SSL cert (testing)
-└── key.pem                # SSL key (testing)
+└── binGO-CLI*             # Prebuilt binaries (macOS, Linux)
 ```
 
 ## Data
 `buzzwords.csv` is included as a sample dataset. If you replace it with your own file, keep the same CSV format (one phrase per row, first column used).
 
 ## Testing
-
-### Unit Tests
-```bash
-go test ./server -v -race
-go test ./... -v
-```
-
-### Multiplayer Test (Server + 2 Connected Clients)
-
-The `TestMultiplayerGameFlow` test verifies the complete multiplayer experience:
-- Starts a WebSocket server
-- Connects 2 clients simultaneously
-- Player 1 marks cells 7, 8, 9 (top row) to win
-- Player 2 marks cells 1, 2 (no win)
-- Verifies Player 1 is declared winner
-- Verifies both players receive game_ended broadcast
-- Confirms losers don't incorrectly win
-
-**Run:**
-```bash
-go test ./tests -tags=integration -run TestMultiplayerGameFlow -v
-```
-
-**What it tests:**
-- Server game coordination (player joining, game state)
-- Client win detection logic (CheckWin)
-- Win announcement (client sends action:"win" to server)
-- Broadcasting (game_ended sent to all connected players)
-- Correct winner identification
-
-**Test Organization:**
-- Unit tests: `./server`, `./shared` directories
-- Integration tests: `./tests` directory (run with `-tags=integration`)
-- All tests: `go test ./...` (unit tests only)
-- All tests + integration: `go test -tags=integration ./...`
+https://github.com/jkMLnop/binGO-CLI/blob/main/tests/README.md
 
 ## TODO
 - **CI/CD Integration**: Add GitHub Actions workflow for E2E testing
