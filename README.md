@@ -11,6 +11,8 @@
 ```
 # binGO-CLI
 
+![Bingo Demo](bingo_demo.gif)
+
 A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and displays a 3x3 bingo board. Supports both single-player standalone mode and multiplayer mode via WebSocket.
 
 ## Why this repo
@@ -127,6 +129,7 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
    ```
 
 ### Gameplay
+
 - Enter a number (1-9) to mark a cell
 - Enter `board` to redisplay the board
 - First player to get 3 in a row (horizontal, vertical, diagonal) wins
