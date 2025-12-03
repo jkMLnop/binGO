@@ -25,7 +25,7 @@ A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and 
 ## Quick Start - Prebuilt Binaries
 
 Pre-compiled binaries are available in this repo for:
-- **macOS Intel**: `binGO-CLI` or `binGO-CLI-intel-mac` (symlink to base binary)
+- **macOS Intel (base)**: `binGO-CLI-intel-mac`
 - **Linux x86_64**: `binGO-CLI-linux`
 
 Download the appropriate binary and run:
