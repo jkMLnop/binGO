@@ -4,16 +4,19 @@ This directory contains integration tests for binGO-CLI, specifically testing th
 
 ## Running Tests
 
-All integration tests use the `integration` build tag and are located in this directory.
-
-**Run all integration tests:**
+**Run all tests:**
 ```bash
-go test -tags=integration ./tests -v
+go test ./...
+```
+
+**Run only multiplayer integration tests:**
+```bash
+go test ./tests -v
 ```
 
 **Run specific test:**
 ```bash
-go test -tags=integration ./tests -run TestMultiplayerGameFlow -v
+go test ./tests -run TestMultiplayerGameFlow -v
 ```
 
 ## Test Files
@@ -38,14 +41,9 @@ Tests the complete multiplayer game flow with server coordination:
 **Security Tests:**
 
 **TestIPSpoofing:**
-- Documents current auth vulnerability where different sources can claim same username
-- Baseline test: PASSES (duplicate check prevents hijacking, but IP-binding is missing)
-- After Phase 7.2: SHOULD FAIL (IP-bound JWT makes spoofing cryptographically impossible)
-
-**TestIPSpoofingDetectionAfterAuth:**
-- Placeholder test for IP-bound JWT validation
-- Tests that tokens are rejected when used from different IP
-- Currently SKIPPED until Phase 7.2 implementation
+- Tests IP-bound JWT authentication from Phase 7.2
+- Verifies that duplicate usernames from different IPs are rejected
+- Status: ✅ PASSES (IP-binding prevents hijacking attacks)
 
 ## Unit Tests
 
@@ -70,18 +68,17 @@ go test ./shared -v
 go test ./...
 ```
 
-**Unit + integration tests:**
+**All tests including integration:**
 ```bash
-go test -tags=integration ./...
+go test -v ./...
 ```
 
-Integration tests use the `integration` build tag to exclude from standard runs since they start servers and are slower.
+Current status: **45/45 tests passing** ✅
+- 37 unit tests (shared package: board, win detection, display)
+- 8 integration tests (multiplayer: game flow, security, edge cases)
 
 ## CI/CD Integration
 
-**GitHub Actions workflow (TODO):**
-```yaml
-- Run unit tests: go test ./...
-- Run integration tests: go test -tags=integration ./tests -v
-- Fail PR if either fails
-```
+Tests are automatically run on every push and pull request via GitHub Actions.
+
+See [CI/CD & Releases](../README.md#cicd--releases) in the main README for details.

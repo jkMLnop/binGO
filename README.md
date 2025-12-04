@@ -13,12 +13,7 @@
 
 ![Bingo Demo](bingo_demo.gif)
 
-A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and displays a 3x3 bingo board. Supports both single-player standalone mode and multiplayer mode via WebSocket.
-
-## Why this repo
-- Quick fun CLI for meetings and random bingo-style phrases
-- Single-player mode (no dependencies)
-- Multiplayer support via WebSocket
+A terminal bingo game written in Go for quick fun in meetings. Reads phrases from `buzzwords.csv` and displays a 3x3 bingo board. Supports single-player (no dependencies) and multiplayer via WebSocket.
 
 ## Requirements
 
@@ -33,7 +28,7 @@ Pre-compiled binaries are available in GitHub Releases for:
 - **macOS Intel (base)**: `binGO-CLI-intel-mac`
 - **Linux x86_64**: `binGO-CLI-linux`
 
-### Download & Run (No Setup Required)
+### Download & Run
 
 1. **Download** the binary for your platform from the [latest release](https://github.com/jkMLnop/binGO-CLI/releases):
    ```bash
@@ -54,19 +49,14 @@ Pre-compiled binaries are available in GitHub Releases for:
    - `chmod +x` the downloaded file
    - Run it: `./binGO-CLI-intel-mac -mode standalone` (or `-linux` for Linux)
 
-## Build & Run
-
-### Build a local binary:
+## Build from Source
 
 ```bash
+# Build
 cd /path/to/binGO-CLI
 go build -o binGO-CLI
-./binGO-CLI -mode standalone
-```
 
-### Run directly:
-
-```bash
+# Or run directly without building
 go run . -mode standalone
 ```
 
@@ -191,7 +181,8 @@ binGO-CLI/
 `buzzwords.csv` is included as a sample dataset. If you replace it with your own file, keep the same CSV format (one phrase per row, first column used).
 
 ## Testing
-https://github.com/jkMLnop/binGO-CLI/blob/main/tests/README.md
+
+Run tests locally with `go test ./...` or see [tests/README.md](tests/README.md) for detailed test documentation.
 
 ## CI/CD & Releases
 
