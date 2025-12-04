@@ -1,5 +1,6 @@
 name: CI/CD
 
+# Automatically test on push/PR and build + release on tags
 on:
   push:
     branches: [main]
