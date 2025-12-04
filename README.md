@@ -21,21 +21,38 @@ A terminal bingo game written in Go that reads phrases from `buzzwords.csv` and 
 - Multiplayer support via WebSocket
 
 ## Requirements
+
+**To play immediately:** Just download a prebuilt binary (see Quick Start above)—no setup needed!
+
+**To build from source:**
 - Go 1.25+ (the project `go.mod` currently specifies `go 1.25.3`)
-- OR use pre-built binaries (see below)
 
 ## Quick Start - Prebuilt Binaries
 
-Pre-compiled binaries are available in this repo for:
+Pre-compiled binaries are available in GitHub Releases for:
 - **macOS Intel (base)**: `binGO-CLI-intel-mac`
 - **Linux x86_64**: `binGO-CLI-linux`
 
-Download the appropriate binary and run:
-```bash
-chmod +x binGO-CLI*
-./binGO-CLI -mode standalone          # macOS Intel
-./binGO-CLI-linux -mode standalone    # Linux
-```
+### Download & Run (No Setup Required)
+
+1. **Download** the binary for your platform from the [latest release](https://github.com/jkMLnop/binGO-CLI/releases):
+   ```bash
+   # macOS Intel
+   wget https://github.com/jkMLnop/binGO-CLI/releases/latest/download/binGO-CLI-intel-mac
+   chmod +x binGO-CLI-intel-mac
+   ./binGO-CLI-intel-mac -mode standalone
+   
+   # Linux x86_64
+   wget https://github.com/jkMLnop/binGO-CLI/releases/latest/download/binGO-CLI-linux
+   chmod +x binGO-CLI-linux
+   ./binGO-CLI-linux -mode standalone
+   ```
+
+2. **Or download manually:**
+   - Visit [binGO-CLI Releases](https://github.com/jkMLnop/binGO-CLI/releases)
+   - Download the binary for your OS
+   - `chmod +x` the downloaded file
+   - Run it: `./binGO-CLI-intel-mac -mode standalone` (or `-linux` for Linux)
 
 ## Build & Run
 
