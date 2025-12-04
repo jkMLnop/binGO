@@ -21,6 +21,7 @@ type Player struct {
 	Token        string              // JWT token for re-authentication
 	GameSession  *shared.GameSession // Use shared game logic (includes Board with Rows/Cols)
 	DisplayWidth int                 // Cached display width for consistent rendering
+	WelcomeMsg   ServerMessage       // Store welcome message for later display
 }
 
 // NewPlayer creates a new player client
@@ -210,9 +211,11 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 	shared.DisplayBannerWithWidth(p.DisplayWidth)
 	shared.PrintBoard(p.GameSession.Board)
 
+	// Display game info below board
+	p.DisplayWelcome(p.WelcomeMsg)
+	
 	// Check for win
 	if p.GameSession.CheckWin() {
-		// Banner + board already displayed together above
 		fmt.Println("\n🎉 YOU WIN! 🎉")
 		return true, nil
 	}
@@ -222,11 +225,15 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 	return false, nil
 }
 
-// HandleBoard redisplays the current board
+// HandleBoard redisplays the current board with game info
 func (p *Player) HandleBoard(inputHandler *shared.InputHandler) {
 	fmt.Print("\033[H\033[2J")
 	shared.DisplayBannerWithWidth(p.DisplayWidth)
 	shared.PrintBoard(p.GameSession.Board)
+	
+	// Display game info below board
+	p.DisplayWelcome(p.WelcomeMsg)
+	
 	fmt.Println("\n" + inputHandler.PromptMessage())
 }
 

@@ -210,6 +210,15 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, err
 	}
 
+	// Broadcast player update to all players in game (excluding the new player who just got welcome)
+	updateMsg := ServerMessage{
+		Type:    "player_update",
+		GameID:  game.ID,
+		Players: game.GetPlayerList(),
+		Message: fmt.Sprintf("Player %s joined the game", player.ID),
+	}
+	s.BroadcastToGame(game.ID, updateMsg)
+
 	return player, game, nil
 }
 
@@ -381,6 +390,18 @@ func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
 // HandlePlayerDisconnect removes player from game and closes the connection
 func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocket.Conn) error {
 	game.RemovePlayer(player.ID)
+	
+	// Broadcast player update to remaining players
+	if game.IsActive && game.PlayerCount() > 0 {
+		updateMsg := ServerMessage{
+			Type:    "player_update",
+			GameID:  game.ID,
+			Players: game.GetPlayerList(),
+			Message: fmt.Sprintf("Player %s left the game", player.ID),
+		}
+		s.BroadcastToGame(game.ID, updateMsg)
+	}
+	
 	if err := ws.Close(); err != nil {
 		log.Printf("Error closing connection for player %s: %v", player.ID, err)
 		return err

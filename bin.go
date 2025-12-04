@@ -99,11 +99,16 @@ func runClient(serverAddr string) {
 
 	// Calculate display width based on board size
 	player.DisplayWidth = shared.CalculateBoardWidth(player.GameSession.Board.Cols, player.GameSession.Board.ColWidths)
+	
+	// Store welcome message for later display
+	player.WelcomeMsg = welcomeMsg
 
-	// Display banner and welcome
+	// Display banner and board first
 	shared.DisplayBannerWithWidth(player.DisplayWidth)
-	player.DisplayWelcome(welcomeMsg)
 	shared.PrintBoard(player.GameSession.Board)
+	
+	// Display initial game info
+	player.DisplayWelcome(welcomeMsg)
 
 	// === Setup Communication Channels ===
 	// Channel to signal when game ends (from server message listener)
@@ -128,6 +133,15 @@ func runClient(serverAddr string) {
 			}
 
 			switch msg.Type {
+			case "player_update":
+				// Update welcome message with new player list and redraw
+				player.WelcomeMsg = msg
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession.Board)
+				player.DisplayWelcome(player.WelcomeMsg)
+				fmt.Println("\n" + inputHandler.PromptMessage())
+				fmt.Print("> ")
 			case "game_ended":
 				player.DisplayGameEnd(msg)
 				gameDone <- true

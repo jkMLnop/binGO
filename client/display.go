@@ -11,8 +11,6 @@ func (p *Player) DisplayWelcome(welcomeMsg ServerMessage) {
 	fmt.Printf("\n🎲 Welcome %s!\n", p.PlayerID)
 	fmt.Printf("   Game: %s\n", p.GameID)
 	fmt.Printf("   Players in game: %v\n", welcomeMsg.Players)
-
-	fmt.Println("\n📋 Your Bingo Board:")
 }
 
 // DisplayGameEnd displays the game end message and handles win animation
