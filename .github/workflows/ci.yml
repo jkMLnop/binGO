@@ -80,21 +80,22 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Create checksums
         run: |
-          for file in binGO-CLI-*/binGO-CLI-*; do
-            sha256sum "$file" >> SHA256SUMS
-          done
+          cd artifacts
+          find . -type f ! -name "SHA256SUMS" -exec sha256sum {} \; > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            binGO-CLI-intel-mac/binGO-CLI-intel-mac
-            binGO-CLI-linux/binGO-CLI-linux
-            SHA256SUMS
+            artifacts/binGO-CLI-intel-mac/binGO-CLI-intel-mac
+            artifacts/binGO-CLI-linux/binGO-CLI-linux
+            artifacts/SHA256SUMS
           draft: false
           prerelease: false
         env:
