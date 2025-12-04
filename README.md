@@ -176,8 +176,30 @@ binGO-CLI/
 ## Testing
 https://github.com/jkMLnop/binGO-CLI/blob/main/tests/README.md
 
+## CI/CD & Releases
+
+This repo uses GitHub Actions to automatically:
+- **Test**: Run full test suite on every push and PR
+- **Build**: Compile binaries for macOS Intel and Linux x86_64
+- **Release**: Create GitHub releases with checksums when you push a tag
+
+### Creating a Release
+
+Simply tag your commit:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions will:
+1. Run all tests
+2. Build binaries for both platforms
+3. Create a release with both binaries + SHA256 checksums
+4. Binaries available at: `https://github.com/jkMLnop/binGO-CLI/releases`
+
+(Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
+
 ## TODO
-- **CI/CD Integration**: Add GitHub Actions workflow for E2E testing
 - Phase 7.3: Game access control (join codes, private games)
 - Phase 7.4: Rate limiting & DDoS protection (in multiplayer testing ngrok handles this for now)
 - Phase 8: Features (leaderboards, classic 5x5 mode, chat)
