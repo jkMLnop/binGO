@@ -213,7 +213,7 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 
 	// Display game info below board
 	p.DisplayWelcome(p.WelcomeMsg)
-	
+
 	// Check for win
 	if p.GameSession.CheckWin() {
 		fmt.Println("\n🎉 YOU WIN! 🎉")
@@ -230,10 +230,10 @@ func (p *Player) HandleBoard(inputHandler *shared.InputHandler) {
 	fmt.Print("\033[H\033[2J")
 	shared.DisplayBannerWithWidth(p.DisplayWidth)
 	shared.PrintBoard(p.GameSession.Board)
-	
+
 	// Display game info below board
 	p.DisplayWelcome(p.WelcomeMsg)
-	
+
 	fmt.Println("\n" + inputHandler.PromptMessage())
 }
 

@@ -390,7 +390,7 @@ func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
 // HandlePlayerDisconnect removes player from game and closes the connection
 func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocket.Conn) error {
 	game.RemovePlayer(player.ID)
-	
+
 	// Broadcast player update to remaining players
 	if game.IsActive && game.PlayerCount() > 0 {
 		updateMsg := ServerMessage{
@@ -401,7 +401,7 @@ func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocke
 		}
 		s.BroadcastToGame(game.ID, updateMsg)
 	}
-	
+
 	if err := ws.Close(); err != nil {
 		log.Printf("Error closing connection for player %s: %v", player.ID, err)
 		return err

@@ -99,14 +99,14 @@ func runClient(serverAddr string) {
 
 	// Calculate display width based on board size
 	player.DisplayWidth = shared.CalculateBoardWidth(player.GameSession.Board.Cols, player.GameSession.Board.ColWidths)
-	
+
 	// Store welcome message for later display
 	player.WelcomeMsg = welcomeMsg
 
 	// Display banner and board first
 	shared.DisplayBannerWithWidth(player.DisplayWidth)
 	shared.PrintBoard(player.GameSession.Board)
-	
+
 	// Display initial game info
 	player.DisplayWelcome(welcomeMsg)
 

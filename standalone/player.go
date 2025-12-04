@@ -77,7 +77,8 @@ func (g *Game) playRound(inputHandler *shared.InputHandler, maxCells int) bool {
 
 // RunGame orchestrates the game loop
 func (g *Game) RunGame() {
-	// Display banner and initial board
+	// Clear screen and display banner and initial board at top of terminal
+	fmt.Print("\033[H\033[2J")
 	shared.DisplayBannerWithWidth(g.displayWidth)
 	shared.PrintBoard(g.session.Board)
 
