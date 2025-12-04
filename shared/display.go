@@ -19,7 +19,44 @@ func CalculateBoardWidth(cols int, colWidths []int) int {
 	return width
 }
 
-// DisplayBanner prints the binGO-CLI ASCII art banner centered with tilde borders
+// generatePatternLine generates a full pattern line of the specified type and length
+func generatePatternLine(width int, patternType string) string {
+	result := ""
+
+	if patternType == "dash" {
+		// Generate dash pattern: ---+---+---+... repeating
+		for i := 0; i < width; i++ {
+			cyclePos := i % 4
+			if cyclePos == 3 {
+				result += "+"
+			} else {
+				result += "-"
+			}
+		}
+	} else {
+		// Generate letter pattern for given letter sequence
+		// Pattern is " X | X | X |..." repeating (4 chars per cycle)
+		letters := patternType
+		for i := 0; i < width; i++ {
+			cyclePos := i % 4
+			letterIdx := (i / 4) % len(letters)
+
+			if cyclePos == 0 {
+				result += " "
+			} else if cyclePos == 1 {
+				result += letters[letterIdx : letterIdx+1]
+			} else if cyclePos == 2 {
+				result += " "
+			} else {
+				result += "|"
+			}
+		}
+	}
+
+	return result
+}
+
+// DisplayBanner prints the binGO-CLI ASCII art banner centered with alternating BINGO borders
 // Uses provided totalWidth to match the board width
 func DisplayBannerWithWidth(totalWidth int) {
 	bannerLines := []string{
@@ -36,22 +73,42 @@ func DisplayBannerWithWidth(totalWidth int) {
 	// Get the width of the banner (all lines are same width)
 	bannerWidth := VisualLength(bannerLines[0])
 
-	// Calculate padding
-	totalPadding := totalWidth - bannerWidth
-	leftPadding := totalPadding / 2
-	rightPadding := totalPadding - leftPadding
+	// Pattern definitions for each row
+	patterns := []string{
+		"dash",  // row 0: ---+---+---+---+...
+		"BINGO", // row 1:  B | I | N | G | O | (cycles: B,I,N,G,O)
+		"dash",  // row 2: ---+---+---+---+...
+		"INGOB", // row 3:  I | N | G | O | B | (offset by 1: I,N,G,O,B)
+		"dash",  // row 4: ---+---+---+---+...
+		"NGOBI", // row 5:  N | G | O | B | I | (offset by 2: N,G,O,B,I)
+		"dash",  // row 6: ---+---+---+---+...
+		"GOBIN", // row 7:  G | O | B | I | N | (offset by 3: G,O,B,I,N)
+	}
 
-	// Print each banner line centered with tildes on sides
-	for _, line := range bannerLines {
-		centered := ""
-		for i := 0; i < leftPadding; i++ {
-			centered += "~"
+	// Print each banner line with alternating borders
+	for rowIdx, line := range bannerLines {
+		pattern := patterns[rowIdx]
+
+		// Generate full-width pattern
+		fullPattern := generatePatternLine(totalWidth, pattern)
+
+		// Get banner center area
+		totalPadding := totalWidth - bannerWidth
+		startPos := totalPadding / 2
+
+		// Build output by overlaying banner text onto pattern
+		output := ""
+		for i := 0; i < totalWidth; i++ {
+			if i >= startPos && i < startPos+bannerWidth {
+				// Use banner text
+				output += string(line[i-startPos])
+			} else {
+				// Use pattern
+				output += string(fullPattern[i])
+			}
 		}
-		centered += line
-		for i := 0; i < rightPadding; i++ {
-			centered += "~"
-		}
-		fmt.Println(centered)
+
+		fmt.Println(output)
 	}
 }
 
@@ -222,16 +279,16 @@ func FormatBoard(board *Board) []string {
 func PrintBoardWithWidth(board *Board) {
 	// Calculate the board's natural width
 	boardWidth := CalculateBoardWidth(board.Cols, board.ColWidths)
-	
+
 	// Banner width is always 42 + padding
 	bannerWidth := 42
-	
+
 	// Use whichever is wider
 	totalWidth := boardWidth
 	if bannerWidth+10 > boardWidth {
 		totalWidth = boardWidth
 	}
-	
+
 	// Display banner and board at the calculated width
 	DisplayBannerWithWidth(totalWidth)
 	PrintBoard(board)

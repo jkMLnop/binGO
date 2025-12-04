@@ -9,7 +9,7 @@ import (
 
 // Game represents a standalone game session
 type Game struct {
-	session    *shared.GameSession
+	session      *shared.GameSession
 	displayWidth int // Cached display width for consistent banner/board rendering
 }
 
@@ -17,12 +17,12 @@ type Game struct {
 func NewGame(buzzwords [][]string) *Game {
 	// Create a shared game session with 3x3 dimensions
 	session := shared.NewGameSession(buzzwords, 3, 3)
-	
+
 	// Calculate display width based on board size
 	boardWidth := shared.CalculateBoardWidth(session.Board.Cols, session.Board.ColWidths)
 
 	return &Game{
-		session: session,
+		session:      session,
 		displayWidth: boardWidth,
 	}
 }
