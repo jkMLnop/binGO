@@ -17,7 +17,7 @@ A terminal bingo game written in Go for quick fun in meetings. Reads phrases fro
 
 ## Requirements
 
-**To play immediately:** Just download a prebuilt binary (see Quick Start above)—no setup needed!
+**To play immediately:** Just download a prebuilt binary (see Quick Start)—no setup needed!
 
 **To build from source:**
 - Go 1.25+ (the project `go.mod` currently specifies `go 1.25.3`)
