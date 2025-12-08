@@ -130,7 +130,7 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
    Forwarding    http://abc123xyz.ngrok-free.dev -> http://localhost:8080
    ```
 
-6. **Share the ngrok URL with friends.** They connect with:**
+6. **Share the ngrok URL with friends.** They connect with:
    ```bash
    ./binGO-CLI -mode client -server abc123xyz.ngrok-free.dev
    ```
