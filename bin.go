@@ -20,6 +20,7 @@ import (
 func main() {
 	mode := flag.String("mode", "standalone", "standalone, server, or client")
 	serverAddr := flag.String("server", "localhost:8080", "server address for client mode (e.g., localhost:8080, 192.168.1.100:8080)")
+	code := flag.String("code", "", "game code for joining (Phase 7.3: required for remote connections)")
 	port := flag.String("port", "8080", "port for server mode")
 	flag.Parse()
 
@@ -29,7 +30,7 @@ func main() {
 	case "server":
 		runServer(*port)
 	case "client":
-		runClient(*serverAddr)
+		runClient(*serverAddr, *code)
 	default:
 		log.Fatalf("Unknown mode: %s. Use 'standalone', 'server', or 'client'", *mode)
 	}
@@ -81,14 +82,14 @@ func runServer(port string) {
 }
 
 // god method but also controller orchestrating model operations pattern
-func runClient(serverAddr string) {
+func runClient(serverAddr string, code string) {
 	// === Setup Client Connection ===
 	// Connect to server via WebSocket
 	wsURL := "ws://" + serverAddr + "/ws"
 	player := client.NewPlayer(wsURL)
 
 	// Use the full auth flow with token/username prompts and local storage
-	welcomeMsg, err := player.ConnectWithAuth()
+	welcomeMsg, err := player.ConnectWithAuth(code)
 	if err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}
@@ -102,13 +103,6 @@ func runClient(serverAddr string) {
 
 	// Store welcome message for later display
 	player.WelcomeMsg = welcomeMsg
-
-	// Display banner and board first
-	shared.DisplayBannerWithWidth(player.DisplayWidth)
-	shared.PrintBoard(player.GameSession.Board)
-
-	// Display initial game info
-	player.DisplayWelcome(welcomeMsg)
 
 	// === Setup Communication Channels ===
 	// Channel to signal when game ends (from server message listener)
@@ -165,11 +159,15 @@ func runClient(serverAddr string) {
 	}()
 
 	// === Command Loop ===
-	// Command loop using select for non-blocking I/O
-	fmt.Println(inputHandler.PromptMessage())
+	// Wait for the first player_update from server to display the board
+	// Then start the command loop
+	firstUpdate := true
 
 	for {
-		fmt.Print("> ")
+		// Only print prompt after first board display
+		if !firstUpdate {
+			fmt.Print("> ")
+		}
 
 		// Wait for either user input or game end
 		select {
@@ -178,6 +176,11 @@ func runClient(serverAddr string) {
 			os.Exit(0)
 
 		case input := <-inputChan:
+			// Mark that we've had our first update
+			if firstUpdate {
+				firstUpdate = false
+			}
+
 			// Parse command:cellID format
 			parts := strings.SplitN(input, ":", 2)
 			command := parts[0]
