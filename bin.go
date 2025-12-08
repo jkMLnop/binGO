@@ -37,8 +37,8 @@ func main() {
 }
 
 func runStandalone() {
-	// Load buzzwords from CSV
-	buzzwords, err := shared.LoadBuzzwords("buzzwords.csv")
+	// Load buzzwords from CSV (prefer buzzwords_full.csv if available)
+	buzzwords, err := shared.LoadBuzzwordsWithFallback()
 	if err != nil {
 		log.Fatalf("Failed to load buzzwords: %v", err)
 	}
@@ -49,8 +49,8 @@ func runStandalone() {
 }
 
 func runServer(port string) {
-	// Load buzzwords from CSV
-	buzzwords, err := shared.LoadBuzzwords("buzzwords.csv")
+	// Load buzzwords from CSV (prefer buzzwords_full.csv if available)
+	buzzwords, err := shared.LoadBuzzwordsWithFallback()
 	if err != nil {
 		log.Fatalf("Failed to load buzzwords: %v", err)
 	}

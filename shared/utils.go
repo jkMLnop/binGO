@@ -27,3 +27,21 @@ func LoadBuzzwords(filename string) ([][]string, error) {
 
 	return rows, nil
 }
+
+// LoadBuzzwordsWithFallback tries to load buzzwords_full.csv first,
+// then falls back to buzzwords.csv if full version doesn't exist
+func LoadBuzzwordsWithFallback() ([][]string, error) {
+	// Try full buzzwords first
+	buzzwords, err := LoadBuzzwords("buzzwords_full.csv")
+	if err == nil {
+		return buzzwords, nil
+	}
+
+	// Fall back to standard buzzwords
+	buzzwords, err = LoadBuzzwords("buzzwords.csv")
+	if err != nil {
+		return nil, fmt.Errorf("could not load buzzwords: buzzwords_full.csv not found, buzzwords.csv error: %w", err)
+	}
+
+	return buzzwords, nil
+}
