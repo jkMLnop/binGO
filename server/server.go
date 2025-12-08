@@ -16,8 +16,9 @@ import (
 
 // Server manages the WebSocket server and game sessions
 type Server struct {
-	Games         map[string]*Game // gameID -> Game
-	CurrentGame   *Game            // The active game all new players join
+	Games         map[string]*Game // gameID -> Game (for backward compatibility)
+	CodeToGame    map[string]*Game // Code -> Game (Phase 7.3: code-based access)
+	CurrentGame   *Game            // The active game all new players join (localhost/LAN auto-join)
 	Buzzwords     [][]string
 	Rows          int
 	Cols          int
@@ -43,6 +44,7 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
 		Games:        make(map[string]*Game),
+		CodeToGame:   make(map[string]*Game),
 		Buzzwords:    buzzwords,
 		Rows:         rows,
 		Cols:         cols,
@@ -95,9 +97,10 @@ func (s *Server) createNewGame() {
 	gameID := fmt.Sprintf("game-%d", len(s.Games)+1)
 	newGame := NewGame(gameID, s.Buzzwords, s.Rows, s.Cols)
 	s.Games[gameID] = newGame
+	s.CodeToGame[newGame.Code] = newGame // Phase 7.3: Register by code
 	s.CurrentGame = newGame
 
-	log.Printf("Created new game: %s", gameID)
+	log.Printf("Created new game: %s with code: %s", gameID, newGame.Code)
 }
 
 // wsHandler handles incoming WebSocket connections - orchestrates the connection lifecycle
@@ -182,8 +185,20 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, fmt.Errorf("failed to issue token: %w", err)
 	}
 
-	// Get or create game
-	game, err := s.getOrCreateGame(r.URL.Query().Get("gameId"))
+	// Phase 7.3: Get game code from query parameter or login message
+	code := r.URL.Query().Get("code")
+	if code == "" && loginMsg.Code != "" {
+		code = loginMsg.Code
+	}
+
+	// Get server IP for classification (use localhost as default for IP comparison)
+	serverIP := "127.0.0.1"
+	if addr, err := net.ResolveTCPAddr("tcp", r.Host); err == nil {
+		serverIP = addr.IP.String()
+	}
+
+	// Get or create game with code-based lookup (Phase 7.3)
+	game, err := s.getOrCreateGame(code, clientIP, serverIP)
 	if err != nil {
 		errMsg := ServerMessage{Type: "error", Message: err.Error()}
 		websocket.JSON.Send(ws, errMsg)
@@ -214,6 +229,8 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	updateMsg := ServerMessage{
 		Type:    "player_update",
 		GameID:  game.ID,
+		Code:    game.Code,
+		HostID:  game.HostID,
 		Players: game.GetPlayerList(),
 		Message: fmt.Sprintf("Player %s joined the game", player.ID),
 	}
@@ -272,6 +289,12 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 	if err := game.AddPlayer(player); err != nil {
 		return nil, err
 	}
+
+	// Set HostID if this is the first player (no host yet)
+	if game.HostID == "" {
+		game.HostID = playerID
+	}
+
 	return player, nil
 }
 
@@ -280,6 +303,8 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 	welcomeMsg := ServerMessage{
 		Type:      "welcome",
 		GameID:    game.ID,
+		Code:      game.Code,   // Phase 7.3: Include game code
+		HostID:    game.HostID, // Include host player ID
 		PlayerID:  player.ID,
 		Username:  player.ID, // username is the player ID
 		Token:     token,     // Include JWT token
@@ -294,36 +319,48 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 		return err
 	}
 
-	log.Printf("Sent welcome message to %s with JWT token", player.ID)
+	log.Printf("Sent welcome message to %s with JWT token and game code: %s", player.ID, game.Code)
 	return nil
 }
 
-// getOrCreateGame retrieves or creates a game
-func (s *Server) getOrCreateGame(gameID string) (*Game, error) {
+// getOrCreateGame retrieves a game by code (Phase 7.3) or falls back to CurrentGame for localhost/LAN
+func (s *Server) getOrCreateGame(code string, clientIP, serverIP string) (*Game, error) {
 	s.GamesMu.RLock()
-	var game *Game
-	if gameID != "" {
-		game = s.Games[gameID]
+	defer s.GamesMu.RUnlock()
+
+	// Phase 7.3: If code provided, look up game by code
+	if code != "" {
+		if game, exists := s.CodeToGame[code]; exists {
+			return game, nil
+		}
+		return nil, fmt.Errorf("invalid game code: %s", code)
 	}
-	if game == nil {
+
+	// No code provided - check if connection is local/LAN
+	ipType := ClassifyIP(clientIP, serverIP)
+	if ipType != Remote {
+		// Localhost or LAN - can auto-join current game
+		var game *Game
 		game = s.CurrentGame
-	}
-	s.GamesMu.RUnlock()
 
-	// If current game is inactive, create a new one
-	if game == s.CurrentGame && !game.IsActive {
-		s.createNewGame()
-		s.GamesMu.RLock()
-		game = s.CurrentGame
-		s.GamesMu.RUnlock()
-		log.Printf("Current game was inactive, created new game: %s", game.ID)
+		// If current game is inactive, create a new one
+		if game != nil && !game.IsActive {
+			// Need to unlock before calling createNewGame which will lock
+			s.GamesMu.RUnlock()
+			s.createNewGame()
+			s.GamesMu.RLock()
+			game = s.CurrentGame
+			log.Printf("Current game was inactive, created new game: %s", game.ID)
+		}
+
+		if game == nil {
+			return nil, fmt.Errorf("no active game available")
+		}
+		return game, nil
 	}
 
-	if game == nil {
-		return nil, fmt.Errorf("no active game available")
-	}
-
-	return game, nil
+	// Remote connection without code - reject
+	return nil, fmt.Errorf("remote connections require a game code")
 }
 
 // ReceivePlayerMessage reads and returns the next message from the WebSocket connection
