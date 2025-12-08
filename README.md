@@ -55,6 +55,7 @@ Pre-compiled binaries are available in GitHub Releases for:
 # Build
 cd /path/to/binGO-CLI
 go build -o binGO-CLI
+chmod +x binGO-CLI
 
 # Or run directly without building
 go run . -mode standalone
@@ -99,9 +100,13 @@ go run . -mode standalone
    ```
    Find your server's local IP with `ifconfig | grep "inet "` (macOS) or `hostname -I` (Linux)
 
-#### Option 2: Internet via ngrok (for testing with remote friends)
+**Note:** Local network connections automatically join the game without requiring a code.
+
+#### Option 2: Internet via ngrok (with Game Code)
 
 ngrok creates a public tunnel to your local server using a reverse proxy. Your machine initiates an outgoing connection to ngrok's servers, which then routes inbound traffic from the internet back through that connection—bypassing ISP firewalls that block direct inbound connections. Perfect for testing multiplayer across the internet without cloud hosting.
+
+**Important:** Remote connections via ngrok require a game code for security. Codes are automatically generated and displayed to all connected players.
 
 1. **Install ngrok** (free account required):
    ```bash
@@ -130,10 +135,11 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
    Forwarding    http://abc123xyz.ngrok-free.dev -> http://localhost:8080
    ```
 
-6. **Share the ngrok URL with friends.** They connect with:
+6. **Share the ngrok URL and game code with friends.** They connect with:
    ```bash
-   ./binGO-CLI -mode client -server abc123xyz.ngrok-free.dev
+   ./binGO-CLI -mode client -server abc123xyz.ngrok-free.dev -code BINGO-XXXXX
    ```
+   Replace `BINGO-XXXXX` with the actual game code shown on the server.
 
 ### Gameplay
 
@@ -208,6 +214,7 @@ GitHub Actions will:
 (Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
 
 ## TODO
-- Phase 7.3: Game access control (join codes, private games)
-- Phase 7.4: Rate limiting & DDoS protection (in multiplayer testing ngrok handles this for now)
-- Phase 8: Features (leaderboards, classic 5x5 mode, chat)
+- Phase 7.4: Host management & game lifecycle (reassignment on disconnect, game termination if only remote remain)
+- Phase 7.5: Cloud deployment & CI/CD automation (Docker containerization, deploy to Fly.io or similar after Phase 7.4)
+- Phase 8: Security hardening & anti-abuse (rate limiting, DDoS mitigation, connection limits)
+- Phase 9: Features (leaderboards, classic 5x5 mode, chat)
