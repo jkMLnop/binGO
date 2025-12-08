@@ -52,7 +52,8 @@ func (p *Player) GetLocalIP() string {
 
 // ConnectWithAuth handles the full authentication flow with token/username prompts
 // This is the main entry point for client connections
-func (p *Player) ConnectWithAuth() (ServerMessage, error) {
+// code parameter is for Phase 7.3 remote player joining (optional for localhost/LAN)
+func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
 	// Initialize auth manager
 	authMgr := NewAuthManager()
 
@@ -94,8 +95,8 @@ func (p *Player) ConnectWithAuth() (ServerMessage, error) {
 		token = ""
 	}
 
-	// Connect to server
-	welcomeMsg, err := p.Connect(username, token)
+	// Connect to server with code (Phase 7.3)
+	welcomeMsg, err := p.Connect(username, token, code)
 	if err != nil {
 		return ServerMessage{}, err
 	}
@@ -110,7 +111,8 @@ func (p *Player) ConnectWithAuth() (ServerMessage, error) {
 
 // Connect establishes WebSocket connection to server and performs authentication handshake
 // If token is provided, uses it for reconnection. Otherwise requires username.
-func (p *Player) Connect(username string, token string) (ServerMessage, error) {
+// code parameter is for Phase 7.3 remote player joining (optional for localhost/LAN)
+func (p *Player) Connect(username string, token string, code string) (ServerMessage, error) {
 	origin := "http://localhost"
 
 	// Construct WS URL from server address
@@ -133,11 +135,12 @@ func (p *Player) Connect(username string, token string) (ServerMessage, error) {
 	p.WS = ws
 	log.Printf("Connected to server at %s", wsURL)
 
-	// Send login message with username or token
+	// Send login message with username or token and optional code (Phase 7.3)
 	loginMsg := ClientMessage{
 		Action:   "login",
 		Username: username,
 		Token:    token,
+		Code:     code,
 	}
 	if err := websocket.JSON.Send(ws, loginMsg); err != nil {
 		ws.Close()
@@ -161,7 +164,7 @@ func (p *Player) Connect(username string, token string) (ServerMessage, error) {
 	p.Username = welcomeMsg.Username
 	p.Token = welcomeMsg.Token
 
-	log.Printf("Successfully authenticated as %s, received JWT token", p.Username)
+	log.Printf("Successfully authenticated as %s, received JWT token and game code: %s", p.Username, welcomeMsg.Code)
 
 	return welcomeMsg, nil
 }

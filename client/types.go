@@ -4,6 +4,8 @@ package client
 type ServerMessage struct {
 	Type      string     `json:"type"`
 	GameID    string     `json:"game_id"`
+	Code      string     `json:"code,omitempty"`    // Phase 7.3: Game code
+	HostID    string     `json:"host_id,omitempty"` // Host player ID
 	PlayerID  string     `json:"player_id"`
 	Username  string     `json:"username,omitempty"`
 	Token     string     `json:"token,omitempty"`
@@ -20,6 +22,7 @@ type ClientMessage struct {
 	Action   string `json:"action"`
 	Username string `json:"username,omitempty"`
 	Token    string `json:"token,omitempty"`
+	Code     string `json:"code,omitempty"` // Phase 7.3: Game join code
 	Cell     string `json:"cell,omitempty"`
 	CardID   string `json:"cardId,omitempty"`
 }
