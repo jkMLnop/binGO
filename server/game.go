@@ -39,6 +39,9 @@ func (p *Player) SendMessage(msg interface{}) error {
 // Game represents a bingo game session
 type Game struct {
 	ID        string
+	Code      string             // Join code for this game
+	HostID    string             // ID of the host player (first player to join)
+	HostIP    string             // IP of the host player
 	Players   map[string]*Player // playerID -> Player
 	IsActive  bool               // Game is in progress
 	Winner    string             // Player ID of winner (empty if no winner yet)
@@ -49,6 +52,7 @@ type Game struct {
 func NewGame(id string, buzzwords [][]string, rows, cols int) *Game {
 	return &Game{
 		ID:       id,
+		Code:     GenerateGameCode(),
 		Players:  make(map[string]*Player),
 		IsActive: true,
 	}
@@ -102,4 +106,24 @@ func (g *Game) PlayerCount() int {
 	defer g.PlayersMu.RUnlock()
 
 	return len(g.Players)
+}
+
+// SetHostIP sets the host IP for this game
+func (g *Game) SetHostIP(ip string) {
+	g.HostIP = ip
+}
+
+// GetHostIP returns the host IP
+func (g *Game) GetHostIP() string {
+	return g.HostIP
+}
+
+// HasLocalPlayers checks if there are any players from localhost or LAN
+func (g *Game) HasLocalPlayers(serverIP string) bool {
+	g.PlayersMu.RLock()
+	defer g.PlayersMu.RUnlock()
+
+	// This is a simplified check - in reality we'd need to track player IPs
+	// For now, we check if HostIP is set (indicating at least one local player)
+	return g.HostIP != ""
 }
