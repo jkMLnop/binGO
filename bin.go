@@ -105,9 +105,6 @@ func runClient(serverAddr string, code string) {
 	player.WelcomeMsg = welcomeMsg
 
 	// === Setup Communication Channels ===
-	// Channel to signal when game ends (from server message listener)
-	gameDone := make(chan bool, 1)
-
 	// Channel for user input (so we can select on it)
 	inputChan := make(chan string, 1)
 
@@ -122,7 +119,7 @@ func runClient(serverAddr string, code string) {
 			msg, err := player.ReceiveMessage()
 			if err != nil {
 				log.Printf("Server disconnected: %v", err)
-				gameDone <- true
+				os.Exit(0)
 				return
 			}
 
@@ -138,8 +135,27 @@ func runClient(serverAddr string, code string) {
 				fmt.Print("> ")
 			case "game_ended":
 				player.DisplayGameEnd(msg)
-				gameDone <- true
-				return
+				// Show restart option if user is host
+				if msg.HostID == player.PlayerID {
+					fmt.Println("\n💡 You are the host. Type 'restart' to start a new round with the same code.")
+					fmt.Println("Or type 'q' to quit.")
+					fmt.Print("> ")
+				} else {
+					// Non-host players can only quit
+					fmt.Println("\nWaiting for host to restart or type 'q' to quit.")
+					fmt.Print("> ")
+				}
+			case "game_restart":
+				// Game restarted - reset board and continue playing
+				fmt.Println("\n🔄 Game restarted! New round begins.")
+				// Reset the game session with new buzzwords
+				if msg.Buzzwords != nil {
+					player.GameSession = shared.NewGameSession(msg.Buzzwords, msg.Rows, msg.Cols)
+				}
+				// Update welcome message
+				player.WelcomeMsg = msg
+				// Redisplay board
+				player.HandleBoard(inputHandler)
 			}
 		}
 	}()
@@ -171,10 +187,6 @@ func runClient(serverAddr string, code string) {
 
 		// Wait for either user input or game end
 		select {
-		case <-gameDone:
-			// Game ended (winner announced)
-			os.Exit(0)
-
 		case input := <-inputChan:
 			// Mark that we've had our first update
 			if firstUpdate {
@@ -204,9 +216,17 @@ func runClient(serverAddr string, code string) {
 					continue
 				}
 				fmt.Println("🎉 Announcing win to server...")
-				// Wait for game_ended message from server
-				<-gameDone
-				os.Exit(0)
+				// Server will broadcast game_ended to all players
+				continue
+
+			case "restart":
+				if err := player.AnnounceRestart(); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+					continue
+				}
+				fmt.Println("🔄 Requesting game restart...")
+				// Server will broadcast game_restart message to all players
+				continue
 
 			case "help":
 				printClientHelp()
@@ -228,16 +248,14 @@ func runClient(serverAddr string, code string) {
 					// Announce win to server immediately (broadcasts game_ended to all players)
 					if err := player.AnnounceWin(); err != nil {
 						fmt.Printf("Error announcing win: %v\n", err)
-						os.Exit(0)
+						continue
 					}
 
 					fmt.Println("🎉 Announcing win to server...")
-					// Wait for game_ended message from server (all players get kicked)
-					<-gameDone
-
-					// Now show the win animation for the winner
-					shared.DisplayWinScreen()
-					os.Exit(0)
+					// Server will broadcast game_ended to all players
+					// Non-hosts will see the message and can quit
+					// Host can send restart
+					continue
 				}
 
 				// Small delay to allow messages from server to be printed
@@ -249,9 +267,10 @@ func runClient(serverAddr string, code string) {
 
 func printClientHelp() {
 	fmt.Println("\n📝 Commands:")
-	fmt.Println("  'mark <row> <col>' - Mark a cell (e.g., mark 0 1)")
-	fmt.Println("  'board' - Redisplay the board")
-	fmt.Println("  'win' - Announce you've won (must have winning pattern)")
-	fmt.Println("  'help' - Show this help")
-	fmt.Println("  'quit' - Exit game")
+	fmt.Println("  1-9              - Mark a cell")
+	fmt.Println("  'board'          - Redisplay the board")
+	fmt.Println("  'win'            - Announce you've won (must have winning pattern)")
+	fmt.Println("  'restart'        - Restart game (host only)")
+	fmt.Println("  'help'           - Show this help")
+	fmt.Println("  'quit' or 'q'    - Exit game")
 }
