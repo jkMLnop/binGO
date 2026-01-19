@@ -264,6 +264,26 @@ GitHub Actions will:
   - DDoS mitigation (connection limits per IP)
   - Logging/monitoring for abuse patterns
 
+- [ ] Observability & Monitoring (critical for load testing insights)
+  - Prometheus metrics endpoint (`/metrics`)
+    - `game_count` (total active games)
+    - `player_count` (total connected players)
+    - `game_creation_duration_ms` (latency)
+    - `database_query_duration_ms` (DB performance)
+  - Structured JSON logging
+    - Game lifecycle events (created, ended, restarted, archived)
+    - Player connection events (joined, disconnected, errors)
+    - Database performance issues
+  - Grafana dashboard
+    - Games created per minute
+    - Average players per game
+    - Error rate & error types
+    - Database query latency histogram
+  - Alert thresholds
+    - Error rate > 5%
+    - Game creation latency > 500ms
+    - Database connection pool exhaustion
+
 #### Phase 9: Client Features & Improved UX
 **Goal:** Support hosting games on cloud server; add leaderboards
 
@@ -298,10 +318,16 @@ GitHub Actions will:
   - Service mesh / ingress configuration
   - Horizontal pod autoscaling
 
+- [ ] Distributed tracing (multi-pod debugging)
+  - Jaeger integration for request tracing across pods
+  - Trace game creation from client request → DB write → response
+  - Identify cross-pod bottlenecks
+  - Debug session correlation (which pod handled which request)
+
 - [ ] Testing under K8s
   - Multi-replica game coordination
   - Database failover scenarios
-  - Performance benchmarking
+  - Performance benchmarking under load
 
 ---
 
