@@ -118,9 +118,17 @@ func (p *Player) Connect(username string, token string, code string) (ServerMess
 	// Construct WS URL from server address
 	wsURL := p.ServerURL
 
-	// For all connections, use ws:// (plain WebSocket)
-	// ngrok free tier doesn't support wss:// anyway
-	if !strings.HasPrefix(wsURL, "ws://") {
+	// Strip any existing protocol and /ws path
+	wsURL = strings.TrimPrefix(wsURL, "ws://")
+	wsURL = strings.TrimPrefix(wsURL, "wss://")
+	wsURL = strings.TrimSuffix(wsURL, "/ws")
+
+	// Auto-detect protocol based on server URL
+	if strings.Contains(wsURL, "ngrok") {
+		// ngrok uses HTTPS, so use wss:// (WebSocket Secure)
+		wsURL = "wss://" + wsURL + "/ws"
+	} else {
+		// Local/LAN connections use plain ws://
 		wsURL = "ws://" + wsURL + "/ws"
 	}
 
@@ -184,6 +192,12 @@ func (p *Player) AnnounceWin() error {
 	return websocket.JSON.Send(p.WS, winMsg)
 }
 
+// AnnounceRestart sends a restart request to the server (host only)
+func (p *Player) AnnounceRestart() error {
+	restartMsg := ClientMessage{Action: "restart"}
+	return websocket.JSON.Send(p.WS, restartMsg)
+}
+
 // ReceiveMessage receives a single message from the server
 func (p *Player) ReceiveMessage() (ServerMessage, error) {
 	var msg ServerMessage
@@ -223,8 +237,7 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 		return true, nil
 	}
 
-	// Prompt for next move
-	fmt.Println("\n" + inputHandler.PromptMessage())
+	// Don't print prompt here - let the event loop handle it via printPrompt()
 	return false, nil
 }
 
@@ -237,7 +250,7 @@ func (p *Player) HandleBoard(inputHandler *shared.InputHandler) {
 	// Display game info below board
 	p.DisplayWelcome(p.WelcomeMsg)
 
-	fmt.Println("\n" + inputHandler.PromptMessage())
+	// Don't print prompt here - let the event loop handle it via printPrompt()
 }
 
 // HandleInvalidInput displays an error message for invalid input

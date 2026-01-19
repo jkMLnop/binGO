@@ -98,7 +98,7 @@ go run . -mode standalone
    ```bash
    ./binGO-CLI -mode client -server <server-ip>:8080
    ```
-   Find your server's local IP with `ifconfig | grep "inet "` (macOS) or `hostname -I` (Linux)
+   Find your server's local IP with `ifconfig | grep "inet " | grep -v 127.0.0.1 | head -1 | awk '{print $2}'` (macOS) or `hostname -I` (Linux)
 
 **Note:** Local network connections automatically join the game without requiring a code.
 
@@ -107,6 +107,9 @@ go run . -mode standalone
 ngrok creates a public tunnel to your local server using a reverse proxy. Your machine initiates an outgoing connection to ngrok's servers, which then routes inbound traffic from the internet back through that connection—bypassing ISP firewalls that block direct inbound connections. Perfect for testing multiplayer across the internet without cloud hosting.
 
 **Important:** Remote connections via ngrok require a game code for security. Codes are automatically generated and displayed to all connected players.
+
+**Requirements:**
+- ngrok **3.0.0+** (tested with 3.34.1). Free tier requires HTTPS/WSS connections. [Download here](https://ngrok.com/download)
 
 1. **Install ngrok** (free account required):
    ```bash
@@ -132,14 +135,17 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
    ```
    You'll see output like:
    ```
-   Forwarding    http://abc123xyz.ngrok-free.dev -> http://localhost:8080
+   Forwarding    https://abc123xyz.ngrok-free.dev -> http://localhost:8080
    ```
+   _(Note: ngrok 3.0+ free tier requires HTTPS/WSS. The client automatically detects ngrok domains and uses secure WebSocket (`wss://`) connections.)_
 
 6. **Share the ngrok URL and game code with friends.** They connect with:
    ```bash
    ./binGO-CLI -mode client -server abc123xyz.ngrok-free.dev -code BINGO-XXXXX
    ```
    Replace `BINGO-XXXXX` with the actual game code shown on the server.
+   
+   _(The client auto-detects ngrok domains and connects securely without needing to specify `wss://`)_
 
 ### Gameplay
 
@@ -214,7 +220,9 @@ GitHub Actions will:
 (Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
 
 ## TODO
-- Phase 7.4: Host management & game lifecycle (reassignment on disconnect, game termination if only remote remain)
+- Phase 7.4: Host management & game lifecycle + board state recovery
+  - Host management & game lifecycle (reassignment on disconnect, game termination if only remote remain)
+  - Board state persistence (client-side storage for disconnect recovery)
 - Phase 7.5: Cloud deployment & CI/CD automation (Docker containerization, deploy to Fly.io or similar after Phase 7.4)
 - Phase 8: Security hardening & anti-abuse (rate limiting, DDoS mitigation, connection limits)
 - Phase 9: Features (leaderboards, classic 5x5 mode, chat)

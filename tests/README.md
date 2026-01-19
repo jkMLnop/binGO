@@ -1,8 +1,32 @@
-# Integration Tests
+# Integration & Regression Tests
 
-This directory contains integration tests for binGO-CLI, specifically testing the multiplayer game flow with server coordination.
+This directory contains both automated integration tests and comprehensive manual regression tests for binGO-CLI.
 
-## Running Tests
+## 📋 Manual Regression Tests
+
+Complete manual regression test suite for Phase 7.3 multiplayer features:
+
+**[See REGRESSION_TESTS.md](REGRESSION_TESTS.md)** for:
+- **49 test cases** across 11 functional areas
+- Server initialization & code generation (5 tests)
+- ngrok tunnel & remote connection (5 tests)  
+- Multiplayer gameplay (6 tests)
+- Win detection (5 tests)
+- Game restart functionality (7 tests)
+- Host disconnect & reconnection (5 tests)
+- Game archiving (4 tests)
+- Edge cases & robustness (8 tests)
+- Code validity & security (4 tests)
+- Display & UX (5 tests)
+- Backwards compatibility (3 tests)
+
+**Status:** ✅ **49/49 tests passing** - Ready for release
+
+---
+
+## Automated Tests
+
+### Running Tests
 
 **Run all tests:**
 ```bash
@@ -73,9 +97,12 @@ go test ./...
 go test -v ./...
 ```
 
-Current status: **45/45 tests passing** ✅
+Current status: **45/45 automated tests passing** ✅
 - 37 unit tests (shared package: board, win detection, display)
 - 8 integration tests (multiplayer: game flow, security, edge cases)
+
+**Manual regression tests:** **49/49 tests passing** ✅
+- See [REGRESSION_TESTS.md](REGRESSION_TESTS.md) for complete coverage
 
 ## CI/CD Integration
 

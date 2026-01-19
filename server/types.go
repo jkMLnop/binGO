@@ -10,11 +10,12 @@ type ClientMessage struct {
 
 // ServerMessage represents messages sent from server to client
 type ServerMessage struct {
-	Type      string     `json:"type"` // "welcome", "game_ended", "error"
-	GameID    string     `json:"game_id"`
-	Code      string     `json:"code,omitempty"`    // Phase 7.3: Game code for joining
-	HostID    string     `json:"host_id,omitempty"` // Host player ID
-	PlayerID  string     `json:"player_id"`
+	Type           string     `json:"type"` // "welcome", "game_ended", "error"
+	GameID         string     `json:"game_id"`
+	Code           string     `json:"code,omitempty"`    // Phase 7.3: Game code for joining
+	HostID         string     `json:"host_id,omitempty"` // Current host player ID
+	OriginalHostID string     `json:"original_host_id,omitempty"` // Original host (never changes)
+	PlayerID       string     `json:"player_id"`
 	Username  string     `json:"username,omitempty"` // authenticated username
 	Token     string     `json:"token,omitempty"`    // JWT token issued on login
 	Rows      int        `json:"rows"`               // board dimensions

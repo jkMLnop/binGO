@@ -45,6 +45,8 @@ func (h *InputHandler) ProcessInput() (string, string, error) {
 		return "", "board", nil
 	case "win":
 		return "", "win", nil
+	case "restart":
+		return "", "restart", nil
 	case "help":
 		return "", "help", nil
 	}

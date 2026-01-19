@@ -84,9 +84,8 @@ func runServer(port string) {
 // god method but also controller orchestrating model operations pattern
 func runClient(serverAddr string, code string) {
 	// === Setup Client Connection ===
-	// Connect to server via WebSocket
-	wsURL := "ws://" + serverAddr + "/ws"
-	player := client.NewPlayer(wsURL)
+	// Pass raw server address; player.Connect() will add ws:// or wss:// protocol and /ws path
+	player := client.NewPlayer(serverAddr)
 
 	// Use the full auth flow with token/username prompts and local storage
 	welcomeMsg, err := player.ConnectWithAuth(code)
@@ -107,6 +106,8 @@ func runClient(serverAddr string, code string) {
 	// === Setup Communication Channels ===
 	// Channel for user input (so we can select on it)
 	inputChan := make(chan string, 1)
+	// Channel for server messages (so we can select on it)
+	serverMsgChan := make(chan client.ServerMessage, 10)
 
 	// Create input handler for the board dimensions
 	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
@@ -122,41 +123,8 @@ func runClient(serverAddr string, code string) {
 				os.Exit(0)
 				return
 			}
-
-			switch msg.Type {
-			case "player_update":
-				// Update welcome message with new player list and redraw
-				player.WelcomeMsg = msg
-				fmt.Print("\033[H\033[2J")
-				shared.DisplayBannerWithWidth(player.DisplayWidth)
-				shared.PrintBoard(player.GameSession.Board)
-				player.DisplayWelcome(player.WelcomeMsg)
-				fmt.Println("\n" + inputHandler.PromptMessage())
-				fmt.Print("> ")
-			case "game_ended":
-				player.DisplayGameEnd(msg)
-				// Show restart option if user is host
-				if msg.HostID == player.PlayerID {
-					fmt.Println("\n💡 You are the host. Type 'restart' to start a new round with the same code.")
-					fmt.Println("Or type 'q' to quit.")
-					fmt.Print("> ")
-				} else {
-					// Non-host players can only quit
-					fmt.Println("\nWaiting for host to restart or type 'q' to quit.")
-					fmt.Print("> ")
-				}
-			case "game_restart":
-				// Game restarted - reset board and continue playing
-				fmt.Println("\n🔄 Game restarted! New round begins.")
-				// Reset the game session with new buzzwords
-				if msg.Buzzwords != nil {
-					player.GameSession = shared.NewGameSession(msg.Buzzwords, msg.Rows, msg.Cols)
-				}
-				// Update welcome message
-				player.WelcomeMsg = msg
-				// Redisplay board
-				player.HandleBoard(inputHandler)
-			}
+			// Send message through channel so main loop can handle it
+			serverMsgChan <- msg
 		}
 	}()
 
@@ -179,14 +147,78 @@ func runClient(serverAddr string, code string) {
 	// Then start the command loop
 	firstUpdate := true
 
-	for {
-		// Only print prompt after first board display
-		if !firstUpdate {
-			fmt.Print("> ")
-		}
+	// Track warning message to display as header
+	var warningMessage string
 
-		// Wait for either user input or game end
+	// Helper function to consistently format warning and prompt
+	printPrompt := func(promptText string) {
+		if warningMessage != "" {
+			fmt.Println()
+			fmt.Println("⚠️  WARNING: " + warningMessage)
+			fmt.Println()
+		}
+		if promptText != "" {
+			fmt.Println(promptText)
+		}
+		fmt.Print("> ")
+	}
+
+	for {
+		// Wait for either user input or server messages
 		select {
+		case msg := <-serverMsgChan:
+			// Handle server message
+			switch msg.Type {
+			case "error":
+				warningMessage = msg.Message
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession.Board)
+				player.DisplayWelcome(player.WelcomeMsg)
+				printPrompt(inputHandler.PromptMessage())
+			case "player_update":
+				// Update welcome message with new player list and redraw
+				player.WelcomeMsg = msg
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession.Board)
+				player.DisplayWelcome(player.WelcomeMsg)
+				printPrompt(inputHandler.PromptMessage())
+			case "game_ended":
+				player.DisplayGameEnd(msg)
+				// Show restart option if user is original host
+				if msg.OriginalHostID == player.PlayerID {
+					printPrompt("\nType 'restart' to start a new game or 'q' to quit.")
+				} else {
+					// Non-host players wait for host
+					printPrompt("\nWaiting for host to restart or type 'q' to quit.")
+				}
+			case "game_restart":
+				// Game restarted - reset board and continue playing
+				log.Printf("DEBUG: Received game_restart message from server")
+				log.Printf("DEBUG: Message: Type=%s, Code=%s, Buzzwords len=%d, Rows=%d, Cols=%d",
+					msg.Type, msg.Code, len(msg.Buzzwords), msg.Rows, msg.Cols)
+				// Reset the game session with new buzzwords
+				if len(msg.Buzzwords) > 0 {
+					log.Println("DEBUG: Creating new game session with buzzwords")
+					player.GameSession = shared.NewGameSession(msg.Buzzwords, msg.Rows, msg.Cols)
+					log.Println("DEBUG: New game session created successfully")
+				} else {
+					log.Printf("DEBUG: Buzzwords is empty! len=%d", len(msg.Buzzwords))
+				}
+				// Update welcome message and clear warning on restart
+				player.WelcomeMsg = msg
+				warningMessage = ""
+				// Redisplay board (same as player_update to maintain consistency)
+				log.Println("DEBUG: Clearing screen and displaying board")
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession.Board)
+				player.DisplayWelcome(player.WelcomeMsg)
+				fmt.Println("\n🔄 New round started! " + inputHandler.PromptMessage())
+				fmt.Print("> ")
+			}
+
 		case input := <-inputChan:
 			// Mark that we've had our first update
 			if firstUpdate {
@@ -208,11 +240,13 @@ func runClient(serverAddr string, code string) {
 
 			case "board":
 				player.HandleBoard(inputHandler)
+				printPrompt("")
 				continue
 
 			case "win":
 				if err := player.AnnounceWin(); err != nil {
 					fmt.Printf("❌ %v\n", err)
+					printPrompt("")
 					continue
 				}
 				fmt.Println("🎉 Announcing win to server...")
@@ -222,24 +256,28 @@ func runClient(serverAddr string, code string) {
 			case "restart":
 				if err := player.AnnounceRestart(); err != nil {
 					fmt.Printf("❌ Error: %v\n", err)
+					printPrompt("")
 					continue
 				}
 				fmt.Println("🔄 Requesting game restart...")
-				// Server will broadcast game_restart message to all players
+				// Server will validate that player is original host
 				continue
 
 			case "help":
 				printClientHelp()
+				printPrompt("")
 				continue
 
 			case "invalid":
 				player.HandleInvalidInput(inputHandler, maxCellNum)
+				printPrompt("")
 				continue
 
 			case "mark":
 				won, err := player.HandleMark(cellID, inputHandler, maxCellNum)
 				if err != nil {
 					fmt.Printf("Error: %v\n", err)
+					printPrompt("")
 					continue
 				}
 
@@ -248,6 +286,7 @@ func runClient(serverAddr string, code string) {
 					// Announce win to server immediately (broadcasts game_ended to all players)
 					if err := player.AnnounceWin(); err != nil {
 						fmt.Printf("Error announcing win: %v\n", err)
+						printPrompt("")
 						continue
 					}
 
@@ -260,6 +299,7 @@ func runClient(serverAddr string, code string) {
 
 				// Small delay to allow messages from server to be printed
 				time.Sleep(100 * time.Millisecond)
+				printPrompt(inputHandler.PromptMessage())
 			}
 		}
 	}

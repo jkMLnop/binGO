@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 // MessageChannel represents a communication channel to a player
@@ -38,23 +39,37 @@ func (p *Player) SendMessage(msg interface{}) error {
 
 // Game represents a bingo game session
 type Game struct {
-	ID        string
-	Code      string             // Join code for this game
-	HostID    string             // ID of the host player (first player to join)
-	HostIP    string             // IP of the host player
-	Players   map[string]*Player // playerID -> Player
-	IsActive  bool               // Game is in progress
-	Winner    string             // Player ID of winner (empty if no winner yet)
-	PlayersMu sync.RWMutex       // Protect Players map
+	ID             string
+	Code           string             // Join code for this game
+	OriginalHostID string             // ID of the original host who owns the code (permanent)
+	HostID         string             // ID of the current host player (can be empty if host disconnected)
+	HostIP         string             // IP of the host player
+	Players        map[string]*Player // playerID -> Player
+	IsActive       bool               // Game is in progress
+	Winner         string             // Player ID of winner (empty if no winner yet)
+	CreatedAt      time.Time          // When this game session started
+	EndedAt        time.Time          // When this game session ended (zero if still active)
+	PlayersMu      sync.RWMutex       // Protect Players map
+}
+
+// ArchivedGame stores completed game sessions for history
+type ArchivedGame struct {
+	ID             string
+	Code           string
+	OriginalHostID string
+	Winner         string
+	CreatedAt      time.Time
+	EndedAt        time.Time
 }
 
 // NewGame creates a new game session
 func NewGame(id string, buzzwords [][]string, rows, cols int) *Game {
 	return &Game{
-		ID:       id,
-		Code:     GenerateGameCode(),
-		Players:  make(map[string]*Player),
-		IsActive: true,
+		ID:        id,
+		Code:      GenerateGameCode(),
+		Players:   make(map[string]*Player),
+		IsActive:  true,
+		CreatedAt: time.Now(),
 	}
 }
 
@@ -126,4 +141,17 @@ func (g *Game) HasLocalPlayers(serverIP string) bool {
 	// This is a simplified check - in reality we'd need to track player IPs
 	// For now, we check if HostIP is set (indicating at least one local player)
 	return g.HostIP != ""
+}
+
+// ResetBoard clears all players and resets game state for the next round
+func (g *Game) ResetBoard(buzzwords [][]string, rows, cols int) {
+	g.PlayersMu.Lock()
+	defer g.PlayersMu.Unlock()
+
+	// Reset game state but keep current players (they will clear their own marks)
+	// Just reset the game metadata for the new session
+	g.IsActive = true
+	g.Winner = ""
+	g.CreatedAt = time.Now() // Fresh session start
+	g.EndedAt = time.Time{}  // Clear end time
 }

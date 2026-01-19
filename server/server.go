@@ -16,20 +16,22 @@ import (
 
 // Server manages the WebSocket server and game sessions
 type Server struct {
-	Games         map[string]*Game // gameID -> Game (for backward compatibility)
-	CodeToGame    map[string]*Game // Code -> Game (Phase 7.3: code-based access)
-	CurrentGame   *Game            // The active game all new players join (localhost/LAN auto-join)
-	Buzzwords     [][]string
-	Rows          int
-	Cols          int
-	GamesMu       sync.RWMutex
-	PlayerCounter int64 // Atomic counter for unique player IDs
-	Port          string
-	Server        *http.Server
-	Mux           *http.ServeMux            // Custom mux for this server
-	TokenManager  *TokenManager             // JWT token manager
-	Sessions      map[string]*ClientSession // IP -> ClientSession for tracking usernames
-	SessionsMu    sync.RWMutex
+	Games              map[string]*Game  // gameID -> Game (for backward compatibility)
+	CodeToGame         map[string]*Game  // Code -> Game (Phase 7.3: code-based access)
+	CodeToOriginalHost map[string]string // Code -> OriginalHostID (permanent mapping)
+	ArchivedGames      []ArchivedGame    // Completed game sessions for history
+	CurrentGame        *Game             // The active game all new players join (localhost/LAN auto-join)
+	Buzzwords          [][]string
+	Rows               int
+	Cols               int
+	GamesMu            sync.RWMutex
+	PlayerCounter      int64 // Atomic counter for unique player IDs
+	Port               string
+	Server             *http.Server
+	Mux                *http.ServeMux            // Custom mux for this server
+	TokenManager       *TokenManager             // JWT token manager
+	Sessions           map[string]*ClientSession // IP -> ClientSession for tracking usernames
+	SessionsMu         sync.RWMutex
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -43,15 +45,17 @@ type ClientSession struct {
 func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
-		Games:        make(map[string]*Game),
-		CodeToGame:   make(map[string]*Game),
-		Buzzwords:    buzzwords,
-		Rows:         rows,
-		Cols:         cols,
-		Port:         port,
-		Mux:          mux,
-		TokenManager: NewTokenManager(""), // Will generate random secret
-		Sessions:     make(map[string]*ClientSession),
+		Games:              make(map[string]*Game),
+		CodeToGame:         make(map[string]*Game),
+		CodeToOriginalHost: make(map[string]string),
+		ArchivedGames:      make([]ArchivedGame, 0),
+		Buzzwords:          buzzwords,
+		Rows:               rows,
+		Cols:               cols,
+		Port:               port,
+		Mux:                mux,
+		TokenManager:       NewTokenManager(""), // Will generate random secret
+		Sessions:           make(map[string]*ClientSession),
 	}
 	srv.createNewGame()
 	return srv
@@ -76,7 +80,7 @@ func (s *Server) startHTTPServer() error {
 		Handler: s.Mux,
 	}
 
-	log.Printf("Server starting on port %s", s.Port)
+	log.Printf("Server listening on port %s", s.Port)
 	log.Printf("Running without TLS (using plain HTTP for testing)")
 	return s.Server.ListenAndServe()
 }
@@ -291,8 +295,15 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 	}
 
 	// Set HostID if this is the first player (no host yet)
+	// Note: AddPlayer already holds the lock, so we can safely access game state here
+	// But we need to set these after AddPlayer returns (lock is released)
 	if game.HostID == "" {
 		game.HostID = playerID
+		// Also set OriginalHostID if not already set (first time ever)
+		if game.OriginalHostID == "" {
+			game.OriginalHostID = playerID
+			log.Printf("👑 Player %s set as OriginalHostID for game %s with code %s", playerID, game.ID, game.Code)
+		}
 	}
 
 	return player, nil
@@ -301,18 +312,19 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 // sendWelcomeMessage sends the welcome message to a newly connected player with JWT token
 func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player, token string) error {
 	welcomeMsg := ServerMessage{
-		Type:      "welcome",
-		GameID:    game.ID,
-		Code:      game.Code,   // Phase 7.3: Include game code
-		HostID:    game.HostID, // Include host player ID
-		PlayerID:  player.ID,
-		Username:  player.ID, // username is the player ID
-		Token:     token,     // Include JWT token
-		Buzzwords: s.Buzzwords,
-		Rows:      s.Rows,
-		Cols:      s.Cols,
-		Players:   game.GetPlayerList(),
-		Message:   fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
+		Type:           "welcome",
+		GameID:         game.ID,
+		Code:           game.Code,           // Phase 7.3: Include game code
+		HostID:         game.HostID,         // Include current host player ID
+		OriginalHostID: game.OriginalHostID, // Include original host player ID
+		PlayerID:       player.ID,
+		Username:       player.ID, // username is the player ID
+		Token:          token,     // Include JWT token
+		Buzzwords:      s.Buzzwords,
+		Rows:           s.Rows,
+		Cols:           s.Cols,
+		Players:        game.GetPlayerList(),
+		Message:        fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
 	}
 
 	if err := websocket.JSON.Send(ws, welcomeMsg); err != nil {
@@ -331,6 +343,8 @@ func (s *Server) getOrCreateGame(code string, clientIP, serverIP string) (*Game,
 	// Phase 7.3: If code provided, look up game by code
 	if code != "" {
 		if game, exists := s.CodeToGame[code]; exists {
+			// Game exists - it's valid for the original host to rejoin or restart
+			// Any other player can only join if game is active
 			return game, nil
 		}
 		return nil, fmt.Errorf("invalid game code: %s", code)
@@ -374,12 +388,23 @@ func (s *Server) ReceivePlayerMessage(ws *websocket.Conn) (*ClientMessage, error
 
 // ProcessPlayerMessage handles a message from a player and logs any errors internally
 func (s *Server) ProcessPlayerMessage(game *Game, player *Player, msg *ClientMessage) {
-	if msg.Action != "win" {
-		return
-	}
-
-	if err := s.HandlePlayerWin(game, player); err != nil {
-		log.Printf("Error processing player message: %v", err)
+	switch msg.Action {
+	case "win":
+		if err := s.HandlePlayerWin(game, player); err != nil {
+			log.Printf("Error processing player message: %v", err)
+		}
+	case "restart":
+		if err := s.HandleGameRestart(game, player); err != nil {
+			log.Printf("Error restarting game: %v", err)
+			// Send error message back to the requesting player
+			errMsg := ServerMessage{
+				Type:    "error",
+				Message: fmt.Sprintf("❌ %v", err),
+			}
+			if err := player.SendMessage(errMsg); err != nil {
+				log.Printf("Failed to send error to player: %v", err)
+			}
+		}
 	}
 }
 
@@ -396,14 +421,19 @@ func (s *Server) HandlePlayerWin(game *Game, player *Player) error {
 	// Update game state
 	game.IsActive = false
 	game.Winner = player.ID
+	game.EndedAt = time.Now()
 	log.Printf("🏆 Player %s WON game %s!", player.ID, game.ID)
+
+	// Archive the completed game
+	s.archiveGame(game)
 
 	// Create and broadcast win message
 	winMsg := ServerMessage{
-		Type:    "game_ended",
-		GameID:  game.ID,
-		Winner:  player.ID,
-		Message: fmt.Sprintf("Player %s has won!", player.ID),
+		Type:           "game_ended",
+		GameID:         game.ID,
+		Winner:         player.ID,
+		OriginalHostID: game.OriginalHostID,
+		Message:        fmt.Sprintf("Player %s has won!", player.ID),
 	}
 
 	if err := s.BroadcastToGame(game.ID, winMsg); err != nil {
@@ -412,6 +442,60 @@ func (s *Server) HandlePlayerWin(game *Game, player *Player) error {
 
 	log.Printf("Broadcasted win for player %s to all players in game %s", player.ID, game.ID)
 	return nil
+}
+
+// HandleGameRestart allows the host to restart a completed game with the same code and fresh board
+func (s *Server) HandleGameRestart(game *Game, player *Player) error {
+	// Check if this is an abandoned game (no active host) - do this FIRST
+	if !game.IsActive && game.HostID == "" {
+		return fmt.Errorf("game was archived (host disconnected). Type 'q' to quit and contact the host (%s) for a new code", game.OriginalHostID)
+	}
+
+	// Only original host can restart
+	if player.ID != game.OriginalHostID {
+		return fmt.Errorf("only the original host can restart the game")
+	}
+
+	// Archive the current game session before resetting
+	s.archiveGame(game)
+
+	// Reset the game for a fresh session
+	game.ResetBoard(s.Buzzwords, s.Rows, s.Cols)
+
+	log.Printf("🔄 Host %s restarted game %s with code: %s", player.ID, game.ID, game.Code)
+
+	// Broadcast restart message to all players
+	restartMsg := ServerMessage{
+		Type:      "game_restart",
+		GameID:    game.ID,
+		Code:      game.Code,
+		HostID:    game.HostID,
+		Players:   game.GetPlayerList(),
+		Buzzwords: s.Buzzwords,
+		Rows:      s.Rows,
+		Cols:      s.Cols,
+		Message:   "Game restarted! New round begins.",
+	}
+	s.BroadcastToGame(game.ID, restartMsg)
+
+	return nil
+}
+
+// archiveGame saves a completed game session to the archive
+func (s *Server) archiveGame(game *Game) {
+	s.GamesMu.Lock()
+	defer s.GamesMu.Unlock()
+
+	archived := ArchivedGame{
+		ID:             game.ID,
+		Code:           game.Code,
+		OriginalHostID: game.OriginalHostID,
+		Winner:         game.Winner,
+		CreatedAt:      game.CreatedAt,
+		EndedAt:        time.Now(),
+	}
+	s.ArchivedGames = append(s.ArchivedGames, archived)
+	log.Printf("📋 Archived game %s (code: %s)", game.ID, game.Code)
 }
 
 // forwardPlayerMessages forwards messages from player's channel to their WebSocket connection
@@ -426,17 +510,66 @@ func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
 
 // HandlePlayerDisconnect removes player from game and closes the connection
 func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocket.Conn) error {
-	game.RemovePlayer(player.ID)
+	log.Printf("🔌 HandlePlayerDisconnect called for player %s, game %s (IsActive=%v, HostID=%s, OriginalHostID=%s)",
+		player.ID, game.ID, game.IsActive, game.HostID, game.OriginalHostID)
 
-	// Broadcast player update to remaining players
-	if game.IsActive && game.PlayerCount() > 0 {
+	game.RemovePlayer(player.ID)
+	playerCount := game.PlayerCount()
+	log.Printf("   After RemovePlayer: playerCount=%d", playerCount)
+
+	// Check if the original host is disconnecting and there are remaining players
+	// Send error message whether game is active or not
+	if player.ID == game.OriginalHostID && playerCount > 0 {
+		log.Printf("   ✓ Original host disconnected, %d player(s) remaining", playerCount)
+		// Notify remaining players that the original host has disconnected
+		errorMsg := ServerMessage{
+			Type:    "error",
+			GameID:  game.ID,
+			Code:    game.Code,
+			Message: fmt.Sprintf("game was archived (host disconnected). Type 'q' to quit and contact the host (%s) for a new code", game.OriginalHostID),
+			HostID:  game.OriginalHostID,
+		}
+		log.Printf("   📢 Broadcasting error message to remaining players")
+		s.BroadcastToGame(game.ID, errorMsg)
+		// Clear the host so we know the game is abandoned
+		game.HostID = ""
+
+		// Also broadcast player_update with updated player list (without the host)
 		updateMsg := ServerMessage{
 			Type:    "player_update",
 			GameID:  game.ID,
+			Code:    game.Code,
+			HostID:  game.HostID, // Now empty since we just cleared it
 			Players: game.GetPlayerList(),
 			Message: fmt.Sprintf("Player %s left the game", player.ID),
 		}
 		s.BroadcastToGame(game.ID, updateMsg)
+	} else if game.IsActive && playerCount > 0 {
+		// Broadcast player update to remaining players (only if game still active and non-host disconnected)
+		log.Printf("   ℹ️ Game still active, broadcasting player_update")
+		updateMsg := ServerMessage{
+			Type:    "player_update",
+			GameID:  game.ID,
+			Code:    game.Code,
+			HostID:  game.HostID,
+			Players: game.GetPlayerList(),
+			Message: fmt.Sprintf("Player %s left the game", player.ID),
+		}
+		s.BroadcastToGame(game.ID, updateMsg)
+	} else if !game.IsActive && playerCount > 0 {
+		// Also broadcast player_update for archived games so remaining players see updated list
+		log.Printf("   ℹ️ Game archived, broadcasting player_update to remaining players")
+		updateMsg := ServerMessage{
+			Type:    "player_update",
+			GameID:  game.ID,
+			Code:    game.Code,
+			HostID:  game.HostID,
+			Players: game.GetPlayerList(),
+			Message: fmt.Sprintf("Player %s left the game", player.ID),
+		}
+		s.BroadcastToGame(game.ID, updateMsg)
+	} else {
+		log.Printf("   ℹ️ No broadcast needed (IsActive=%v, playerCount=%d)", game.IsActive, playerCount)
 	}
 
 	if err := ws.Close(); err != nil {
@@ -483,8 +616,14 @@ func (s *Server) BroadcastToGame(gameID string, msg interface{}) error {
 	}
 	game.PlayersMu.RUnlock()
 
+	log.Printf("   📡 BroadcastToGame %s: sending to %d player(s)", gameID, len(playersCopy))
 	for _, player := range playersCopy {
-		_ = player.SendMessage(msg) // Non-blocking send
+		err := player.SendMessage(msg) // Non-blocking send
+		if err != nil {
+			log.Printf("     ⚠️ Failed to send to player %s: %v", player.ID, err)
+		} else {
+			log.Printf("     ✓ Message sent to player %s", player.ID)
+		}
 	}
 
 	return nil

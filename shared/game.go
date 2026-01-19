@@ -87,6 +87,11 @@ func (gs *GameSession) CheckWin() bool {
 	return false
 }
 
+// ClearMarks clears all marked cells on the board for a fresh game
+func (gs *GameSession) ClearMarks() {
+	gs.Board.Marked = make(map[string]bool)
+}
+
 // checkLineWin checks if 3 cells in a line are marked
 // startRow, startCol: starting position
 // dRow, dCol: direction (e.g., 0,1 for horizontal, 1,0 for vertical, 1,1 for diagonal)
