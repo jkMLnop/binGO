@@ -220,9 +220,6 @@ GitHub Actions will:
 (Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
 
 ## TODO
-- Phase 7.4: Host management & game lifecycle + board state recovery
-  - Host management & game lifecycle (reassignment on disconnect, game termination if only remote remain)
-  - Board state persistence (client-side storage for disconnect recovery)
-- Phase 7.5: Cloud deployment & CI/CD automation (Docker containerization, deploy to Fly.io or similar after Phase 7.4)
-- Phase 8: Security hardening & anti-abuse (rate limiting, DDoS mitigation, connection limits)
-- Phase 9: Features (leaderboards, classic 5x5 mode, chat)
+- **Phase 7.5**: Cloud deployment & CI/CD automation (Docker containerization, deploy to Fly.io)
+- **Phase 8**: Security hardening & anti-abuse (rate limiting, DDoS mitigation, connection limits)
+- **Phase 9**: Features (leaderboards, classic 5x5 mode, chat)
