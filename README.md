@@ -245,6 +245,20 @@ GitHub Actions will:
   - Use Fly.io persistent volume for SQLite data
   - Test: `./binGO-CLI -mode client -server bingoserver.live`
 
+- [ ] HTTP API for web client support
+  - `GET /api/game/:code` endpoint validates game code and returns metadata
+    ```
+    {
+      "id": "uuid-123",
+      "code": "ABC123",
+      "host": "alice",
+      "player_count": 2,
+      "status": "active",
+      "created_at": "2026-01-19T10:30:00Z"
+    }
+    ```
+  - Enables web client URL routing (bingoserver.live/game/ABC123) in Phase 11
+
 #### Phase 8: Production Hardening & Scaling
 **Goal:** Make cloud server reliable under load
 
@@ -288,7 +302,7 @@ GitHub Actions will:
 **Goal:** Support hosting games on cloud server; add leaderboards
 
 **Tasks:**
-- [ ] Client menu system
+- [ ] Client menu system (Host vs Join)
   ```
   Connect to bingoserver.live?
   1) Host a new game
@@ -296,6 +310,7 @@ GitHub Actions will:
   ```
   - Option 1: Server creates game, assigns code, display to user
   - Option 2: Prompt for code, validate, join
+  - Display game code in CLI (e.g., "Game code: ABC123")
 
 - [ ] Leaderboard queries
   - Query wins_history to display top players
@@ -329,9 +344,40 @@ GitHub Actions will:
   - Database failover scenarios
   - Performance benchmarking under load
 
+#### Phase 11: Web Client & Shareable Links
+**Goal:** Browser-based bingo client with URL-based game sharing (like Zoom meeting links)
+
+**Tasks:**
+- [ ] Web client (React + TypeScript)
+  - Game board UI (3x3 grid with click-to-mark)
+  - WebSocket integration (same protocol as CLI)
+  - Player list + join form
+  - Leaderboard display
+
+- [ ] Shareable links feature
+  - URL routing: `bingoserver.live/game/ABC123`
+  - Server `GET /api/game/:code` endpoint (added in Phase 7.5) validates code
+  - Web client pre-populates game code from URL
+  - Share button copies link to clipboard
+  - Works seamlessly from Phase 7.5 server endpoint
+
+- [ ] CLI integration
+  - When host creates game, display shareable link:
+    ```
+    Game created! Code: ABC123
+    Share this link: https://bingoserver.live/game/ABC123
+    Or use code with CLI: ./binGO-CLI -mode client -server bingoserver.live -code ABC123
+    ```
+
+- [ ] Mobile optimization
+  - Responsive design (works on phone/tablet)
+  - Touch-friendly board
+  - PWA features (offline fallback)
+
 ---
 
 **Notes:**
-- Phase 7.5 is prerequisite for 8, 9
+- Phase 7.5 is prerequisite for 8, 9, 11
 - Phase 10 can happen anytime after 7.5 (GameStore abstraction enables it)
+- Phase 11 requires Phase 7.5 `GET /api/game/:code` endpoint but can develop in parallel
 - All phases keep backward compatibility with existing v1.0.0 clients
