@@ -239,7 +239,7 @@ func runClient(serverAddr string, code string) {
 				os.Exit(0)
 
 			case "board":
-				player.HandleBoard(inputHandler)
+				player.HandleBoard()
 				printPrompt("")
 				continue
 
@@ -274,7 +274,7 @@ func runClient(serverAddr string, code string) {
 				continue
 
 			case "mark":
-				won, err := player.HandleMark(cellID, inputHandler, maxCellNum)
+				won, err := player.HandleMark(cellID, maxCellNum)
 				if err != nil {
 					fmt.Printf("Error: %v\n", err)
 					printPrompt("")

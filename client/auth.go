@@ -76,6 +76,14 @@ func (am *AuthManager) LoadSession(clientIP string) (username, token string, err
 	return session.Username, session.Token, nil
 }
 
+// sessionFilePath returns the path for a session file
+func (am *AuthManager) sessionFilePath(clientIP string) string {
+	// Sanitize IP for use in filename
+	sanitizedIP := strings.ReplaceAll(clientIP, ":", "-")
+	sanitizedIP = strings.ReplaceAll(sanitizedIP, "/", "-")
+	return filepath.Join(am.configDir, fmt.Sprintf("session-%s.json", sanitizedIP))
+}
+
 // PromptForUsername asks user for username or generates random one
 func (am *AuthManager) PromptForUsername(lastUsername string) (string, error) {
 	if lastUsername != "" {
@@ -119,14 +127,6 @@ func (am *AuthManager) PromptForReconnect(lastUsername string) (useLastUsername 
 	}
 
 	return false, nil
-}
-
-// sessionFilePath returns the path for a session file
-func (am *AuthManager) sessionFilePath(clientIP string) string {
-	// Sanitize IP for use in filename
-	sanitizedIP := strings.ReplaceAll(clientIP, ":", "-")
-	sanitizedIP = strings.ReplaceAll(sanitizedIP, "/", "-")
-	return filepath.Join(am.configDir, fmt.Sprintf("session-%s.json", sanitizedIP))
 }
 
 // generateRandomUsername creates a random username like "player-abc123"

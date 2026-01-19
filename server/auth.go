@@ -101,17 +101,3 @@ func generateRandomSecret(length int) string {
 	}
 	return string(secret)
 }
-
-// generateRandomUsername creates a random username like "player-abc123"
-func generateRandomUsername(prefix string, length int) (string, error) {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	randomPart := make([]byte, length)
-	for i := 0; i < length; i++ {
-		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
-		if err != nil {
-			return "", err
-		}
-		randomPart[i] = charset[num.Int64()]
-	}
-	return fmt.Sprintf("%s-%s", prefix, string(randomPart)), nil
-}

@@ -31,8 +31,8 @@ func NewPlayer(serverURL string) *Player {
 	}
 }
 
-// GetLocalIP retrieves the client's local IP address
-func (p *Player) GetLocalIP() string {
+// getLocalIP retrieves the client's local IP address
+func (p *Player) getLocalIP() string {
 	if p.ClientIP != "" {
 		return p.ClientIP
 	}
@@ -48,65 +48,6 @@ func (p *Player) GetLocalIP() string {
 	// Fallback
 	p.ClientIP = "localhost"
 	return p.ClientIP
-}
-
-// ConnectWithAuth handles the full authentication flow with token/username prompts
-// This is the main entry point for client connections
-// code parameter is for Phase 7.3 remote player joining (optional for localhost/LAN)
-func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
-	// Initialize auth manager
-	authMgr := NewAuthManager()
-
-	// Get local IP for session tracking
-	p.GetLocalIP()
-
-	// Try to load saved session
-	lastUsername, lastToken, _ := authMgr.LoadSession(p.ClientIP)
-
-	var username, token string
-
-	if lastToken != "" && lastUsername != "" {
-		// Ask if they want to reconnect
-		reuse, err := authMgr.PromptForReconnect(lastUsername)
-		if err != nil {
-			return ServerMessage{}, err
-		}
-
-		if reuse {
-			username = lastUsername
-			token = lastToken
-			log.Printf("Reconnecting as %s with saved token", username)
-		} else {
-			// User wants new username
-			newUsername, err := authMgr.PromptForUsername("")
-			if err != nil {
-				return ServerMessage{}, err
-			}
-			username = newUsername
-			token = "" // New login
-		}
-	} else {
-		// No saved session, prompt for username
-		newUsername, err := authMgr.PromptForUsername(lastUsername)
-		if err != nil {
-			return ServerMessage{}, err
-		}
-		username = newUsername
-		token = ""
-	}
-
-	// Connect to server with code (Phase 7.3)
-	welcomeMsg, err := p.Connect(username, token, code)
-	if err != nil {
-		return ServerMessage{}, err
-	}
-
-	// Save session for future use
-	if err := authMgr.SaveSession(p.ClientIP, p.Username, p.Token); err != nil {
-		log.Printf("Warning: failed to save session: %v", err)
-	}
-
-	return welcomeMsg, nil
 }
 
 // Connect establishes WebSocket connection to server and performs authentication handshake
@@ -177,14 +118,76 @@ func (p *Player) Connect(username string, token string, code string) (ServerMess
 	return welcomeMsg, nil
 }
 
-// HasWon checks if the player has a winning pattern using shared game logic
-func (p *Player) HasWon() bool {
-	return p.GameSession.CheckWin()
+// ConnectWithAuth handles the full authentication flow with token/username prompts
+// This is the main entry point for client connections
+// code parameter is for Phase 7.3 remote player joining (optional for localhost/LAN)
+func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
+	// Initialize auth manager
+	authMgr := NewAuthManager()
+
+	// Get local IP for session tracking
+	p.getLocalIP()
+
+	// Try to load saved session
+	lastUsername, lastToken, _ := authMgr.LoadSession(p.ClientIP)
+
+	var username, token string
+
+	if lastToken != "" && lastUsername != "" {
+		// Ask if they want to reconnect
+		reuse, err := authMgr.PromptForReconnect(lastUsername)
+		if err != nil {
+			return ServerMessage{}, err
+		}
+
+		if reuse {
+			username = lastUsername
+			token = lastToken
+			log.Printf("Reconnecting as %s with saved token", username)
+		} else {
+			// User wants new username
+			newUsername, err := authMgr.PromptForUsername("")
+			if err != nil {
+				return ServerMessage{}, err
+			}
+			username = newUsername
+			token = "" // New login
+		}
+	} else {
+		// No saved session, prompt for username
+		newUsername, err := authMgr.PromptForUsername(lastUsername)
+		if err != nil {
+			return ServerMessage{}, err
+		}
+		username = newUsername
+		token = ""
+	}
+
+	// Connect to server with code (Phase 7.3)
+	welcomeMsg, err := p.Connect(username, token, code)
+	if err != nil {
+		return ServerMessage{}, err
+	}
+
+	// Save session for future use
+	if err := authMgr.SaveSession(p.ClientIP, p.Username, p.Token); err != nil {
+		log.Printf("Warning: failed to save session: %v", err)
+	}
+
+	return welcomeMsg, nil
+}
+
+// Close closes the WebSocket connection
+func (p *Player) Close() error {
+	if p.WS != nil {
+		return p.WS.Close()
+	}
+	return nil
 }
 
 // AnnounceWin sends a win message to the server
 func (p *Player) AnnounceWin() error {
-	if !p.HasWon() {
+	if !p.hasWon() {
 		return fmt.Errorf("no winning pattern detected")
 	}
 
@@ -207,17 +210,14 @@ func (p *Player) ReceiveMessage() (ServerMessage, error) {
 	return msg, nil
 }
 
-// Close closes the WebSocket connection
-func (p *Player) Close() error {
-	if p.WS != nil {
-		return p.WS.Close()
-	}
-	return nil
+// hasWon checks if the player has a winning pattern using shared game logic
+func (p *Player) hasWon() bool {
+	return p.GameSession.CheckWin()
 }
 
 // HandleMark processes a mark command: validate, mark cell, check win
 // Returns true if player won, false otherwise
-func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, maxCellNum int) (bool, error) {
+func (p *Player) HandleMark(cellID string, maxCellNum int) (bool, error) {
 	// Mark the cell
 	if err := p.GameSession.Board.MarkCell(cellID); err != nil {
 		return false, err
@@ -242,7 +242,7 @@ func (p *Player) HandleMark(cellID string, inputHandler *shared.InputHandler, ma
 }
 
 // HandleBoard redisplays the current board with game info
-func (p *Player) HandleBoard(inputHandler *shared.InputHandler) {
+func (p *Player) HandleBoard() {
 	fmt.Print("\033[H\033[2J")
 	shared.DisplayBannerWithWidth(p.DisplayWidth)
 	shared.PrintBoard(p.GameSession.Board)
