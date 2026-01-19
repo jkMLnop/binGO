@@ -220,6 +220,92 @@ GitHub Actions will:
 (Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
 
 ## TODO
-- **Phase 7.5**: Cloud deployment & CI/CD automation (Docker containerization, deploy to Fly.io)
-- **Phase 8**: Security hardening & anti-abuse (rate limiting, DDoS mitigation, connection limits)
-- **Phase 9**: Features (leaderboards, classic 5x5 mode, chat)
+
+#### Phase 7.5: Production Database & Cloud Deployment
+**Goal:** Move from ngrok to persistent cloud server (bingoserver.live) with database
+
+**Tasks:**
+- [ ] Database schema (SQLite initially)
+  - `games` table: id, code, host_id, status, buzzwords (JSON), winner_id, created_at, ended_at, expires_at (4-day cleanup)
+  - `players` table: id, game_id, username, ip_address, is_host, joined_at, left_at
+  - `wins_history` table: player_username, game_code, won_at (survives game deletion for leaderboards)
+  
+- [ ] Abstract database layer (interface-based for future K8s migration)
+  - `db/store.go`: GameStore interface (CreateGame, GetGameByCode, UpdateGame, etc.)
+  - `db/sqlite.go`: SQLite implementation
+  - Design allows easy swap to PostgreSQL later without app changes
+
+- [ ] Docker containerization
+  - Dockerfile for server binary + SQLite
+  - docker-compose.yml for local testing
+  - Fly.io config for deployment
+
+- [ ] Deploy to Fly.io
+  - Point `bingoserver.live` DNS to Fly.io instance
+  - Use Fly.io persistent volume for SQLite data
+  - Test: `./binGO-CLI -mode client -server bingoserver.live`
+
+#### Phase 8: Production Hardening & Scaling
+**Goal:** Make cloud server reliable under load
+
+**Tasks:**
+- [ ] Multi-game stability testing
+  - Load test with dozens of concurrent games
+  - Verify game isolation (games don't interfere)
+  - Connection cleanup on client disconnect
+
+- [ ] Game lifecycle management
+  - Auto-cleanup: Delete games older than 4 days (after archiving to wins_history)
+  - Orphaned game detection (host left, no players remaining)
+  - Graceful shutdown handling
+
+- [ ] Security hardening
+  - Rate limiting (prevent code brute-force)
+  - DDoS mitigation (connection limits per IP)
+  - Logging/monitoring for abuse patterns
+
+#### Phase 9: Client Features & Improved UX
+**Goal:** Support hosting games on cloud server; add leaderboards
+
+**Tasks:**
+- [ ] Client menu system
+  ```
+  Connect to bingoserver.live?
+  1) Host a new game
+  2) Join existing game (with code)
+  ```
+  - Option 1: Server creates game, assigns code, display to user
+  - Option 2: Prompt for code, validate, join
+
+- [ ] Leaderboard queries
+  - Query wins_history to display top players
+  - Display personal stats (wins, games played)
+
+- [ ] Updated help text with new commands
+
+#### Phase 10: Kubernetes & Scaling (Future)
+**Goal:** Run multiple server instances with shared database
+
+**Tasks:**
+- [ ] PostgreSQL migration
+  - Replace SQLite with PostgreSQL (same schema)
+  - Use prepared statements for connection pooling
+  - No app code changes needed (thanks to GameStore interface)
+
+- [ ] Kubernetes deployment
+  - Helm chart for server deployment
+  - Persistent volume claims for PostgreSQL
+  - Service mesh / ingress configuration
+  - Horizontal pod autoscaling
+
+- [ ] Testing under K8s
+  - Multi-replica game coordination
+  - Database failover scenarios
+  - Performance benchmarking
+
+---
+
+**Notes:**
+- Phase 7.5 is prerequisite for 8, 9
+- Phase 10 can happen anytime after 7.5 (GameStore abstraction enables it)
+- All phases keep backward compatibility with existing v1.0.0 clients
