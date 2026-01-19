@@ -6,31 +6,31 @@ import (
 	"time"
 )
 
-// MessageChannel represents a communication channel to a player
-type MessageChannel struct {
-	Send chan interface{}
+// messageChannel represents a communication channel to a player
+type messageChannel struct {
+	send chan interface{}
 }
 
 // Player represents a connected player in a game
 type Player struct {
 	ID       string
-	Messages *MessageChannel
+	messages *messageChannel
 }
 
-// NewPlayer creates a new player
-func NewPlayer(id string) *Player {
+// newPlayer creates a new player
+func newPlayer(id string) *Player {
 	return &Player{
 		ID: id,
-		Messages: &MessageChannel{
-			Send: make(chan interface{}, 25),
+		messages: &messageChannel{
+			send: make(chan interface{}, 25),
 		},
 	}
 }
 
-// SendMessage safely sends a message to the player
-func (p *Player) SendMessage(msg interface{}) error {
+// sendMessage safely sends a message to the player
+func (p *Player) sendMessage(msg interface{}) error {
 	select {
-	case p.Messages.Send <- msg:
+	case p.messages.send <- msg:
 		return nil
 	default:
 		return fmt.Errorf("player %s message channel full", p.ID)
@@ -121,26 +121,6 @@ func (g *Game) PlayerCount() int {
 	defer g.PlayersMu.RUnlock()
 
 	return len(g.Players)
-}
-
-// SetHostIP sets the host IP for this game
-func (g *Game) SetHostIP(ip string) {
-	g.HostIP = ip
-}
-
-// GetHostIP returns the host IP
-func (g *Game) GetHostIP() string {
-	return g.HostIP
-}
-
-// HasLocalPlayers checks if there are any players from localhost or LAN
-func (g *Game) HasLocalPlayers(serverIP string) bool {
-	g.PlayersMu.RLock()
-	defer g.PlayersMu.RUnlock()
-
-	// This is a simplified check - in reality we'd need to track player IPs
-	// For now, we check if HostIP is set (indicating at least one local player)
-	return g.HostIP != ""
 }
 
 // ResetBoard clears all players and resets game state for the next round

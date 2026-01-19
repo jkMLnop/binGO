@@ -81,7 +81,7 @@ func extractIPFromAddr(addr string) string {
 	if strings.HasPrefix(addr, "[") {
 		endBracket := strings.Index(addr, "]")
 		if endBracket != -1 {
-			return strings.TrimPrefix(addr[:endBracket+1], "[")
+			return addr[1:endBracket]
 		}
 	}
 	// Handle IPv4 with port: 192.168.1.1:8080

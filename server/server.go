@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -25,7 +24,6 @@ type Server struct {
 	Rows               int
 	Cols               int
 	GamesMu            sync.RWMutex
-	PlayerCounter      int64 // Atomic counter for unique player IDs
 	Port               string
 	Server             *http.Server
 	Mux                *http.ServeMux            // Custom mux for this server
@@ -109,13 +107,13 @@ func (s *Server) createNewGame() {
 
 // wsHandler handles incoming WebSocket connections - orchestrates the connection lifecycle
 func (s *Server) wsHandler(ws *websocket.Conn) {
-	player, game, err := s.HandlePlayerConnect(ws)
+	player, game, err := s.handlePlayerConnect(ws)
 	if err != nil {
 		log.Printf("Error handling player connect: %v", err)
 		return
 	}
 	defer func() {
-		if err := s.HandlePlayerDisconnect(game, player, ws); err != nil {
+		if err := s.handlePlayerDisconnect(game, player, ws); err != nil {
 			log.Printf("Error during disconnect: %v", err)
 		}
 	}()
@@ -125,25 +123,23 @@ func (s *Server) wsHandler(ws *websocket.Conn) {
 
 	// Listen for incoming messages from player
 	for {
-		msg, err := s.ReceivePlayerMessage(ws)
+		msg, err := s.receivePlayerMessage(ws)
 		if err != nil {
 			log.Printf("Player %s disconnected: %v", player.ID, err)
 			break
 		}
 
-		s.ProcessPlayerMessage(game, player, msg)
+		s.processPlayerMessage(game, player, msg)
 	}
 }
 
-// HandlePlayerConnect authenticates and welcomes a player, returns player and game or error
-func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error) {
+// handlePlayerConnect authenticates and welcomes a player, returns player and game or error
+func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error) {
 	log.Printf("New WebSocket connection from %s", ws.Request().RemoteAddr)
 	r := ws.Request()
-
-	// Extract client IP
 	clientIP := s.extractClientIP(r)
 
-	// Receive login message with username or token
+	// Receive and authenticate login message
 	var loginMsg ClientMessage
 	if err := websocket.JSON.Receive(ws, &loginMsg); err != nil {
 		errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Failed to receive login: %v", err)}
@@ -152,56 +148,29 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, fmt.Errorf("failed to receive login: %w", err)
 	}
 
-	// Authenticate player and get username
-	var username string
-	var err error
-
-	if loginMsg.Token != "" {
-		// Token-based authentication (reconnect)
-		username, err = s.TokenManager.VerifyToken(loginMsg.Token, clientIP)
-		if err != nil {
-			errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Invalid token: %v", err)}
-			websocket.JSON.Send(ws, errMsg)
-			ws.Close()
-			return nil, nil, fmt.Errorf("invalid token: %w", err)
-		}
-		log.Printf("Player %s re-authenticated with token from IP %s", username, clientIP)
-	} else if loginMsg.Username != "" {
-		// Username-based login
-		username = loginMsg.Username
-		log.Printf("Player logging in with username: %s from IP %s", username, clientIP)
-	} else {
-		errMsg := ServerMessage{Type: "error", Message: "Username or token required"}
-		websocket.JSON.Send(ws, errMsg)
-		ws.Close()
-		return nil, nil, fmt.Errorf("no username or token provided")
-	}
-
-	// Update session for this IP
-	s.storeSession(clientIP, username)
-
-	// Issue new token
-	token, err := s.TokenManager.IssueToken(username, clientIP, 24) // 24 hour expiration
+	username, err := s.authenticatePlayer(ws, loginMsg)
 	if err != nil {
-		errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Failed to issue token: %v", err)}
-		websocket.JSON.Send(ws, errMsg)
-		ws.Close()
-		return nil, nil, fmt.Errorf("failed to issue token: %w", err)
+		return nil, nil, err
 	}
 
-	// Phase 7.3: Get game code from query parameter or login message
+	// Store session and issue token
+	s.storeSession(clientIP, username)
+	token, err := s.issueAndStoreToken(ws, username, clientIP)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Get or create game
 	code := r.URL.Query().Get("code")
 	if code == "" && loginMsg.Code != "" {
 		code = loginMsg.Code
 	}
 
-	// Get server IP for classification (use localhost as default for IP comparison)
 	serverIP := "127.0.0.1"
 	if addr, err := net.ResolveTCPAddr("tcp", r.Host); err == nil {
 		serverIP = addr.IP.String()
 	}
 
-	// Get or create game with code-based lookup (Phase 7.3)
 	game, err := s.getOrCreateGame(code, clientIP, serverIP)
 	if err != nil {
 		errMsg := ServerMessage{Type: "error", Message: err.Error()}
@@ -210,7 +179,7 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, err
 	}
 
-	// Create and add player to game (use username as playerID)
+	// Create player and add to game
 	player, err := s.createPlayerInGame(game, username)
 	if err != nil {
 		errMsg := ServerMessage{Type: "error", Message: err.Error()}
@@ -221,15 +190,69 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 
 	log.Printf("Player %s joined game %s from IP %s via WebSocket", username, game.ID, clientIP)
 
-	// Send welcome message with token
-	if err := s.sendWelcomeMessage(ws, game, player, token); err != nil {
-		log.Printf("Error sending welcome message: %v", err)
+	// Send welcome and broadcast
+	if err := s.welcomeAndBroadcast(ws, game, player, token); err != nil {
+		log.Printf("Error in welcome/broadcast: %v", err)
 		game.RemovePlayer(username)
 		ws.Close()
 		return nil, nil, err
 	}
 
-	// Broadcast player update to all players in game (excluding the new player who just got welcome)
+	return player, game, nil
+}
+
+// authenticatePlayer validates login via token or username
+func (s *Server) authenticatePlayer(ws *websocket.Conn, loginMsg ClientMessage) (string, error) {
+	var username string
+	var err error
+
+	if loginMsg.Token != "" {
+		// Token-based authentication (reconnect)
+		clientIP := ""
+		if r := ws.Request(); r != nil {
+			clientIP = s.extractClientIP(r)
+		}
+		username, err = s.TokenManager.VerifyToken(loginMsg.Token, clientIP)
+		if err != nil {
+			errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Invalid token: %v", err)}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return "", fmt.Errorf("invalid token: %w", err)
+		}
+		log.Printf("Player %s re-authenticated with token", username)
+	} else if loginMsg.Username != "" {
+		// Username-based login
+		username = loginMsg.Username
+		log.Printf("Player logging in with username: %s", username)
+	} else {
+		errMsg := ServerMessage{Type: "error", Message: "Username or token required"}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
+		return "", fmt.Errorf("no username or token provided")
+	}
+
+	return username, nil
+}
+
+// issueAndStoreToken issues a new JWT token
+func (s *Server) issueAndStoreToken(ws *websocket.Conn, username, clientIP string) (string, error) {
+	token, err := s.TokenManager.IssueToken(username, clientIP, 24) // 24 hour expiration
+	if err != nil {
+		errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Failed to issue token: %v", err)}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
+		return "", fmt.Errorf("failed to issue token: %w", err)
+	}
+	return token, nil
+}
+
+// welcomeAndBroadcast sends welcome message and announces player to others
+func (s *Server) welcomeAndBroadcast(ws *websocket.Conn, game *Game, player *Player, token string) error {
+	if err := s.sendWelcomeMessage(ws, game, player, token); err != nil {
+		return err
+	}
+
+	// Broadcast player update to all players in game
 	updateMsg := ServerMessage{
 		Type:    "player_update",
 		GameID:  game.ID,
@@ -238,9 +261,7 @@ func (s *Server) HandlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		Players: game.GetPlayerList(),
 		Message: fmt.Sprintf("Player %s joined the game", player.ID),
 	}
-	s.BroadcastToGame(game.ID, updateMsg)
-
-	return player, game, nil
+	return s.broadcastToGame(game.ID, updateMsg)
 }
 
 // extractClientIP extracts the client IP from the request
@@ -267,29 +288,9 @@ func (s *Server) storeSession(clientIP, username string) {
 	}
 }
 
-// getStoredUsername retrieves the stored username for an IP, or empty string if not found
-func (s *Server) getStoredUsername(clientIP string) string {
-	s.SessionsMu.RLock()
-	defer s.SessionsMu.RUnlock()
-	if session, exists := s.Sessions[clientIP]; exists {
-		return session.Username
-	}
-	return ""
-}
-
-// extractPlayerID gets player ID from request or generates a new one (deprecated, kept for compatibility)
-func (s *Server) extractPlayerID(r *http.Request) string {
-	playerID := r.URL.Query().Get("id")
-	if playerID == "" {
-		newID := atomic.AddInt64(&s.PlayerCounter, 1)
-		playerID = fmt.Sprintf("player-%d", newID)
-	}
-	return playerID
-}
-
 // createPlayerInGame creates a new player and adds them to the game
 func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error) {
-	player := NewPlayer(playerID)
+	player := newPlayer(playerID)
 	if err := game.AddPlayer(player); err != nil {
 		return nil, err
 	}
@@ -377,8 +378,8 @@ func (s *Server) getOrCreateGame(code string, clientIP, serverIP string) (*Game,
 	return nil, fmt.Errorf("remote connections require a game code")
 }
 
-// ReceivePlayerMessage reads and returns the next message from the WebSocket connection
-func (s *Server) ReceivePlayerMessage(ws *websocket.Conn) (*ClientMessage, error) {
+// receivePlayerMessage reads and returns the next message from the WebSocket connection
+func (s *Server) receivePlayerMessage(ws *websocket.Conn) (*ClientMessage, error) {
 	var msg ClientMessage
 	if err := websocket.JSON.Receive(ws, &msg); err != nil {
 		return nil, err
@@ -386,30 +387,30 @@ func (s *Server) ReceivePlayerMessage(ws *websocket.Conn) (*ClientMessage, error
 	return &msg, nil
 }
 
-// ProcessPlayerMessage handles a message from a player and logs any errors internally
-func (s *Server) ProcessPlayerMessage(game *Game, player *Player, msg *ClientMessage) {
+// processPlayerMessage handles a message from a player and logs any errors internally
+func (s *Server) processPlayerMessage(game *Game, player *Player, msg *ClientMessage) {
 	switch msg.Action {
 	case "win":
-		if err := s.HandlePlayerWin(game, player); err != nil {
+		if err := s.handlePlayerWin(game, player); err != nil {
 			log.Printf("Error processing player message: %v", err)
 		}
 	case "restart":
-		if err := s.HandleGameRestart(game, player); err != nil {
+		if err := s.handleGameRestart(game, player); err != nil {
 			log.Printf("Error restarting game: %v", err)
 			// Send error message back to the requesting player
 			errMsg := ServerMessage{
 				Type:    "error",
 				Message: fmt.Sprintf("❌ %v", err),
 			}
-			if err := player.SendMessage(errMsg); err != nil {
+			if err := player.sendMessage(errMsg); err != nil {
 				log.Printf("Failed to send error to player: %v", err)
 			}
 		}
 	}
 }
 
-// HandlePlayerWin processes a win announcement from a player
-func (s *Server) HandlePlayerWin(game *Game, player *Player) error {
+// handlePlayerWin processes a win announcement from a player
+func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 	log.Printf("Player %s announced a win!", player.ID)
 
 	// Verify player exists in game
@@ -436,7 +437,7 @@ func (s *Server) HandlePlayerWin(game *Game, player *Player) error {
 		Message:        fmt.Sprintf("Player %s has won!", player.ID),
 	}
 
-	if err := s.BroadcastToGame(game.ID, winMsg); err != nil {
+	if err := s.broadcastToGame(game.ID, winMsg); err != nil {
 		return err
 	}
 
@@ -444,8 +445,8 @@ func (s *Server) HandlePlayerWin(game *Game, player *Player) error {
 	return nil
 }
 
-// HandleGameRestart allows the host to restart a completed game with the same code and fresh board
-func (s *Server) HandleGameRestart(game *Game, player *Player) error {
+// handleGameRestart allows the host to restart a completed game with the same code and fresh board
+func (s *Server) handleGameRestart(game *Game, player *Player) error {
 	// Check if this is an abandoned game (no active host) - do this FIRST
 	if !game.IsActive && game.HostID == "" {
 		return fmt.Errorf("game was archived (host disconnected). Type 'q' to quit and contact the host (%s) for a new code", game.OriginalHostID)
@@ -476,7 +477,7 @@ func (s *Server) HandleGameRestart(game *Game, player *Player) error {
 		Cols:      s.Cols,
 		Message:   "Game restarted! New round begins.",
 	}
-	s.BroadcastToGame(game.ID, restartMsg)
+	s.broadcastToGame(game.ID, restartMsg)
 
 	return nil
 }
@@ -500,7 +501,7 @@ func (s *Server) archiveGame(game *Game) {
 
 // forwardPlayerMessages forwards messages from player's channel to their WebSocket connection
 func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
-	for msg := range player.Messages.Send {
+	for msg := range player.messages.send {
 		if err := websocket.JSON.Send(ws, msg); err != nil {
 			log.Printf("Error sending message to %s: %v", player.ID, err)
 			return
@@ -508,8 +509,8 @@ func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
 	}
 }
 
-// HandlePlayerDisconnect removes player from game and closes the connection
-func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocket.Conn) error {
+// handlePlayerDisconnect removes player from game and closes the connection
+func (s *Server) handlePlayerDisconnect(game *Game, player *Player, ws *websocket.Conn) error {
 	log.Printf("🔌 HandlePlayerDisconnect called for player %s, game %s (IsActive=%v, HostID=%s, OriginalHostID=%s)",
 		player.ID, game.ID, game.IsActive, game.HostID, game.OriginalHostID)
 
@@ -517,11 +518,21 @@ func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocke
 	playerCount := game.PlayerCount()
 	log.Printf("   After RemovePlayer: playerCount=%d", playerCount)
 
-	// Check if the original host is disconnecting and there are remaining players
-	// Send error message whether game is active or not
-	if player.ID == game.OriginalHostID && playerCount > 0 {
+	// Broadcast disconnection messages if players remain
+	if playerCount > 0 {
+		s.broadcastDisconnectionMessages(game, player)
+	}
+
+	return s.closeConnection(ws, player)
+}
+
+// broadcastDisconnectionMessages notifies remaining players about the disconnection
+func (s *Server) broadcastDisconnectionMessages(game *Game, player *Player) {
+	playerCount := game.PlayerCount()
+
+	// Host disconnection - notify everyone
+	if player.ID == game.OriginalHostID {
 		log.Printf("   ✓ Original host disconnected, %d player(s) remaining", playerCount)
-		// Notify remaining players that the original host has disconnected
 		errorMsg := ServerMessage{
 			Type:    "error",
 			GameID:  game.ID,
@@ -530,53 +541,44 @@ func (s *Server) HandlePlayerDisconnect(game *Game, player *Player, ws *websocke
 			HostID:  game.OriginalHostID,
 		}
 		log.Printf("   📢 Broadcasting error message to remaining players")
-		s.BroadcastToGame(game.ID, errorMsg)
+		s.broadcastToGame(game.ID, errorMsg)
+
 		// Clear the host so we know the game is abandoned
 		game.HostID = ""
 
-		// Also broadcast player_update with updated player list (without the host)
+		// Broadcast player_update with updated list
 		updateMsg := ServerMessage{
 			Type:    "player_update",
 			GameID:  game.ID,
 			Code:    game.Code,
-			HostID:  game.HostID, // Now empty since we just cleared it
+			HostID:  game.HostID, // Now empty
 			Players: game.GetPlayerList(),
 			Message: fmt.Sprintf("Player %s left the game", player.ID),
 		}
-		s.BroadcastToGame(game.ID, updateMsg)
-	} else if game.IsActive && playerCount > 0 {
-		// Broadcast player update to remaining players (only if game still active and non-host disconnected)
-		log.Printf("   ℹ️ Game still active, broadcasting player_update")
-		updateMsg := ServerMessage{
-			Type:    "player_update",
-			GameID:  game.ID,
-			Code:    game.Code,
-			HostID:  game.HostID,
-			Players: game.GetPlayerList(),
-			Message: fmt.Sprintf("Player %s left the game", player.ID),
-		}
-		s.BroadcastToGame(game.ID, updateMsg)
-	} else if !game.IsActive && playerCount > 0 {
-		// Also broadcast player_update for archived games so remaining players see updated list
-		log.Printf("   ℹ️ Game archived, broadcasting player_update to remaining players")
-		updateMsg := ServerMessage{
-			Type:    "player_update",
-			GameID:  game.ID,
-			Code:    game.Code,
-			HostID:  game.HostID,
-			Players: game.GetPlayerList(),
-			Message: fmt.Sprintf("Player %s left the game", player.ID),
-		}
-		s.BroadcastToGame(game.ID, updateMsg)
-	} else {
-		log.Printf("   ℹ️ No broadcast needed (IsActive=%v, playerCount=%d)", game.IsActive, playerCount)
+		s.broadcastToGame(game.ID, updateMsg)
+		return
 	}
 
+	// Non-host disconnection - send player_update
+	log.Printf("   ℹ️ Non-host player disconnected, broadcasting player_update")
+	updateMsg := ServerMessage{
+		Type:    "player_update",
+		GameID:  game.ID,
+		Code:    game.Code,
+		HostID:  game.HostID,
+		Players: game.GetPlayerList(),
+		Message: fmt.Sprintf("Player %s left the game", player.ID),
+	}
+	s.broadcastToGame(game.ID, updateMsg)
+}
+
+// closeConnection closes the WebSocket and logs
+func (s *Server) closeConnection(ws *websocket.Conn, player *Player) error {
 	if err := ws.Close(); err != nil {
 		log.Printf("Error closing connection for player %s: %v", player.ID, err)
 		return err
 	}
-	log.Printf("Player %s disconnected from game %s", player.ID, game.ID)
+	log.Printf("Player %s disconnected", player.ID)
 	return nil
 }
 
@@ -599,8 +601,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(statusData)
 }
 
-// BroadcastToGame sends a message to all players in a game
-func (s *Server) BroadcastToGame(gameID string, msg interface{}) error {
+// broadcastToGame sends a message to all players in a game
+func (s *Server) broadcastToGame(gameID string, msg interface{}) error {
 	s.GamesMu.RLock()
 	game, exists := s.Games[gameID]
 	s.GamesMu.RUnlock()
@@ -618,7 +620,7 @@ func (s *Server) BroadcastToGame(gameID string, msg interface{}) error {
 
 	log.Printf("   📡 BroadcastToGame %s: sending to %d player(s)", gameID, len(playersCopy))
 	for _, player := range playersCopy {
-		err := player.SendMessage(msg) // Non-blocking send
+		err := player.sendMessage(msg) // Non-blocking send
 		if err != nil {
 			log.Printf("     ⚠️ Failed to send to player %s: %v", player.ID, err)
 		} else {
