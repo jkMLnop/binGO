@@ -42,7 +42,7 @@ func findBuzzwordsFile() ([][]string, error) {
 }
 
 // createTestGame creates a new game session for testing (3x3 speed bingo)
-func createTestGame(t *testing.T) *shared.GameSession {
+func createTestGame(t *testing.T) *shared.Board {
 	buzzwords, err := findBuzzwordsFile()
 	if err != nil {
 		t.Fatalf("Failed to load buzzwords: %v", err)

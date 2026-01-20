@@ -24,14 +24,14 @@ func testBuzzwords() [][]string {
 }
 
 func TestPlayerCreation(t *testing.T) {
-	player := NewPlayer("player-1")
+	player := newPlayer("player-1")
 
 	if player.ID != "player-1" {
 		t.Errorf("Expected player ID 'player-1', got %s", player.ID)
 	}
 
-	if player.Messages == nil {
-		t.Error("Expected Messages channel to be initialized")
+	if player.messages == nil {
+		t.Error("Expected messages channel to be initialized")
 	}
 }
 
@@ -57,7 +57,7 @@ func TestAddPlayerToGame(t *testing.T) {
 	buzzwords := testBuzzwords()
 
 	game := NewGame("game-1", buzzwords, 3, 3)
-	player := NewPlayer("player-1")
+	player := newPlayer("player-1")
 
 	err := game.AddPlayer(player)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestDuplicatePlayerError(t *testing.T) {
 	buzzwords := testBuzzwords()
 
 	game := NewGame("game-1", buzzwords, 3, 3)
-	player := NewPlayer("player-1")
+	player := newPlayer("player-1")
 
 	err1 := game.AddPlayer(player)
 	if err1 != nil {
@@ -123,8 +123,8 @@ func TestGetPlayerList(t *testing.T) {
 	buzzwords := testBuzzwords()
 
 	game := NewGame("game-1", buzzwords, 3, 3)
-	player1 := NewPlayer("player-1")
-	player2 := NewPlayer("player-2")
+	player1 := newPlayer("player-1")
+	player2 := newPlayer("player-2")
 
 	game.AddPlayer(player1)
 	game.AddPlayer(player2)

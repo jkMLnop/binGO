@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -98,7 +99,7 @@ func runClient(serverAddr string, code string) {
 	player.GameSession = shared.NewGameSession(welcomeMsg.Buzzwords, welcomeMsg.Rows, welcomeMsg.Cols)
 
 	// Calculate display width based on board size
-	player.DisplayWidth = shared.CalculateBoardWidth(player.GameSession.Board.Cols, player.GameSession.Board.ColWidths)
+	player.DisplayWidth = shared.CalculateBoardWidth(player.GameSession.Cols, player.GameSession.ColWidths)
 
 	// Store welcome message for later display
 	player.WelcomeMsg = welcomeMsg
@@ -109,9 +110,9 @@ func runClient(serverAddr string, code string) {
 	// Channel for server messages (so we can select on it)
 	serverMsgChan := make(chan client.ServerMessage, 10)
 
-	// Create input handler for the board dimensions
+	// Calculate max cell number for the board dimensions
 	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
-	inputHandler := shared.NewInputHandler(maxCellNum, "\nEnter a number (1-"+strconv.Itoa(maxCellNum)+") to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:")
+	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:"
 
 	// === Setup Server Listener ===
 	// Spawn goroutine to listen for server messages
@@ -131,13 +132,33 @@ func runClient(serverAddr string, code string) {
 	// === Setup Input Listener ===
 	// Spawn goroutine to read user input (non-blocking)
 	go func() {
-		for {
-			cellID, command, _ := inputHandler.ProcessInput()
-			// Encode the result as "command:cellID" or just "command"
-			if command == "mark" {
-				inputChan <- "mark:" + cellID
-			} else {
-				inputChan <- command
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			input := strings.TrimSpace(scanner.Text())
+			if input == "" {
+				continue
+			}
+
+			// Check for text commands first
+			switch input {
+			case "q", "quit":
+				inputChan <- "quit"
+			case "board":
+				inputChan <- "board"
+			case "win":
+				inputChan <- "win"
+			case "restart":
+				inputChan <- "restart"
+			case "help":
+				inputChan <- "help"
+			default:
+				// Try to parse as numeric cell ID
+				cellNum, err := strconv.Atoi(input)
+				if err != nil || cellNum < 1 || cellNum > maxCellNum {
+					inputChan <- "invalid"
+				} else {
+					inputChan <- "mark:" + strconv.Itoa(cellNum)
+				}
 			}
 		}
 	}()
@@ -173,17 +194,17 @@ func runClient(serverAddr string, code string) {
 				warningMessage = msg.Message
 				fmt.Print("\033[H\033[2J")
 				shared.DisplayBannerWithWidth(player.DisplayWidth)
-				shared.PrintBoard(player.GameSession.Board)
+				shared.PrintBoard(player.GameSession)
 				player.DisplayWelcome(player.WelcomeMsg)
-				printPrompt(inputHandler.PromptMessage())
+				printPrompt(promptMsg)
 			case "player_update":
 				// Update welcome message with new player list and redraw
 				player.WelcomeMsg = msg
 				fmt.Print("\033[H\033[2J")
 				shared.DisplayBannerWithWidth(player.DisplayWidth)
-				shared.PrintBoard(player.GameSession.Board)
+				shared.PrintBoard(player.GameSession)
 				player.DisplayWelcome(player.WelcomeMsg)
-				printPrompt(inputHandler.PromptMessage())
+				printPrompt(promptMsg)
 			case "game_ended":
 				player.DisplayGameEnd(msg)
 				// Show restart option if user is original host
@@ -213,9 +234,9 @@ func runClient(serverAddr string, code string) {
 				log.Println("DEBUG: Clearing screen and displaying board")
 				fmt.Print("\033[H\033[2J")
 				shared.DisplayBannerWithWidth(player.DisplayWidth)
-				shared.PrintBoard(player.GameSession.Board)
+				shared.PrintBoard(player.GameSession)
 				player.DisplayWelcome(player.WelcomeMsg)
-				fmt.Println("\n🔄 New round started! " + inputHandler.PromptMessage())
+				fmt.Println("\n🔄 New round started! " + promptMsg)
 				fmt.Print("> ")
 			}
 
@@ -269,7 +290,7 @@ func runClient(serverAddr string, code string) {
 				continue
 
 			case "invalid":
-				player.HandleInvalidInput(inputHandler, maxCellNum)
+				fmt.Printf("Invalid input. Please enter a number between 1-%d, or type 'help' for commands.\n", maxCellNum)
 				printPrompt("")
 				continue
 
@@ -299,7 +320,7 @@ func runClient(serverAddr string, code string) {
 
 				// Small delay to allow messages from server to be printed
 				time.Sleep(100 * time.Millisecond)
-				printPrompt(inputHandler.PromptMessage())
+				printPrompt(promptMsg)
 			}
 		}
 	}

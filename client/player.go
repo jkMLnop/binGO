@@ -18,10 +18,10 @@ type Player struct {
 	GameID       string
 	PlayerID     string
 	Username     string
-	Token        string              // JWT token for re-authentication
-	GameSession  *shared.GameSession // Use shared game logic (includes Board with Rows/Cols)
-	DisplayWidth int                 // Cached display width for consistent rendering
-	WelcomeMsg   ServerMessage       // Store welcome message for later display
+	Token        string        // JWT token for re-authentication
+	GameSession  *shared.Board // Bingo board with game state
+	DisplayWidth int           // Cached display width for consistent rendering
+	WelcomeMsg   ServerMessage // Store welcome message for later display
 }
 
 // NewPlayer creates a new player client
@@ -219,14 +219,14 @@ func (p *Player) hasWon() bool {
 // Returns true if player won, false otherwise
 func (p *Player) HandleMark(cellID string, maxCellNum int) (bool, error) {
 	// Mark the cell
-	if err := p.GameSession.Board.MarkCell(cellID); err != nil {
+	if err := p.GameSession.MarkCell(cellID); err != nil {
 		return false, err
 	}
 
 	// Clear screen and redraw banner + board
 	fmt.Print("\033[H\033[2J")
 	shared.DisplayBannerWithWidth(p.DisplayWidth)
-	shared.PrintBoard(p.GameSession.Board)
+	shared.PrintBoard(p.GameSession)
 
 	// Display game info below board
 	p.DisplayWelcome(p.WelcomeMsg)
@@ -245,7 +245,7 @@ func (p *Player) HandleMark(cellID string, maxCellNum int) (bool, error) {
 func (p *Player) HandleBoard() {
 	fmt.Print("\033[H\033[2J")
 	shared.DisplayBannerWithWidth(p.DisplayWidth)
-	shared.PrintBoard(p.GameSession.Board)
+	shared.PrintBoard(p.GameSession)
 
 	// Display game info below board
 	p.DisplayWelcome(p.WelcomeMsg)
@@ -254,6 +254,6 @@ func (p *Player) HandleBoard() {
 }
 
 // HandleInvalidInput displays an error message for invalid input
-func (p *Player) HandleInvalidInput(inputHandler *shared.InputHandler, maxCellNum int) {
-	fmt.Println(inputHandler.InvalidInputMessage(maxCellNum))
+func (p *Player) HandleInvalidInput(maxCellNum int) {
+	fmt.Printf("Invalid input. Please enter a number between 1-%d, or type 'help' for commands.\n", maxCellNum)
 }

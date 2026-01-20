@@ -174,12 +174,13 @@ binGO-CLI/
 │   ├── types.go           # Message types
 │   └── server_test.go     # Unit tests
 ├── shared/                # Shared game logic (all modes)
-│   ├── board.go           # Board management & cell marking
-│   ├── display.go         # Terminal rendering
-│   ├── game.go            # Game session & win detection
-│   ├── shared_test.go     # 37 unit tests (board, win detection, display)
-│   ├── types.go           # Type definitions
-│   └── utils.go           # CSV loading utilities
+│   ├── board.go           # Board management, cell marking, win detection
+│   ├── board_test.go      # Tests for board operations and game logic
+│   ├── display.go         # Terminal rendering and formatting
+│   ├── display_test.go    # Tests for display functions
+│   ├── utils.go           # CSV loading utilities
+│   ├── utils_test.go      # Tests for file I/O operations
+│   └── types.go           # Type definitions
 ├── standalone/            # Single-player mode
 │   └── player.go          # Game loop & input handling
 ├── tests/                 # Integration tests

@@ -112,12 +112,6 @@ func DisplayBannerWithWidth(totalWidth int) {
 	}
 }
 
-// DisplayBanner prints the binGO-CLI ASCII art banner (uses default width)
-func DisplayBanner() {
-	// Default width - will be overridden by DisplayBannerWithWidth when called from game
-	DisplayBannerWithWidth(116)
-}
-
 // CenterText returns the text centered within the given width using the specified padding character
 // If no padding character is provided, defaults to space
 func CenterText(text string, width int, paddingChar ...string) string {
@@ -273,25 +267,6 @@ func FormatBoard(board *Board) []string {
 	}
 
 	return output
-}
-
-// PrintBoardWithWidth displays the bingo board and banner at a consistent width
-func PrintBoardWithWidth(board *Board) {
-	// Calculate the board's natural width
-	boardWidth := CalculateBoardWidth(board.Cols, board.ColWidths)
-
-	// Banner width is always 42 + padding
-	bannerWidth := 42
-
-	// Use whichever is wider
-	totalWidth := boardWidth
-	if bannerWidth+10 > boardWidth {
-		totalWidth = boardWidth
-	}
-
-	// Display banner and board at the calculated width
-	DisplayBannerWithWidth(totalWidth)
-	PrintBoard(board)
 }
 
 // PrintBoard displays the bingo board with optional strikethrough for marked cells
