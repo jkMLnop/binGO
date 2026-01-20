@@ -227,6 +227,7 @@ GitHub Actions will:
 
 **Tasks:**
 - [ ] Database schema (SQLite initially)
+  - `hosts` table: id, username, approved_buzzwords (JSON), created_at
   - `games` table: id, code, host_id, status, buzzwords (JSON), winner_id, created_at, ended_at, expires_at (4-day cleanup)
   - `players` table: id, game_id, username, ip_address, is_host, joined_at, left_at
   - `wins_history` table: player_username, game_code, won_at (survives game deletion for leaderboards)
@@ -300,7 +301,7 @@ GitHub Actions will:
     - Database connection pool exhaustion
 
 #### Phase 9: Client Features & Improved UX
-**Goal:** Support hosting games on cloud server; add leaderboards
+**Goal:** Support hosting games on cloud server; add leaderboards; support custom buzzword lists
 
 **Tasks:**
 - [ ] Client menu system (Host vs Join)
@@ -309,9 +310,23 @@ GitHub Actions will:
   1) Host a new game
   2) Join existing game (with code)
   ```
-  - Option 1: Server creates game, assigns code, display to user
-  - Option 2: Prompt for code, validate, join
+  - Option 1: Host workflow
+    - Prompt: "Enter path to JSON buzzword file (or 'skip' for defaults)"
+    - If path provided: Validate JSON format, upload to server
+    - If skip: Use default buzzwords.csv
+    - Server creates game, assigns code, display to user
+  - Option 2: Join workflow
+    - Prompt for code, validate, join
   - Display game code in CLI (e.g., "Game code: ABC123")
+
+- [ ] Buzzword suggestion system (in-game)
+  - Players suggest via chat: `add_new_phrase <phrase>`
+  - Suggestions ephemeral (in-memory only, no DB storage)
+  - Host approves: `approve <phrase>` → adds to both current game AND host profile, saves to DB
+  - Host rejects: `reject <phrase>` → discarded immediately (not stored)
+  - When host creates new game: Inherits approved buzzwords from their profile
+  - Host can also upload custom JSON on game creation (overrides their profile list)
+  - Chat UI displays suggestion broadcasts and outcomes
 
 - [ ] Leaderboard queries
   - Query wins_history to display top players
