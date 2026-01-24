@@ -31,7 +31,7 @@ type Server struct {
 	TokenManager       *TokenManager             // JWT token manager
 	Sessions           map[string]*ClientSession // IP -> ClientSession for tracking usernames
 	SessionsMu         sync.RWMutex
-	DB                 db.GameStore              // Database store (Phase 7.5)
+	DB                 db.GameStore // Database store (Phase 7.5)
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -111,6 +111,12 @@ func (s *Server) createNewGame() {
 	s.CurrentGame = newGame
 
 	log.Printf("Created new game: %s with code: %s", gameID, newGame.Code)
+
+	// Save game to database (Phase 7.5)
+	ctx := context.Background()
+	if err := SaveGameToDB(ctx, s.DB, newGame, s.Buzzwords); err != nil {
+		log.Printf("Warning: failed to save game to DB: %v", err)
+	}
 }
 
 // wsHandler handles incoming WebSocket connections - orchestrates the connection lifecycle
@@ -306,12 +312,31 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 	// Set HostID if this is the first player (no host yet)
 	// Note: AddPlayer already holds the lock, so we can safely access game state here
 	// But we need to set these after AddPlayer returns (lock is released)
+	isHost := false
 	if game.HostID == "" {
 		game.HostID = playerID
+		isHost = true
 		// Also set OriginalHostID if not already set (first time ever)
 		if game.OriginalHostID == "" {
 			game.OriginalHostID = playerID
 			log.Printf("👑 Player %s set as OriginalHostID for game %s with code %s", playerID, game.ID, game.Code)
+		}
+	}
+
+	// Record player in database (Phase 7.5)
+	ctx := context.Background()
+	if s.DB != nil {
+		dbPlayerID, err := RecordPlayerInDB(ctx, s.DB, game.ID, playerID, "", isHost)
+		if err != nil {
+			log.Printf("Warning: failed to record player in DB: %v", err)
+		} else {
+			// Store DB info for later win recording
+			SetPlayerDBInfo(player.ID, &PlayerDBInfo{
+				DBPlayerID: dbPlayerID,
+				GameCode:   game.Code,
+				Username:   playerID,
+				IPAddress:  "",
+			})
 		}
 	}
 
@@ -432,6 +457,12 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 	game.Winner = player.ID
 	game.EndedAt = time.Now()
 	log.Printf("🏆 Player %s WON game %s!", player.ID, game.ID)
+
+	// Record win in database (Phase 7.5)
+	ctx := context.Background()
+	if err := RecordWinInDB(ctx, s.DB, game, player.ID); err != nil {
+		log.Printf("Warning: failed to record win in DB: %v", err)
+	}
 
 	// Archive the completed game
 	s.archiveGame(game)
