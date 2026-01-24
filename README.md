@@ -226,15 +226,16 @@ GitHub Actions will:
 **Goal:** Move from ngrok to persistent cloud server (bingoserver.live) with database
 
 **Tasks:**
-- [ ] Database schema (SQLite initially)
+- [x] Database schema (SQLite initially)
   - `hosts` table: id, username, approved_buzzwords (JSON), created_at
   - `games` table: id, code, host_id, status, buzzwords (JSON), winner_id, created_at, ended_at, expires_at (4-day cleanup)
   - `players` table: id, game_id, username, ip_address, is_host, joined_at, left_at
   - `wins_history` table: player_username, game_code, won_at (survives game deletion for leaderboards)
   
-- [ ] Abstract database layer (interface-based for future K8s migration)
+- [x] Abstract database layer (interface-based for future K8s migration)
   - `db/store.go`: GameStore interface (CreateGame, GetGameByCode, UpdateGame, etc.)
-  - `db/sqlite.go`: SQLite implementation
+  - `db/sqlite.go`: SQLite implementation with full CRUD operations
+  - All game, player, host, and leaderboard operations complete
   - Design allows easy swap to PostgreSQL later without app changes
 
 - [ ] Docker containerization
@@ -247,18 +248,11 @@ GitHub Actions will:
   - Use Fly.io persistent volume for SQLite data
   - Test: `./binGO-CLI -mode client -server bingoserver.live`
 
-- [ ] HTTP API for web client support
-  - `GET /api/game/:code` endpoint validates game code and returns metadata
-    ```
-    {
-      "id": "uuid-123",
-      "code": "ABC123",
-      "host": "alice",
-      "player_count": 2,
-      "status": "active",
-      "created_at": "2026-01-19T10:30:00Z"
-    }
-    ```
+- [x] HTTP API for web client support
+  - `GET /api/game/:code` validates game code and returns metadata (GameInfo)
+  - `GET /api/leaderboard?limit=10` returns top players with ranks
+  - `GET /api/status` returns server health status
+  - Hybrid access pattern (in-memory + database fallback)
   - Enables web client URL routing (bingoserver.live/game/ABC123) in Phase 11
 
 #### Phase 8: Production Hardening & Scaling
