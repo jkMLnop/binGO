@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkMLnop/binGO-CLI/db"
 	"golang.org/x/net/websocket"
 )
 
@@ -30,6 +31,7 @@ type Server struct {
 	TokenManager       *TokenManager             // JWT token manager
 	Sessions           map[string]*ClientSession // IP -> ClientSession for tracking usernames
 	SessionsMu         sync.RWMutex
+	DB                 db.GameStore              // Database store (Phase 7.5)
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -54,9 +56,15 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 		Mux:                mux,
 		TokenManager:       NewTokenManager(""), // Will generate random secret
 		Sessions:           make(map[string]*ClientSession),
+		DB:                 nil, // Optional - can be set later with SetDB()
 	}
 	srv.createNewGame()
 	return srv
+}
+
+// SetDB sets the database store for this server
+func (s *Server) SetDB(store db.GameStore) {
+	s.DB = store
 }
 
 // Start begins listening for connections
