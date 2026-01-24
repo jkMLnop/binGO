@@ -77,6 +77,11 @@ func (s *Server) Start() error {
 func (s *Server) registerHandlers() {
 	s.Mux.Handle("/ws", websocket.Handler(s.wsHandler))
 	s.Mux.HandleFunc("/status", s.handleStatus)
+	
+	// API handlers (Phase 7.5)
+	s.Mux.HandleFunc("/api/status", s.handleAPIStatus)
+	s.Mux.HandleFunc("/api/game/", s.handleGetGameByCode)
+	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
 }
 
 // startHTTPServer creates and starts the HTTP server
