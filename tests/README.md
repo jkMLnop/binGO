@@ -45,6 +45,44 @@ go test ./tests -run TestMultiplayerGameFlow -v
 
 ## Test Files
 
+### `db_integration_test.go` (Phase 7.5)
+Tests database persistence and REST API integration:
+
+**TestGameCreationPersistence:**
+- Creates games and verifies persistence to SQLite
+- Validates game code and status in database
+
+**TestPlayerJoinPersistence:**
+- Tests player records in database
+- Verifies player tracking and host detection
+
+**TestWinRecording:**
+- Validates wins are recorded in wins_history table
+- Tests win count accuracy
+
+**TestLeaderboardAccuracy:**
+- Verifies correct leaderboard ordering
+- Tests with multiple players and win counts
+
+**TestAPIGameLookup:**
+- Tests game lookup API endpoint
+- Validates response format and data accuracy
+
+**TestAPILeaderboardEndpoint:**
+- Tests leaderboard API endpoint
+- Verifies proper player ranking and win counts
+
+**TestGameExpirationCleanup:**
+- Validates 4-day game expiration logic
+- Tests timestamp calculations
+
+**Run with build tag:**
+```bash
+go test -tags=integration ./tests/db_integration_test.go -v
+```
+
+**Status:** ✅ **7/7 Phase 7.5 integration tests passing**
+
 ### `multiplayer_test.go`
 Tests the complete multiplayer game flow with server coordination:
 
@@ -98,6 +136,9 @@ go test -v ./...
 ```
 
 Current status: **45/45 automated tests passing** ✅
+- **7/7 Phase 7.5 integration tests** (database & API)
+- **20+/20+ multiplayer integration tests** (WebSocket coordination)
+- **40+/40+ unit tests** (shared, server, client, db packages)
 - 37 unit tests (shared package: board, win detection, display)
 - 8 integration tests (multiplayer: game flow, security, edge cases)
 
