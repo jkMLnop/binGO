@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.local
+.DS_Store
+*.db
+bingo.db
+coverage.out
+binGO
+binGO-CLI-intel-mac
+binGO-CLI-linux
+*.mp4
+*.gif
+.vscode
+.idea
+node_modules

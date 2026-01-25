@@ -18,12 +18,12 @@ type APIResponse struct {
 
 // GameInfo represents game metadata for API responses
 type GameInfo struct {
-	ID         string `json:"id"`
-	Code       string `json:"code"`
-	HostID     string `json:"host_id"`
-	Status     string `json:"status"`
-	PlayerCount int   `json:"player_count"`
-	CreatedAt  int64  `json:"created_at"`
+	ID          string `json:"id"`
+	Code        string `json:"code"`
+	HostID      string `json:"host_id"`
+	Status      string `json:"status"`
+	PlayerCount int    `json:"player_count"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 // LeaderboardEntry represents a player's leaderboard position
@@ -150,10 +150,10 @@ func (s *Server) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	s.GamesMu.RUnlock()
 
 	status := map[string]interface{}{
-		"status":         "running",
-		"port":           s.Port,
-		"active_games":   activeGames,
-		"db_enabled":     s.DB != nil,
+		"status":       "running",
+		"port":         s.Port,
+		"active_games": activeGames,
+		"db_enabled":   s.DB != nil,
 	}
 
 	writeAPISuccess(w, status)

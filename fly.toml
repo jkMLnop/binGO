@@ -1,0 +1,56 @@
+# Fly.io Configuration for binGO-CLI Server
+# Deploy with: fly deploy
+
+app = "bingo-server"
+primary_region = "sjc"
+
+[build]
+  image = "bingo-server:latest"
+
+[build.args]
+  GO_VERSION = "1.25.3"
+
+[env]
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[http_service.concurrency]
+  type = "connections"
+  hard_limit = 1000
+  soft_limit = 800
+
+[[services]]
+  internal_port = 8080
+  processes = ["app"]
+  protocol = "tcp"
+  [services.concurrency]
+    hard_limit = 1000
+    soft_limit = 800
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+# Persistent volume for SQLite database
+[[mounts]]
+  source = "bingo_data"
+  destination = "/app/data"
+
+# Resource allocation
+[env]
+  GOMAXPROCS = "4"
+
+[[processes]]
+  name = "app"
+  cmd = "./binGO -mode server -port 8080 -db /app/data/bingo.db"
+  auto_stop_machines = true
+  auto_start_machines = true

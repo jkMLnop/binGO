@@ -46,7 +46,7 @@ type Game struct {
 	ID        string
 	Code      string
 	HostID    string
-	Status    string          // "active", "ended"
+	Status    string // "active", "ended"
 	Buzzwords json.RawMessage
 	WinnerID  *string // nullable - nil if no winner yet
 	CreatedAt int64   // Unix timestamp
