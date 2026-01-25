@@ -162,32 +162,56 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
 
 ```
 binGO-CLI/
-├── bin.go                 # Main entry point
-├── client/                # Multiplayer CLI client
-│   ├── auth.go            # Local session management (token storage, username prompts)
-│   ├── player.go          # Connection, board sync, input handling
-│   └── types.go           # Client message types
-├── server/                # Multiplayer WebSocket server
-│   ├── auth.go            # JWT token generation & validation (IP-bound)
-│   ├── server.go          # WebSocket handler, game coordination
-│   ├── game.go            # Player & Game structs with thread-safe operations
-│   ├── types.go           # Message types
-│   └── server_test.go     # Unit tests
-├── shared/                # Shared game logic (all modes)
-│   ├── board.go           # Board management, cell marking, win detection
-│   ├── board_test.go      # Tests for board operations and game logic
-│   ├── display.go         # Terminal rendering and formatting
-│   ├── display_test.go    # Tests for display functions
-│   ├── utils.go           # CSV loading utilities
-│   ├── utils_test.go      # Tests for file I/O operations
-│   └── types.go           # Type definitions
-├── standalone/            # Single-player mode
-│   └── player.go          # Game loop & input handling
-├── tests/                 # Integration tests
-│   ├── multiplayer_test.go # 7 integration tests (game flow, edge cases, security)
-│   └── README.md          # Test documentation
-├── buzzwords.csv          # Sample dataset
-└── binGO-CLI*             # Prebuilt binaries (macOS, Linux)
+├── bin.go                      # Main entry point & CLI modes
+├── client/                     # Multiplayer CLI client
+│   ├── auth.go                 # Local session management (token storage, username prompts)
+│   ├── auth_test.go            # Auth tests
+│   ├── player.go               # Connection, board sync, input handling
+│   ├── display.go              # Client-side UI rendering
+│   └── types.go                # Client message types
+├── server/                     # Multiplayer WebSocket server
+│   ├── auth.go                 # JWT token generation & validation (IP-bound)
+│   ├── auth_test.go            # Auth unit tests
+│   ├── server.go               # WebSocket handler, game coordination
+│   ├── server_test.go          # Server unit tests
+│   ├── game.go                 # Player & Game structs with thread-safe operations
+│   ├── api.go                  # REST API endpoints (game lookup, leaderboard, status)
+│   ├── api_test.go             # API endpoint tests
+│   ├── db.go                   # Database integration & helpers
+│   ├── player_db.go            # Player database tracking
+│   ├── types.go                # Message types
+│   ├── utils.go                # Utility functions
+│   └── utils_test.go           # Utility tests
+├── shared/                     # Shared game logic (all modes)
+│   ├── board.go                # Board management, cell marking, win detection
+│   ├── board_test.go           # Board unit tests
+│   ├── display.go              # Terminal rendering and formatting
+│   ├── display_test.go         # Display unit tests
+│   ├── types.go                # Type definitions
+│   ├── utils.go                # CSV loading utilities
+│   └── utils_test.go           # Utility tests
+├── standalone/                 # Single-player mode
+│   └── player.go               # Game loop & input handling
+├── db/                         # Database layer (Phase 7.5)
+│   ├── store.go                # GameStore interface (abstract DB operations)
+│   ├── sqlite.go               # SQLite implementation with full CRUD
+│   └── sqlite_test.go          # Database unit tests
+├── tests/                      # Integration & regression tests
+│   ├── multiplayer_test.go     # 8+ multiplayer integration tests
+│   ├── db_integration_test.go  # 7 database persistence tests (Phase 7.5)
+│   ├── README.md               # Test documentation
+│   └── REGRESSION_TESTS.md     # 49 manual regression tests
+├── buzzwords.csv               # Default sample dataset
+├── buzzwords_full.csv          # Extended buzzword set
+├── bingo.db                    # SQLite database (created with -db flag)
+├── go.mod                      # Go module dependencies
+├── go.sum                       # Dependency checksums
+├── CHANGELOG.md                # Version history
+├── LICENSE                     # MIT license
+└── binGO*                      # Prebuilt binaries (macOS, Linux)
+    ├── binGO                   # Apple Silicon binary (arm64)
+    ├── binGO-CLI-intel-mac     # Intel Mac binary (amd64)
+    └── binGO-CLI-linux         # Linux binary (amd64)
 ```
 
 ## Data
