@@ -238,6 +238,26 @@ GitHub Actions will:
   - All game, player, host, and leaderboard operations complete
   - Design allows easy swap to PostgreSQL later without app changes
 
+- [x] HTTP API for web client support
+  - `GET /api/game/:code` validates game code and returns metadata (GameInfo)
+  - `GET /api/leaderboard?limit=10` returns top players with ranks
+  - `GET /api/status` returns server health status
+  - Hybrid access pattern (in-memory + database fallback)
+  - Enables web client URL routing (bingoserver.live/game/ABC123) in Phase 11
+
+- [x] Comprehensive integration tests
+  - `tests/db_integration_test.go`: 7 database & API tests
+  - TestGameCreationPersistence, TestPlayerJoinPersistence, TestWinRecording
+  - TestLeaderboardAccuracy, TestAPIGameLookup, TestAPILeaderboardEndpoint
+  - TestGameExpirationCleanup
+  - All 7/7 tests passing ✅
+
+- [x] Command-line flag support
+  - `-db <path>` flag to enable SQLite database persistence
+  - Server automatically initializes and uses database when flag provided
+  - Backward compatible: database optional, all modes work without it
+  - Usage: `./binGO -mode server -port 8080 -db ./bingo.db`
+
 - [ ] Docker containerization
   - Dockerfile for server binary + SQLite
   - docker-compose.yml for local testing
@@ -247,13 +267,6 @@ GitHub Actions will:
   - Point `bingoserver.live` DNS to Fly.io instance
   - Use Fly.io persistent volume for SQLite data
   - Test: `./binGO-CLI -mode client -server bingoserver.live`
-
-- [x] HTTP API for web client support
-  - `GET /api/game/:code` validates game code and returns metadata (GameInfo)
-  - `GET /api/leaderboard?limit=10` returns top players with ranks
-  - `GET /api/status` returns server health status
-  - Hybrid access pattern (in-memory + database fallback)
-  - Enables web client URL routing (bingoserver.live/game/ABC123) in Phase 11
 
 #### Phase 8: Production Hardening & Scaling
 **Goal:** Make cloud server reliable under load
