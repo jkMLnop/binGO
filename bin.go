@@ -23,13 +23,14 @@ func main() {
 	serverAddr := flag.String("server", "localhost:8080", "server address for client mode (e.g., localhost:8080, 192.168.1.100:8080)")
 	code := flag.String("code", "", "game code for joining (Phase 7.3: required for remote connections)")
 	port := flag.String("port", "8080", "port for server mode")
+	dbPath := flag.String("db", "", "path to SQLite database file (Phase 7.5: optional, e.g., ./bingo.db)")
 	flag.Parse()
 
 	switch *mode {
 	case "standalone":
 		runStandalone()
 	case "server":
-		runServer(*port)
+		runServer(*port, *dbPath)
 	case "client":
 		runClient(*serverAddr, *code)
 	default:
@@ -49,7 +50,7 @@ func runStandalone() {
 	game.RunGame()
 }
 
-func runServer(port string) {
+func runServer(port string, dbPath string) {
 	// Load buzzwords from CSV (prefer buzzwords_full.csv if available)
 	buzzwords, err := shared.LoadBuzzwordsWithFallback()
 	if err != nil {
@@ -58,6 +59,19 @@ func runServer(port string) {
 
 	// Create server (3x3 for speed bingo mode)
 	srv := server.NewServer(buzzwords, 3, 3, port)
+
+	// Initialize database if path provided (Phase 7.5)
+	if dbPath != "" {
+		dbConfig, err := server.NewDBConfig(dbPath)
+		if err != nil {
+			log.Fatalf("Failed to initialize database: %v", err)
+		}
+		srv.SetDB(dbConfig.Store)
+		defer dbConfig.Close()
+		log.Printf("Database enabled: %s", dbPath)
+	} else {
+		log.Println("Running without database (use -db flag to enable)")
+	}
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
