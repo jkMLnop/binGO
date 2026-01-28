@@ -1,0 +1,39 @@
+groups:
+  - name: bingo_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: rate(bingo_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: HighGameCreationLatency
+        expr: histogram_quantile(0.95, bingo_game_creation_duration_ms) > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High game creation latency"
+          description: "95th percentile game creation latency is {{ $value }}ms"
+
+      - alert: HighDatabaseLatency
+        expr: histogram_quantile(0.95, bingo_database_query_duration_ms) > 250
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database query latency"
+          description: "95th percentile database query latency is {{ $value }}ms"
+
+      - alert: LowGameCount
+        expr: bingo_game_count == 0
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "No active games"
+          description: "Currently no active games running"

@@ -197,14 +197,3 @@ Monitor with:
 flyctl status
 ```
 Consider reducing busy-wait polling or increasing machine resources.
-
-## Migration to PostgreSQL (Phase 10)
-
-When ready to scale beyond single instance:
-
-1. The `db/store.go` interface is already abstraction-ready
-2. Create `db/postgres.go` implementing the same interface
-3. Update `bin.go` to select between SQLite/PostgreSQL
-4. No other code changes needed!
-
-This is why we built with an abstract database layer from the start.

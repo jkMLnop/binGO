@@ -102,7 +102,17 @@ go run . -mode standalone
 
 **Note:** Local network connections automatically join the game without requiring a code.
 
-#### Option 2: Internet via ngrok (with Game Code)
+#### Option 2: Cloud Server (Fly.io)
+
+The easiest way to play remotely—just connect to the public production server:
+
+```bash
+./binGO-CLI -mode client -server bingo-server.fly.dev -code GAME-CODE
+```
+
+Replace `GAME-CODE` with the code from a friend hosting a game, or start your own game by having someone run the server locally and share the code.
+
+#### Option 3: Internet via ngrok (with Game Code)
 
 ngrok creates a public tunnel to your local server using a reverse proxy. Your machine initiates an outgoing connection to ngrok's servers, which then routes inbound traffic from the internet back through that connection—bypassing ISP firewalls that block direct inbound connections. Perfect for testing multiplayer across the internet without cloud hosting.
 
@@ -196,6 +206,10 @@ binGO-CLI/
 │   ├── store.go                # GameStore interface (abstract DB operations)
 │   ├── sqlite.go               # SQLite implementation with full CRUD
 │   └── sqlite_test.go          # Database unit tests
+├── docs/                       # Documentation
+│   ├── ROADMAP.md              # Development phases and roadmap
+│   ├── DEPLOYMENT.md           # Cloud deployment guide (Fly.io)
+│   └── MONITORING_SETUP.md     # Monitoring & observability setup
 ├── tests/                      # Integration & regression tests
 │   ├── multiplayer_test.go     # 8+ multiplayer integration tests
 │   ├── db_integration_test.go  # 7 database persistence tests (Phase 7.5)
@@ -244,224 +258,6 @@ GitHub Actions will:
 
 (Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
 
-## TODO
+## Project Roadmap
 
-#### Phase 7.5: Production Database & Cloud Deployment
-**Goal:** Move from ngrok to persistent cloud server (bingoserver.live) with database
-
-**Tasks:**
-- [x] Database schema (SQLite initially)
-  - `hosts` table: id, username, approved_buzzwords (JSON), created_at
-  - `games` table: id, code, host_id, status, buzzwords (JSON), winner_id, created_at, ended_at, expires_at (4-day cleanup)
-  - `players` table: id, game_id, username, ip_address, is_host, joined_at, left_at
-  - `wins_history` table: player_username, game_code, won_at (survives game deletion for leaderboards)
-  
-- [x] Abstract database layer (interface-based for future K8s migration)
-  - `db/store.go`: GameStore interface (CreateGame, GetGameByCode, UpdateGame, etc.)
-  - `db/sqlite.go`: SQLite implementation with full CRUD operations
-  - All game, player, host, and leaderboard operations complete
-  - Design allows easy swap to PostgreSQL later without app changes
-
-- [x] HTTP API for web client support
-  - `GET /api/game/:code` validates game code and returns metadata (GameInfo)
-  - `GET /api/leaderboard?limit=10` returns top players with ranks
-  - `GET /api/status` returns server health status
-  - Hybrid access pattern (in-memory + database fallback)
-  - Enables web client URL routing (bingoserver.live/game/ABC123) in Phase 11
-
-- [x] Comprehensive integration tests
-  - `tests/db_integration_test.go`: 7 database & API tests
-  - TestGameCreationPersistence, TestPlayerJoinPersistence, TestWinRecording
-  - TestLeaderboardAccuracy, TestAPIGameLookup, TestAPILeaderboardEndpoint
-  - TestGameExpirationCleanup
-  - All 7/7 tests passing ✅
-
-- [x] Command-line flag support
-  - `-db <path>` flag to enable SQLite database persistence
-  - Server automatically initializes and uses database when flag provided
-  - Backward compatible: database optional, all modes work without it
-  - Usage: `./binGO -mode server -port 8080 -db ./bingo.db`
-
-- [x] Docker containerization
-  - Dockerfile: Multi-stage build (Go builder + Alpine runtime, ~50MB)
-  - docker-compose.yml: Local testing with persistent volume (bingo-data)
-  - .dockerignore: Optimizes builds by excluding unnecessary files
-  - Tested locally: `docker-compose up --build` ✅
-  - Database persistence verified: data survives container restarts ✅
-
-- [x] Deploy to Fly.io
-  - fly.toml: Complete Fly.io production configuration
-  - Persistent volume mount (/app/data) for SQLite database
-  - HTTP/HTTPS routing on ports 80/443
-  - Auto-scaling disabled (capped at 1 machine, ~$5/month)
-  - DEPLOYMENT.md: Complete step-by-step deployment guide
-  - Deployed and tested: https://bingo-server.fly.dev/ ✅
-  - Leaderboard API verified working with persistent data ✅
-
-#### Phase 7.6: Custom Domain Setup
-**Goal:** Point bingoserver.live to Fly.io for production shareable links
-
-**Tasks:**
-- [ ] Register or configure bingoserver.live domain
-  - Register domain (Namecheap, GoDaddy, etc.) if not already owned
-  - Or verify you have admin access to existing domain
-
-- [ ] Add Fly.io DNS records
-  - Point domain's nameservers to Fly.io or add CNAME record
-  - Fly.io DNS instructions: `flyctl certs create bingoserver.live`
-  - This auto-provisions SSL/TLS certificate
-
-- [ ] Verify SSL certificate
-  - `flyctl certs list` to see certificate status
-  - Visit https://bingoserver.live to confirm working
-
-- [ ] Update README with production URL
-  - Change references from bingo-server.fly.dev to bingoserver.live
-  - Update shareable link examples
-
-#### Phase 8: Production Hardening & Scaling
-**Goal:** Make cloud server reliable under load; automate deployments
-
-**Tasks:**
-- [ ] Automated deployments with Dagger
-  - Create `dagger/main.go` pipeline (replaces GitHub Actions YAML for deployments)
-  - `dagger run build` - builds Docker image locally
-  - `dagger run deploy --env staging` - deploy to Fly.io staging environment
-  - `dagger run deploy --env production` - deploy to Fly.io production
-  - GitHub Actions triggers Dagger pipeline on `main` branch (staging) and version tags (production)
-  - Pipeline steps: Run tests → Build Docker image → Push to registry → Deploy to Fly.io
-  - Local developers can test deployment flow: `dagger run deploy --env staging` before pushing
-  - Enables Phase 10 K8s migration without changing pipeline structure
-
-- [ ] Multi-game stability testing
-  - Load test with dozens of concurrent games
-  - Verify game isolation (games don't interfere)
-  - Connection cleanup on client disconnect
-
-- [ ] Game lifecycle management
-  - Auto-cleanup: Delete games older than 4 days (after archiving to wins_history)
-  - Orphaned game detection (host left, no players remaining)
-  - Graceful shutdown handling
-
-- [ ] Security hardening
-  - Rate limiting (prevent code brute-force)
-  - DDoS mitigation (connection limits per IP)
-  - Logging/monitoring for abuse patterns
-
-- [ ] Observability & Monitoring (critical for load testing insights)
-  - Prometheus metrics endpoint (`/metrics`)
-    - `game_count` (total active games)
-    - `player_count` (total connected players)
-    - `game_creation_duration_ms` (latency)
-    - `database_query_duration_ms` (DB performance)
-  - Structured JSON logging
-    - Game lifecycle events (created, ended, restarted, archived)
-    - Player connection events (joined, disconnected, errors)
-    - Database performance issues
-  - Grafana dashboard
-    - Games created per minute
-    - Average players per game
-    - Error rate & error types
-    - Database query latency histogram
-  - Alert thresholds
-    - Error rate > 5%
-    - Game creation latency > 500ms
-    - Database connection pool exhaustion
-
-#### Phase 9: Client Features & Improved UX
-**Goal:** Support hosting games on cloud server; add leaderboards; support custom buzzword lists
-
-**Tasks:**
-- [ ] Client menu system (Host vs Join)
-  ```
-  Connect to bingoserver.live?
-  1) Host a new game
-  2) Join existing game (with code)
-  ```
-  - Option 1: Host workflow
-    - Prompt: "Enter path to JSON buzzword file (or 'skip' for defaults)"
-    - If path provided: Validate JSON format, upload to server
-    - If skip: Use default buzzwords.csv
-    - Server creates game, assigns code, display to user
-  - Option 2: Join workflow
-    - Prompt for code, validate, join
-  - Display game code in CLI (e.g., "Game code: ABC123")
-
-- [ ] Buzzword suggestion system (in-game)
-  - Players suggest via chat: `add_new_phrase <phrase>`
-  - Suggestions ephemeral (in-memory only, no DB storage)
-  - Host approves: `approve <phrase>` → adds to both current game AND host profile, saves to DB
-  - Host rejects: `reject <phrase>` → discarded immediately (not stored)
-  - When host creates new game: Inherits approved buzzwords from their profile
-  - Host can also upload custom JSON on game creation (overrides their profile list)
-  - Chat UI displays suggestion broadcasts and outcomes
-
-- [ ] Leaderboard queries
-  - Query wins_history to display top players
-  - Display personal stats (wins, games played)
-
-- [ ] Updated help text with new commands
-
-#### Phase 10: Kubernetes & Scaling (Future)
-**Goal:** Run multiple server instances with shared database
-
-**Tasks:**
-- [ ] PostgreSQL migration
-  - Replace SQLite with PostgreSQL (same schema)
-  - Use prepared statements for connection pooling
-  - No app code changes needed (thanks to GameStore interface)
-
-- [ ] Kubernetes deployment
-  - Helm chart for server deployment
-  - Persistent volume claims for PostgreSQL
-  - Service mesh / ingress configuration
-  - Horizontal pod autoscaling
-
-- [ ] Distributed tracing (multi-pod debugging)
-  - Jaeger integration for request tracing across pods
-  - Trace game creation from client request → DB write → response
-  - Identify cross-pod bottlenecks
-  - Debug session correlation (which pod handled which request)
-
-- [ ] Testing under K8s
-  - Multi-replica game coordination
-  - Database failover scenarios
-  - Performance benchmarking under load
-
-#### Phase 11: Web Client & Shareable Links
-**Goal:** Browser-based bingo client with URL-based game sharing (like Zoom meeting links)
-
-**Tasks:**
-- [ ] Web client (React + TypeScript)
-  - Game board UI (3x3 grid with click-to-mark)
-  - WebSocket integration (same protocol as CLI)
-  - Player list + join form
-  - Leaderboard display
-
-- [ ] Shareable links feature
-  - URL routing: `bingoserver.live/game/ABC123`
-  - Server `GET /api/game/:code` endpoint (added in Phase 7.5) validates code
-  - Web client pre-populates game code from URL
-  - Share button copies link to clipboard
-  - Works seamlessly from Phase 7.5 server endpoint
-
-- [ ] CLI integration
-  - When host creates game, display shareable link:
-    ```
-    Game created! Code: ABC123
-    Share this link: https://bingoserver.live/game/ABC123
-    Or use code with CLI: ./binGO-CLI -mode client -server bingoserver.live -code ABC123
-    ```
-
-- [ ] Mobile optimization
-  - Responsive design (works on phone/tablet)
-  - Touch-friendly board
-  - PWA features (offline fallback)
-
----
-
-**Notes:**
-- Phase 7.5 is prerequisite for 8, 9, 11
-- Phase 10 can happen anytime after 7.5 (GameStore abstraction enables it)
-- Phase 11 requires Phase 7.5 `GET /api/game/:code` endpoint but can develop in parallel
-- All phases keep backward compatibility with existing v1.0.0 clients
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the development roadmap and upcoming phases.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jkMLnop/binGO-CLI/db"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/net/websocket"
 )
 
@@ -32,6 +33,8 @@ type Server struct {
 	Sessions           map[string]*ClientSession // IP -> ClientSession for tracking usernames
 	SessionsMu         sync.RWMutex
 	DB                 db.GameStore // Database store (Phase 7.5)
+	Metrics            *Metrics     // Prometheus metrics (Phase 8)
+	Logger             *Logger      // Structured JSON logger (Phase 8)
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -57,6 +60,8 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 		TokenManager:       NewTokenManager(""), // Will generate random secret
 		Sessions:           make(map[string]*ClientSession),
 		DB:                 nil, // Optional - can be set later with SetDB()
+		Metrics:            NewMetrics(),
+		Logger:             NewLogger(),
 	}
 	srv.createNewGame()
 	return srv
@@ -77,11 +82,14 @@ func (s *Server) Start() error {
 func (s *Server) registerHandlers() {
 	s.Mux.Handle("/ws", websocket.Handler(s.wsHandler))
 	s.Mux.HandleFunc("/status", s.handleStatus)
-	
+
 	// API handlers (Phase 7.5)
 	s.Mux.HandleFunc("/api/status", s.handleAPIStatus)
 	s.Mux.HandleFunc("/api/game/", s.handleGetGameByCode)
 	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
+
+	// Metrics endpoint (Phase 8)
+	s.Mux.Handle("/metrics", promhttp.Handler())
 }
 
 // startHTTPServer creates and starts the HTTP server
@@ -116,6 +124,10 @@ func (s *Server) createNewGame() {
 	s.CurrentGame = newGame
 
 	log.Printf("Created new game: %s with code: %s", gameID, newGame.Code)
+
+	// Update metrics (Phase 8)
+	s.Metrics.GameCount.Set(float64(len(s.Games)))
+	s.Metrics.GamesCreatedTotal.Inc()
 
 	// Save game to database (Phase 7.5)
 	ctx := context.Background()
@@ -208,6 +220,10 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	}
 
 	log.Printf("Player %s joined game %s from IP %s via WebSocket", username, game.ID, clientIP)
+
+	// Update metrics (Phase 8)
+	s.Metrics.PlayerCount.Set(float64(s.countTotalPlayers()))
+	s.Metrics.PlayersConnectedTotal.Inc()
 
 	// Send welcome and broadcast
 	if err := s.welcomeAndBroadcast(ws, game, player, token); err != nil {
@@ -562,6 +578,10 @@ func (s *Server) handlePlayerDisconnect(game *Game, player *Player, ws *websocke
 	playerCount := game.PlayerCount()
 	log.Printf("   After RemovePlayer: playerCount=%d", playerCount)
 
+	// Update metrics (Phase 8)
+	s.Metrics.PlayerCount.Set(float64(s.countTotalPlayers()))
+	s.Metrics.PlayersDisconnectedTotal.Inc()
+
 	// Broadcast disconnection messages if players remain
 	if playerCount > 0 {
 		s.broadcastDisconnectionMessages(game, player)
@@ -674,3 +694,15 @@ func (s *Server) broadcastToGame(gameID string, msg interface{}) error {
 
 	return nil
 }
+
+// countTotalPlayers counts all connected players across all games
+func (s *Server) countTotalPlayers() int {
+	s.GamesMu.RLock()
+	defer s.GamesMu.RUnlock()
+	total := 0
+	for _, game := range s.Games {
+		total += game.PlayerCount()
+	}
+	return total
+}
+

@@ -17,6 +17,15 @@ All notable changes to binGO-CLI are documented in this file.
 - **Code persistence across sessions**: Game codes remain valid indefinitely within a server session and across game restarts
 - **Archived game logging**: Server logs all completed games with game ID and code for auditing
 
+#### Production Database & Cloud Deployment (Phase 7.5)
+- **SQLite database**: Persistent game storage with schema for hosts, games, players, and win history
+- **Abstract database layer**: Interface-based design enabling future PostgreSQL/K8s migration
+- **REST API**: `/api/game/:code`, `/api/leaderboard?limit=10`, `/api/status` endpoints
+- **Integration tests**: 7/7 database persistence & API tests passing
+- **Command-line database flag**: `-db <path>` enables optional persistence
+- **Docker containerization**: Multi-stage build with ~50MB runtime image
+- **Fly.io deployment**: Production server at https://bingo-server.fly.dev/ with persistent volume
+
 #### ngrok Support
 - **Internet multiplayer**: Remote players can now connect via ngrok tunnels using a game code
 - **Secure WebSocket (WSS)**: Automatic protocol detection for ngrok domains (wss://) vs. local (ws://)

@@ -5,13 +5,14 @@ app = "bingo-server"
 primary_region = "sjc"
 
 [build]
-  image = "bingo-server:latest"
+  dockerfile = "Dockerfile"
 
 [build.args]
   GO_VERSION = "1.25.3"
 
 [env]
   LOG_LEVEL = "info"
+  GOMAXPROCS = "4"
 
 [http_service]
   internal_port = 8080
@@ -27,25 +28,12 @@ primary_region = "sjc"
   hard_limit = 100
   soft_limit = 80
 
-[[services]]
-  internal_port = 8080
-  processes = ["app"]
-  protocol = "tcp"
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
+
 
 # Persistent volume for SQLite database
 [[mounts]]
   source = "bingo_data"
   destination = "/app/data"
-
-# Resource allocation
-[env]
-  GOMAXPROCS = "4"
 
 [[processes]]
   name = "app"
