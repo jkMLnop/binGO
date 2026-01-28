@@ -54,7 +54,7 @@ The evolution of binGO-CLI organized by development phases.
   - DDoS mitigation (connection limits per IP)
   - Logging/monitoring for abuse patterns
 
-- [ ] Observability & Monitoring (critical for load testing insights)
+- [x] Observability & Monitoring (critical for load testing insights)
   - Prometheus metrics endpoint (`/metrics`)
     - `game_count` (total active games)
     - `player_count` (total connected players)
