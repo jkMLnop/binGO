@@ -282,20 +282,57 @@ GitHub Actions will:
   - Backward compatible: database optional, all modes work without it
   - Usage: `./binGO -mode server -port 8080 -db ./bingo.db`
 
-- [ ] Docker containerization
-  - Dockerfile for server binary + SQLite
-  - docker-compose.yml for local testing
-  - Fly.io config for deployment
+- [x] Docker containerization
+  - Dockerfile: Multi-stage build (Go builder + Alpine runtime, ~50MB)
+  - docker-compose.yml: Local testing with persistent volume (bingo-data)
+  - .dockerignore: Optimizes builds by excluding unnecessary files
+  - Tested locally: `docker-compose up --build` ✅
+  - Database persistence verified: data survives container restarts ✅
 
-- [ ] Deploy to Fly.io
-  - Point `bingoserver.live` DNS to Fly.io instance
-  - Use Fly.io persistent volume for SQLite data
-  - Test: `./binGO-CLI -mode client -server bingoserver.live`
+- [x] Deploy to Fly.io
+  - fly.toml: Complete Fly.io production configuration
+  - Persistent volume mount (/app/data) for SQLite database
+  - HTTP/HTTPS routing on ports 80/443
+  - Auto-scaling disabled (capped at 1 machine, ~$5/month)
+  - DEPLOYMENT.md: Complete step-by-step deployment guide
+  - Deployed and tested: https://bingo-server.fly.dev/ ✅
+  - Leaderboard API verified working with persistent data ✅
 
-#### Phase 8: Production Hardening & Scaling
-**Goal:** Make cloud server reliable under load
+#### Phase 7.6: Custom Domain Setup
+**Goal:** Point bingoserver.live to Fly.io for production shareable links
 
 **Tasks:**
+- [ ] Register or configure bingoserver.live domain
+  - Register domain (Namecheap, GoDaddy, etc.) if not already owned
+  - Or verify you have admin access to existing domain
+
+- [ ] Add Fly.io DNS records
+  - Point domain's nameservers to Fly.io or add CNAME record
+  - Fly.io DNS instructions: `flyctl certs create bingoserver.live`
+  - This auto-provisions SSL/TLS certificate
+
+- [ ] Verify SSL certificate
+  - `flyctl certs list` to see certificate status
+  - Visit https://bingoserver.live to confirm working
+
+- [ ] Update README with production URL
+  - Change references from bingo-server.fly.dev to bingoserver.live
+  - Update shareable link examples
+
+#### Phase 8: Production Hardening & Scaling
+**Goal:** Make cloud server reliable under load; automate deployments
+
+**Tasks:**
+- [ ] Automated deployments with Dagger
+  - Create `dagger/main.go` pipeline (replaces GitHub Actions YAML for deployments)
+  - `dagger run build` - builds Docker image locally
+  - `dagger run deploy --env staging` - deploy to Fly.io staging environment
+  - `dagger run deploy --env production` - deploy to Fly.io production
+  - GitHub Actions triggers Dagger pipeline on `main` branch (staging) and version tags (production)
+  - Pipeline steps: Run tests → Build Docker image → Push to registry → Deploy to Fly.io
+  - Local developers can test deployment flow: `dagger run deploy --env staging` before pushing
+  - Enables Phase 10 K8s migration without changing pipeline structure
+
 - [ ] Multi-game stability testing
   - Load test with dozens of concurrent games
   - Verify game isolation (games don't interfere)
