@@ -147,9 +147,9 @@
           "tooltip": {"mode": "single"}
         },
         "targets": [
-          {"expr": "histogram_quantile(0.50, bingo_game_creation_duration_ms)", "refId": "A", "legendFormat": "p50"},
-          {"expr": "histogram_quantile(0.95, bingo_game_creation_duration_ms)", "refId": "B", "legendFormat": "p95"},
-          {"expr": "histogram_quantile(0.99, bingo_game_creation_duration_ms)", "refId": "C", "legendFormat": "p99"}
+          {"expr": "histogram_quantile(0.50, rate(bingo_game_creation_duration_ms_bucket[1m]))", "refId": "A", "legendFormat": "p50"},
+          {"expr": "histogram_quantile(0.95, rate(bingo_game_creation_duration_ms_bucket[1m]))", "refId": "B", "legendFormat": "p95"},
+          {"expr": "histogram_quantile(0.99, rate(bingo_game_creation_duration_ms_bucket[1m]))", "refId": "C", "legendFormat": "p99"}
         ],
         "title": "Game Creation Latency (Percentiles)",
         "type": "timeseries"
@@ -188,9 +188,9 @@
           "tooltip": {"mode": "single"}
         },
         "targets": [
-          {"expr": "histogram_quantile(0.50, bingo_database_query_duration_ms)", "refId": "A", "legendFormat": "p50"},
-          {"expr": "histogram_quantile(0.95, bingo_database_query_duration_ms)", "refId": "B", "legendFormat": "p95"},
-          {"expr": "histogram_quantile(0.99, bingo_database_query_duration_ms)", "refId": "C", "legendFormat": "p99"}
+          {"expr": "histogram_quantile(0.50, rate(bingo_database_query_duration_ms_bucket[1m]))", "refId": "A", "legendFormat": "p50"},
+          {"expr": "histogram_quantile(0.95, rate(bingo_database_query_duration_ms_bucket[1m]))", "refId": "B", "legendFormat": "p95"},
+          {"expr": "histogram_quantile(0.99, rate(bingo_database_query_duration_ms_bucket[1m]))", "refId": "C", "legendFormat": "p99"}
         ],
         "title": "Database Query Latency (Percentiles)",
         "type": "timeseries"

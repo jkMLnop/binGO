@@ -9,7 +9,8 @@ buzzwords_full.csv
 # Ignore test output files
 coverage.out
 
-# Compiled program
-binGO*
+# Compiled programs (only in root directory)
+/binGO
+/binGO-*
 
 bingo_demo.mp4
