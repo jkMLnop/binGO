@@ -97,6 +97,8 @@ func TestDuplicatePlayerError(t *testing.T) {
 }
 
 func TestServerConnectionHandler(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	buzzwords := testBuzzwords()
 
 	srv := NewServer(buzzwords, 3, 3, "8080")
@@ -218,6 +220,8 @@ func TestIPClassification(t *testing.T) {
 }
 
 func TestServerCodeBasedLookup(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
@@ -237,6 +241,8 @@ func TestServerCodeBasedLookup(t *testing.T) {
 }
 
 func TestLocalConnectionCanJoinWithoutCode(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
@@ -256,6 +262,8 @@ func TestLocalConnectionCanJoinWithoutCode(t *testing.T) {
 }
 
 func TestRemoteConnectionRequiresCode(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
@@ -271,6 +279,8 @@ func TestRemoteConnectionRequiresCode(t *testing.T) {
 }
 
 func TestCodeBasedGameJoin(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
@@ -292,6 +302,8 @@ func TestCodeBasedGameJoin(t *testing.T) {
 }
 
 func TestInvalidCodeRejected(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 

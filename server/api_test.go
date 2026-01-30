@@ -10,6 +10,8 @@ import (
 
 // TestAPIGameByCode tests the GET /api/game/:code endpoint
 func TestAPIGameByCode(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	// Create a test server with buzzwords
 	testBuzzwords := [][]string{
 		{"synergy", "moving the needle", "low-hanging fruit"},
@@ -82,6 +84,8 @@ func TestAPIGameByCode(t *testing.T) {
 
 // TestAPIStatus tests the GET /api/status endpoint
 func TestAPIStatus(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	testBuzzwords := [][]string{
 		{"synergy", "moving the needle", "low-hanging fruit"},
 		{"circle back", "touch base", "deep dive"},
@@ -122,6 +126,8 @@ func TestAPIStatus(t *testing.T) {
 
 // TestAPILeaderboardWithoutDB tests leaderboard endpoint without database
 func TestAPILeaderboardWithoutDB(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	testBuzzwords := [][]string{
 		{"synergy", "moving the needle", "low-hanging fruit"},
 		{"circle back", "touch base", "deep dive"},
@@ -144,6 +150,8 @@ func TestAPILeaderboardWithoutDB(t *testing.T) {
 
 // TestAPIMethodNotAllowed tests that only GET is allowed for API endpoints
 func TestAPIMethodNotAllowed(t *testing.T) {
+	ResetMetrics() // Reset metrics before test
+	
 	testBuzzwords := [][]string{
 		{"synergy", "moving the needle", "low-hanging fruit"},
 		{"circle back", "touch base", "deep dive"},
