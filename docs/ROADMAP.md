@@ -28,9 +28,36 @@ The evolution of binGO-CLI organized by development phases.
 #### Phase 8: Production Hardening & Scaling
 **Goal:** Make cloud server reliable under load; automate deployments
 
-**Status:** v8.0.0 - Observability & Monitoring complete. Remaining tasks in progress.
-
 **Tasks:**
+- [ ] Simplify host tracking architecture
+  - Replace dual `HostID` + `OriginalHostID` with single immutable `HostID`
+  - Remove IP classification system (`ClassifyIP`, `IsLocalConnection`, `IPType`)
+  - Remove localhost/LAN auto-join logic and `CurrentGame` concept
+  - Single host is set on first player connect, never changes
+  - Host disconnection doesn't require special handling (game continues)
+  - Enables future host privileges (buzzword approval, host-specific settings) without complex reconnection logic
+  - Database migration: Add `host_id` column, remove `original_host_id` and `host_ip` columns
+  - Update `ServerMessage` protocol to remove host-related fields
+  - Simplifies game creation: no more IP-based routing, all remote creation now works identically
+
+- [ ] Admin API for testing and game management
+  - Admin key validation middleware (check `X-Admin-Key` header against env var `ADMIN_API_KEY`)
+  - Game CRUD endpoints:
+    - `POST /admin/api/games` - Create game (optional body: `{players: ["p1", "p2"]}`)
+    - `GET /admin/api/games` - List all games with state
+    - `GET /admin/api/games/{id}` - Get detailed game state
+    - `DELETE /admin/api/games/{id}` - Force close a game
+  - Enables testing without localhost restriction; players can create games freely via WebSocket, tests use admin API
+  - Add `ADMIN_API_KEY` config (env var, defaults to dev key locally)
+  - Document endpoints with curl examples
+
+- [ ] Multi-game stability testing (using Admin API)
+  - Load test with dozens of concurrent games via `POST /admin/api/games`
+  - Verify game isolation (games don't interfere)
+  - Measure game creation latency and query performance via metrics endpoint
+  - Connection cleanup verification on client disconnect
+  - Test script hammers admin API endpoints while observing Grafana dashboards
+
 - [ ] Automated deployments with Dagger
   - Create `dagger/main.go` pipeline (replaces GitHub Actions YAML for deployments)
   - `dagger run build` - builds Docker image locally
@@ -41,11 +68,6 @@ The evolution of binGO-CLI organized by development phases.
   - Local developers can test deployment flow: `dagger run deploy --env staging` before pushing
   - Enables Phase 10 K8s migration without changing pipeline structure
 
-- [ ] Multi-game stability testing
-  - Load test with dozens of concurrent games
-  - Verify game isolation (games don't interfere)
-  - Connection cleanup on client disconnect
-
 - [ ] Game lifecycle management
   - Auto-cleanup: Delete games older than 4 days (after archiving to wins_history)
   - Orphaned game detection (host left, no players remaining)
@@ -55,30 +77,6 @@ The evolution of binGO-CLI organized by development phases.
   - Rate limiting (prevent code brute-force)
   - DDoS mitigation (connection limits per IP)
   - Logging/monitoring for abuse patterns
-
-- [x] Observability & Monitoring (critical for load testing insights)
-  - Prometheus metrics endpoint (`/metrics`)
-    - `game_count` (total active games)
-    - `player_count` (total connected players)
-    - `game_creation_duration_ms` (latency)
-    - `database_query_duration_ms` (DB performance)
-  - Structured JSON logging
-    - Game lifecycle events (created, ended, restarted, archived)
-    - Player connection events (joined, disconnected, errors)
-    - Database performance issues
-  - Grafana dashboard
-    - Games created per minute
-    - Average players per game
-    - Error rate & error types
-    - Database query latency histogram
-  - Alert thresholds
-    - Error rate > 5%
-    - Game creation latency > 500ms
-    - Database connection pool exhaustion
-  - Local development & validation
-    - Run Prometheus & Grafana locally via Docker Compose against a local server instance
-    - Validate metrics collection, dashboards, and alerts before deploying to production
-    - Enables developers to test the full observability stack locally first
 
 - [ ] Production credentials setup
   - `.env.example` template with Grafana/database credential placeholders

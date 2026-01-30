@@ -26,6 +26,27 @@ All notable changes to binGO-CLI are documented in this file.
 - **Docker containerization**: Multi-stage build with ~50MB runtime image
 - **Fly.io deployment**: Production server at https://bingo-server.fly.dev/ with persistent volume
 
+#### Observability & Monitoring (Phase 8.1)
+- **Prometheus metrics endpoint**: `/metrics` exposes server metrics including:
+  - `game_count` (total active games)
+  - `player_count` (total connected players)
+  - `game_creation_duration_ms` (latency histogram)
+  - `database_query_duration_ms` (DB performance histogram)
+- **Structured JSON logging**: Comprehensive event logging with timestamps and metadata for:
+  - Game lifecycle events (created, ended, restarted, archived)
+  - Player connection events (joined, disconnected, errors)
+  - Database performance issues
+- **Grafana dashboards**: Pre-configured dashboards visualizing:
+  - Games created per minute
+  - Average players per game
+  - Error rate & error types
+  - Database query latency percentiles (p50, p95, p99)
+- **Alert rules**: Prometheus AlertManager rules for:
+  - Error rate > 5%
+  - Game creation latency p95 > 500ms
+  - Database latency p95 > 250ms
+- **Local validation**: Docker Compose setup for testing observability stack locally before production deployment
+
 #### ngrok Support
 - **Internet multiplayer**: Remote players can now connect via ngrok tunnels using a game code
 - **Secure WebSocket (WSS)**: Automatic protocol detection for ngrok domains (wss://) vs. local (ws://)
