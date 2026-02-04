@@ -60,7 +60,7 @@
 | 4.2 | Vertical win detected | Mark cells 1, 4, 7 (left column) | [X] |
 | 4.3 | Diagonal win detected | Mark cells 1, 5, 9 (main diagonal) | [X] |
 | 4.4 | Reverse diagonal win detected | Mark cells 3, 5, 7 (anti-diagonal) | [X] |
-| 4.5 | Non-winner still connected | Winner announces win, other clients remain in game | Non-winners see trophy message with winner name below their prompt, game_ended message displays | [ ] |
+| 4.5 | Non-winner still connected | Winner announces win, other clients remain in game | Non-winners see trophy message with winner name below their prompt, game_ended message displays | [X] |
 
 ---
 
@@ -68,13 +68,14 @@
 
 | Test # | Scenario | Steps | Expected Result | Status |
 |--------|----------|-------|-----------------|--------|
-| 5.1 | Host sees restart prompt | Game ends (someone wins), host observes message | Host sees: "Type 'restart' to start a new game or 'q' to quit" | [ ] |
-| 5.2 | Non-host sees waiting message | Game ends, non-host observes message | Non-host sees: "Waiting for host to restart..." OR "❌ Host has disconnected. Game cannot be restarted." if host disconnected | [ ] |
-| 5.3 | Host types restart | Host types `restart` after game ends | Board resets with new buzzwords, all clients receive game_restart message and display fresh board simultaneously | [ ] |
-| 5.4 | New buzzwords on restart | Host types `restart`, observe new board | New buzzwords appear in cells, no previous marks visible | [ ] |
-| 5.5 | Non-host cannot restart | Non-host tries typing `restart` after game ends | Client shows "🔄 Requesting game restart..." then receives error "❌ only the host can restart the game" (game does not restart) | [ ] |
-| 5.6 | Game code persists across restart | Note code before game, type `restart`, check code | Same code still in use for next session | [ ] |
-| 5.7 | Multiple restarts work | Restart 2-3 times in sequence | Each restart resets board, loads new buzzwords, works seamlessly | [ ] |
+| 5.1 | Host sees restart prompt | Game ends (someone wins), host observes message | Host sees: "Type 'restart' to start a new game or 'q' to quit" | [X] |
+| 5.2 | Non-host sees waiting message | Game ends, non-host observes message | Non-host sees: "Waiting for host to restart..." | [X] |
+| 5.3 | Non-host sees disconnect message | Game ends, host disconnects, non-host tries to restart | Non-host sees: "❌ Host has disconnected. Game cannot be restarted." | [ ] |
+| 5.4 | Host types restart | Host types `restart` after game ends | Board resets with new buzzwords, all clients receive game_restart message and display fresh board simultaneously | [ ] |
+| 5.5 | New buzzwords on restart | Host types `restart`, observe new board | New buzzwords appear in cells, no previous marks visible | [ ] |
+| 5.6 | Non-host cannot restart | Non-host tries typing `restart` after game ends | Client shows "🔄 Requesting game restart..." then receives error "❌ only the host can restart the game" (game does not restart) | [ ] |
+| 5.7 | Game code persists across restart | Note code before game, type `restart`, check code | Same code still in use for next session | [ ] |
+| 5.8 | Multiple restarts work | Restart 2-3 times in sequence | Each restart resets board, loads new buzzwords, works seamlessly | [ ] |
 
 ---
 

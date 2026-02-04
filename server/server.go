@@ -489,8 +489,13 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 
 // handleGameRestart allows the host to restart a completed game with the same code and fresh board
 func (s *Server) handleGameRestart(game *Game, player *Player) error {
-	// Only original host can restart
+	// Check if player is the host
 	if player.ID != game.HostID {
+		// Non-host trying to restart - check if host is still connected
+		hostPlayer, hostExists := game.GetPlayer(game.HostID)
+		if !hostExists || hostPlayer == nil {
+			return fmt.Errorf("❌ Host has disconnected. Game cannot be restarted.")
+		}
 		return fmt.Errorf("only the host can restart the game")
 	}
 
@@ -574,29 +579,21 @@ func (s *Server) broadcastDisconnectionMessages(game *Game, player *Player) {
 	// Host disconnection - notify everyone
 	if player.ID == game.HostID {
 		log.Printf("   ✓ Host disconnected, %d player(s) remaining", playerCount)
+		
+		// NOTE: HostID is immutable - DO NOT clear it. Host can reconnect and remains host.
+		log.Printf("   ℹ️  Host ID preserved for potential reconnection: %s", game.HostID)
+
+		// Send error message to keep non-hosts in postgame state if game is ended
+		// or to warn them if game is still active
 		errorMsg := ServerMessage{
 			Type:    "error",
 			GameID:  game.ID,
 			Code:    game.Code,
-			Message: fmt.Sprintf("Host disconnected. Type 'q' to quit."),
 			HostID:  game.HostID,
+			Message: "❌ Host has disconnected. Game cannot be restarted.",
 		}
-		log.Printf("   📢 Broadcasting error message to remaining players")
+		log.Printf("   📢 Broadcasting host disconnection error to remaining players")
 		s.broadcastToGame(game.ID, errorMsg)
-
-		// NOTE: HostID is immutable - DO NOT clear it. Host can reconnect and remains host.
-		log.Printf("   ℹ️  Host ID preserved for potential reconnection: %s", game.HostID)
-
-		// Broadcast player_update with updated list
-		updateMsg := ServerMessage{
-			Type:    "player_update",
-			GameID:  game.ID,
-			Code:    game.Code,
-			HostID:  game.HostID, // Now empty
-			Players: game.GetPlayerList(),
-			Message: fmt.Sprintf("Player %s left the game", player.ID),
-		}
-		s.broadcastToGame(game.ID, updateMsg)
 		return
 	}
 
