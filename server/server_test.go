@@ -434,3 +434,51 @@ func TestGameCodePersistsAcrossRestarts(t *testing.T) {
 		t.Logf("✓ Game code persisted across restart: %s", game.Code)
 	}
 }
+// TestHandlePlayerWinAlreadyEnded verifies that duplicate win announcements are rejected
+// when a game has already ended (e.g., host disconnects/reconnects without restarting)
+func TestHandlePlayerWinAlreadyEnded(t *testing.T) {
+	buzzwords := testBuzzwords()
+	server := NewServer(buzzwords, 3, 3, "8080")
+	
+	// Create a game with a player
+	game := NewGame("game-1", buzzwords, 3, 3)
+	player := newPlayer("player-1")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+	
+	// Register game with server
+	server.GamesMu.Lock()
+	server.Games["game-1"] = game
+	server.GamesMu.Unlock()
+	
+	// First win announcement succeeds
+	err := server.handlePlayerWin(game, player)
+	if err != nil {
+		t.Fatalf("First win announcement should succeed: %v", err)
+	}
+	
+	// Verify game is now ended
+	if game.IsActive {
+		t.Fatal("Game should be inactive after first win")
+	}
+	
+	// Second win announcement should fail
+	player2 := newPlayer("player-2")
+	game.AddPlayer(player2)
+	err = server.handlePlayerWin(game, player2)
+	if err == nil {
+		t.Fatal("Expected error for win when game already ended")
+	}
+	
+	// Verify error message mentions the already-ended state
+	if !strings.Contains(err.Error(), "already ended") {
+		t.Fatalf("Expected error about game already ended, got: %v", err)
+	}
+	
+	// Verify winner didn't change
+	if game.Winner != player.ID {
+		t.Fatalf("Game winner should not change. Expected %s, got %s", player.ID, game.Winner)
+	}
+	
+	t.Logf("✓ Duplicate win rejection works correctly")
+}
