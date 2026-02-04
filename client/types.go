@@ -2,12 +2,11 @@ package client
 
 // ServerMessage matches server/types.go
 type ServerMessage struct {
-	Type           string     `json:"type"`
-	GameID         string     `json:"game_id"`
-	Code           string     `json:"code,omitempty"`    // Phase 7.3: Game code
-	HostID         string     `json:"host_id,omitempty"` // Current host player ID
-	OriginalHostID string     `json:"original_host_id,omitempty"` // Original host (never changes)
-	PlayerID       string     `json:"player_id"`
+	Type      string     `json:"type"`
+	GameID    string     `json:"game_id"`
+	Code      string     `json:"code,omitempty"`    // Phase 7.3: Game code
+	HostID    string     `json:"host_id,omitempty"` // Host player ID (immutable)
+	PlayerID  string     `json:"player_id"`
 	Username  string     `json:"username,omitempty"`
 	Token     string     `json:"token,omitempty"`
 	Buzzwords [][]string `json:"buzzwords"`

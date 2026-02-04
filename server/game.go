@@ -39,27 +39,25 @@ func (p *Player) sendMessage(msg interface{}) error {
 
 // Game represents a bingo game session
 type Game struct {
-	ID             string
-	Code           string             // Join code for this game
-	OriginalHostID string             // ID of the original host who owns the code (permanent)
-	HostID         string             // ID of the current host player (can be empty if host disconnected)
-	HostIP         string             // IP of the host player
-	Players        map[string]*Player // playerID -> Player
-	IsActive       bool               // Game is in progress
-	Winner         string             // Player ID of winner (empty if no winner yet)
-	CreatedAt      time.Time          // When this game session started
-	EndedAt        time.Time          // When this game session ended (zero if still active)
-	PlayersMu      sync.RWMutex       // Protect Players map
+	ID        string
+	Code      string             // Join code for this game
+	HostID    string             // ID of the host player (immutable once set on first player connect)
+	Players   map[string]*Player // playerID -> Player
+	IsActive  bool               // Game is in progress
+	Winner    string             // Player ID of winner (empty if no winner yet)
+	CreatedAt time.Time          // When this game session started
+	EndedAt   time.Time          // When this game session ended (zero if still active)
+	PlayersMu sync.RWMutex       // Protect Players map
 }
 
 // ArchivedGame stores completed game sessions for history
 type ArchivedGame struct {
-	ID             string
-	Code           string
-	OriginalHostID string
-	Winner         string
-	CreatedAt      time.Time
-	EndedAt        time.Time
+	ID        string
+	Code      string
+	HostID    string
+	Winner    string
+	CreatedAt time.Time
+	EndedAt   time.Time
 }
 
 // NewGame creates a new game session
@@ -79,7 +77,7 @@ func (g *Game) AddPlayer(player *Player) error {
 	defer g.PlayersMu.Unlock()
 
 	if _, exists := g.Players[player.ID]; exists {
-		return fmt.Errorf("player %s already in game", player.ID)
+		return fmt.Errorf("player ID %s is already in use (collision detected). Please use a different username", player.ID)
 	}
 
 	g.Players[player.ID] = player

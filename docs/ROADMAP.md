@@ -29,17 +29,6 @@ The evolution of binGO-CLI organized by development phases.
 **Goal:** Make cloud server reliable under load; automate deployments
 
 **Tasks:**
-- [ ] Simplify host tracking architecture
-  - Replace dual `HostID` + `OriginalHostID` with single immutable `HostID`
-  - Remove IP classification system (`ClassifyIP`, `IsLocalConnection`, `IPType`)
-  - Remove localhost/LAN auto-join logic and `CurrentGame` concept
-  - Single host is set on first player connect, never changes
-  - Host disconnection doesn't require special handling (game continues)
-  - Enables future host privileges (buzzword approval, host-specific settings) without complex reconnection logic
-  - Database migration: Add `host_id` column, remove `original_host_id` and `host_ip` columns
-  - Update `ServerMessage` protocol to remove host-related fields
-  - Simplifies game creation: no more IP-based routing, all remote creation now works identically
-
 - [ ] Admin API for testing and game management
   - Admin key validation middleware (check `X-Admin-Key` header against env var `ADMIN_API_KEY`)
   - Game CRUD endpoints:

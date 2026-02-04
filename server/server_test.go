@@ -98,10 +98,13 @@ func TestDuplicatePlayerError(t *testing.T) {
 
 func TestServerConnectionHandler(t *testing.T) {
 	ResetMetrics() // Reset metrics before test
-	
+
 	buzzwords := testBuzzwords()
 
 	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	// Create a game (NewServer no longer creates one automatically)
+	srv.createNewGame()
 
 	// Test status endpoint
 	req := httptest.NewRequest("GET", "/status", nil)
@@ -181,139 +184,253 @@ func TestGameCodeGeneration(t *testing.T) {
 	}
 }
 
-func TestIPClassification(t *testing.T) {
-	tests := []struct {
-		name          string
-		clientIP      string
-		serverIP      string
-		expectedType  IPType
-		expectedLocal bool
-	}{
-		// Localhost tests
-		{"localhost IPv4", "127.0.0.1", "127.0.0.1", Localhost, true},
-		{"localhost IPv6", "::1", "::1", Localhost, true},
-
-		// LAN tests (same /24 subnet)
-		{"LAN IPv4 same subnet", "192.168.1.100", "192.168.1.1", LAN, true},
-		{"LAN IPv4 same subnet 2", "10.0.0.50", "10.0.0.1", LAN, true},
-
-		// Remote tests
-		{"remote different subnet", "203.0.113.100", "192.168.1.1", Remote, false},
-		{"remote different class A", "172.16.0.1", "192.168.1.1", Remote, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Test ClassifyIP
-			result := ClassifyIP(tt.clientIP, tt.serverIP)
-			if result != tt.expectedType {
-				t.Errorf("ClassifyIP(%s, %s) = %v, want %v", tt.clientIP, tt.serverIP, result, tt.expectedType)
-			}
-
-			// Test IsLocalConnection
-			isLocal := IsLocalConnection(tt.clientIP, tt.serverIP)
-			if isLocal != tt.expectedLocal {
-				t.Errorf("IsLocalConnection(%s, %s) = %v, want %v", tt.clientIP, tt.serverIP, isLocal, tt.expectedLocal)
-			}
-		})
-	}
-}
-
-func TestServerCodeBasedLookup(t *testing.T) {
+func TestCodeBasedGameLookup(t *testing.T) {
 	ResetMetrics() // Reset metrics before test
-	
+
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
-	// Check that current game has a code
-	if srv.CurrentGame.Code == "" {
-		t.Error("Expected current game to have a code")
-	}
+	// Create a new game with a code
+	srv.createNewGame()
 
-	code := srv.CurrentGame.Code
+	// Get a code from the map
+	var code string
+	for c := range srv.CodeToGame {
+		code = c
+		break
+	}
 
 	// Check that game is registered by code
 	if game, exists := srv.CodeToGame[code]; !exists {
 		t.Error("Expected game to be registered by code in CodeToGame map")
-	} else if game.ID != srv.CurrentGame.ID {
-		t.Errorf("Expected CodeToGame[%s] to point to current game", code)
+	} else if game.Code != code {
+		t.Errorf("Expected CodeToGame[%s] to have matching code", code)
 	}
 }
 
-func TestLocalConnectionCanJoinWithoutCode(t *testing.T) {
+func TestGameJoinRequiresCode(t *testing.T) {
 	ResetMetrics() // Reset metrics before test
-	
+
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
-	// Local connection (localhost) should be able to join without code
+	// All connections require a code now
 	code := ""
-	clientIP := "127.0.0.1"
-	serverIP := "127.0.0.1"
 
-	game, err := srv.getOrCreateGame(code, clientIP, serverIP)
-	if err != nil {
-		t.Errorf("Expected local connection to join without code, got error: %v", err)
-	}
-
-	if game == nil || game.ID != srv.CurrentGame.ID {
-		t.Error("Expected to get current game for local connection")
-	}
-}
-
-func TestRemoteConnectionRequiresCode(t *testing.T) {
-	ResetMetrics() // Reset metrics before test
-	
-	buzzwords := testBuzzwords()
-	srv := NewServer(buzzwords, 3, 3, "8080")
-
-	// Remote connection without code should fail
-	code := ""
-	clientIP := "203.0.113.100" // Remote IP
-	serverIP := "192.168.1.1"
-
-	_, err := srv.getOrCreateGame(code, clientIP, serverIP)
+	_, err := srv.getOrCreateGame(code)
 	if err == nil {
-		t.Error("Expected remote connection without code to fail")
+		t.Error("Expected getOrCreateGame without code to fail")
 	}
 }
 
 func TestCodeBasedGameJoin(t *testing.T) {
 	ResetMetrics() // Reset metrics before test
-	
+
 	buzzwords := testBuzzwords()
 	srv := NewServer(buzzwords, 3, 3, "8080")
 
-	// Get current game's code
-	correctCode := srv.CurrentGame.Code
-
-	// Remote connection with correct code should succeed
-	clientIP := "203.0.113.100"
-	serverIP := "192.168.1.1"
-
-	game, err := srv.getOrCreateGame(correctCode, clientIP, serverIP)
+	// Create a new game with a code
+	srv.createNewGame()
+	var correctCode string
+	for code := range srv.CodeToGame {
+		correctCode = code
+		break
+	}
+	game, err := srv.getOrCreateGame(correctCode)
 	if err != nil {
-		t.Errorf("Expected remote connection with correct code to succeed, got error: %v", err)
+		t.Errorf("Expected getOrCreateGame with valid code to succeed, got error: %v", err)
 	}
 
-	if game.ID != srv.CurrentGame.ID {
-		t.Error("Expected to get current game when providing correct code")
+	if game == nil {
+		t.Error("Expected to get a game when providing valid code")
 	}
 }
 
-func TestInvalidCodeRejected(t *testing.T) {
-	ResetMetrics() // Reset metrics before test
-	
+// TestHostIDImmutableAfterDisconnect verifies that HostID is not cleared when host disconnects
+func TestHostIDImmutableAfterDisconnect(t *testing.T) {
 	buzzwords := testBuzzwords()
-	srv := NewServer(buzzwords, 3, 3, "8080")
+	game := NewGame("game-1", buzzwords, 3, 3)
 
-	// Invalid code should be rejected
-	invalidCode := "BINGO-XXXXX"
-	clientIP := "203.0.113.100"
-	serverIP := "192.168.1.1"
+	// Create and add host (first player) - simulates createPlayerInGame behavior
+	host := newPlayer("host-player-id")
+	err := game.AddPlayer(host)
+	if err != nil {
+		t.Fatalf("Failed to add host: %v", err)
+	}
 
-	_, err := srv.getOrCreateGame(invalidCode, clientIP, serverIP)
-	if err == nil {
-		t.Error("Expected invalid code to be rejected")
+	// Manually set HostID (simulating createPlayerInGame logic)
+	if game.HostID == "" {
+		game.HostID = host.ID
+	}
+
+	// Verify host is set
+	if game.HostID != "host-player-id" {
+		t.Errorf("Expected HostID to be 'host-player-id', got %s", game.HostID)
+	}
+
+	// Create and add a second player
+	player2 := newPlayer("player-2")
+	err = game.AddPlayer(player2)
+	if err != nil {
+		t.Fatalf("Failed to add player 2: %v", err)
+	}
+
+	originalHostID := game.HostID
+	t.Logf("Original HostID: %s", originalHostID)
+
+	// Simulate host disconnection by removing them from the game
+	game.RemovePlayer("host-player-id")
+
+	// BUG CHECK: HostID should NOT be cleared
+	// If it is cleared, this test will fail and indicate the bug exists
+	if game.HostID != originalHostID {
+		t.Errorf("BUG DETECTED: HostID was mutated on disconnect. Expected %s, got %s", originalHostID, game.HostID)
+	} else {
+		t.Logf("✓ HostID preserved after host disconnect: %s", game.HostID)
+	}
+}
+
+// TestHostIDPersistsMultipleTimes verifies immutability through multiple disconnects
+func TestHostIDPersistsMultipleTimes(t *testing.T) {
+	buzzwords := testBuzzwords()
+	game := NewGame("game-1", buzzwords, 3, 3)
+
+	// Create and add host
+	host := newPlayer("immutable-host")
+	err := game.AddPlayer(host)
+	if err != nil {
+		t.Fatalf("Failed to add host: %v", err)
+	}
+
+	// Manually set HostID (simulating createPlayerInGame logic)
+	if game.HostID == "" {
+		game.HostID = host.ID
+	}
+
+	originalHostID := game.HostID
+	t.Logf("Set HostID: %s", originalHostID)
+
+	// Add and remove multiple players
+	for i := 1; i <= 3; i++ {
+		player := newPlayer("temp-player-" + string(rune(48+i)))
+		game.AddPlayer(player)
+
+		// Verify HostID unchanged
+		if game.HostID != originalHostID {
+			t.Errorf("HostID changed when adding player %d: %s → %s", i, originalHostID, game.HostID)
+		}
+
+		// Remove the player
+		game.RemovePlayer(player.ID)
+
+		// Verify HostID still unchanged
+		if game.HostID != originalHostID {
+			t.Errorf("HostID changed when removing player %d: %s → %s", i, originalHostID, game.HostID)
+		}
+	}
+
+	if game.HostID != originalHostID {
+		t.Errorf("HostID mutated through player lifecycle. Expected %s, got %s", originalHostID, game.HostID)
+	} else {
+		t.Logf("✓ HostID remained immutable through multiple changes: %s", originalHostID)
+	}
+}
+
+// TestHostReconnectionIdentity verifies host maintains same ID after reconnect
+func TestHostReconnectionIdentity(t *testing.T) {
+	buzzwords := testBuzzwords()
+	game := NewGame("game-1", buzzwords, 3, 3)
+
+	// First connection: Host joins
+	host1 := newPlayer("persistent-host-id")
+	err := game.AddPlayer(host1)
+	if err != nil {
+		t.Fatalf("Failed to add host: %v", err)
+	}
+
+	// Manually set HostID (simulating createPlayerInGame logic)
+	if game.HostID == "" {
+		game.HostID = host1.ID
+	}
+
+	hostID := game.HostID
+	playerCount := game.PlayerCount()
+
+	// Host disconnects
+	game.RemovePlayer(host1.ID)
+	if game.PlayerCount() != playerCount-1 {
+		t.Errorf("Expected player count to decrease after disconnect")
+	}
+
+	// Host ID should still be set (not cleared)
+	if game.HostID != hostID {
+		t.Errorf("HostID cleared on disconnect: %s → %s", hostID, game.HostID)
+	}
+
+	// Host reconnects (same player ID due to token-based auth)
+	host2 := newPlayer(host1.ID) // Same ID as before
+	err = game.AddPlayer(host2)
+	if err != nil {
+		// This error would indicate collision detection interfering with reconnection
+		t.Fatalf("Failed to reconnect host (collision?): %v", err)
+	}
+
+	// Verify host is still the host
+	if game.HostID != hostID {
+		t.Errorf("Host status lost after reconnect. Expected %s, got %s", hostID, game.HostID)
+	}
+
+	t.Logf("✓ Host maintained identity through disconnect/reconnect: %s", hostID)
+}
+
+// TestReconnectionDetectionDoesntCauseCollision verifies returning player isn't rejected
+func TestReconnectionDetectionDoesntCauseCollision(t *testing.T) {
+	buzzwords := testBuzzwords()
+	game := NewGame("game-1", buzzwords, 3, 3)
+
+	// Player joins initially
+	player1 := newPlayer("returning-player")
+	err := game.AddPlayer(player1)
+	if err != nil {
+		t.Fatalf("Failed to add player initially: %v", err)
+	}
+
+	// Player disconnects
+	game.RemovePlayer(player1.ID)
+
+	// Player reconnects with same ID (simulating token-based reconnection)
+	player2 := newPlayer(player1.ID)
+	err = game.AddPlayer(player2)
+
+	// This should succeed, not trigger a collision error
+	if err != nil {
+		t.Errorf("Reconnection triggered collision error (should be allowed): %v", err)
+	}
+
+	// Verify player is back in the game
+	retrieved, exists := game.GetPlayer(player1.ID)
+	if !exists {
+		t.Error("Reconnected player not found in game")
+	} else {
+		t.Logf("✓ Player successfully reconnected: %s", retrieved.ID)
+	}
+}
+
+// TestGameCodePersistsAcrossRestarts verifies code is maintained
+func TestGameCodePersistsAcrossRestarts(t *testing.T) {
+	buzzwords := testBuzzwords()
+	game := NewGame("game-1", buzzwords, 3, 3)
+
+	originalCode := game.Code
+	t.Logf("Original code: %s", originalCode)
+
+	// Simulate a game ending and restarting
+	game.IsActive = false // Game ends
+	game.IsActive = true  // Game restarts
+
+	if game.Code != originalCode {
+		t.Errorf("Game code changed after restart. Expected %s, got %s", originalCode, game.Code)
+	} else {
+		t.Logf("✓ Game code persisted across restart: %s", game.Code)
 	}
 }

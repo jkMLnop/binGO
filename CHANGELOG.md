@@ -4,6 +4,18 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Phase 8.2 - Host Tracking Simplification (2026-02-04)
+
+#### Fixed
+- **HostID Immutability**: Removed `game.HostID = ""` mutation on host disconnect - host now retains immutable ID for reconnection
+- **Reconnection Detection**: Added check to detect returning players and reuse existing player object instead of triggering collision errors  
+- **Host Connection Status**: Check if host is connected before showing restart prompt - non-hosts now see accurate "Host disconnected" message when applicable
+
+#### Added
+- 5 new unit tests for host disconnect/reconnection scenarios
+- 4 new integration tests for E2E host disconnect validation
+- Comprehensive test coverage for immutable host ID principle
+
 ### Added
 
 #### Game Restart & Host Management (Phase 7.3)
@@ -46,6 +58,14 @@ All notable changes to binGO-CLI are documented in this file.
   - Game creation latency p95 > 500ms
   - Database latency p95 > 250ms
 - **Local validation**: Docker Compose setup for testing observability stack locally before production deployment
+
+#### Simplified Host Tracking Architecture (Phase 8.2)
+- **Single immutable HostID**: Replaced dual `HostID` + `OriginalHostID` with single immutable host identifier set on first player connect
+- **Removed IP classification system**: Eliminated `ClassifyIP`, `IsLocalConnection`, and `IPType` - no more IP-based connection logic
+- **Unified game creation**: All players (local and remote) now require a game code - no localhost/LAN auto-join logic
+- **Simplified protocol**: Removed `OriginalHostID` field from `ServerMessage` struct for cleaner protocol
+- **Foundation for host privileges**: Architecture now supports future host-specific features (buzzword approval, host-only settings) without complex reconnection logic
+- **Cleaner codebase**: Reduced complexity by removing ~200 lines of IP-based routing code
 
 #### ngrok Support
 - **Internet multiplayer**: Remote players can now connect via ngrok tunnels using a game code

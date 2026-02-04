@@ -221,8 +221,8 @@ func runClient(serverAddr string, code string) {
 				printPrompt(promptMsg)
 			case "game_ended":
 				player.DisplayGameEnd(msg)
-				// Show restart option if user is original host
-				if msg.OriginalHostID == player.PlayerID {
+				// Show restart option if user is host
+				if msg.HostID == player.PlayerID {
 					printPrompt("\nType 'restart' to start a new game or 'q' to quit.")
 				} else {
 					// Non-host players wait for host

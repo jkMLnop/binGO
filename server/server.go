@@ -17,24 +17,22 @@ import (
 
 // Server manages the WebSocket server and game sessions
 type Server struct {
-	Games              map[string]*Game  // gameID -> Game (for backward compatibility)
-	CodeToGame         map[string]*Game  // Code -> Game (Phase 7.3: code-based access)
-	CodeToOriginalHost map[string]string // Code -> OriginalHostID (permanent mapping)
-	ArchivedGames      []ArchivedGame    // Completed game sessions for history
-	CurrentGame        *Game             // The active game all new players join (localhost/LAN auto-join)
-	Buzzwords          [][]string
-	Rows               int
-	Cols               int
-	GamesMu            sync.RWMutex
-	Port               string
-	Server             *http.Server
-	Mux                *http.ServeMux            // Custom mux for this server
-	TokenManager       *TokenManager             // JWT token manager
-	Sessions           map[string]*ClientSession // IP -> ClientSession for tracking usernames
-	SessionsMu         sync.RWMutex
-	DB                 db.GameStore // Database store (Phase 7.5)
-	Metrics            *Metrics     // Prometheus metrics (Phase 8)
-	Logger             *Logger      // Structured JSON logger (Phase 8)
+	Games         map[string]*Game // gameID -> Game (for backward compatibility)
+	CodeToGame    map[string]*Game // Code -> Game (Phase 7.3: code-based access)
+	ArchivedGames []ArchivedGame   // Completed game sessions for history
+	Buzzwords     [][]string
+	Rows          int
+	Cols          int
+	GamesMu       sync.RWMutex
+	Port          string
+	Server        *http.Server
+	Mux           *http.ServeMux            // Custom mux for this server
+	TokenManager  *TokenManager             // JWT token manager
+	Sessions      map[string]*ClientSession // IP -> ClientSession for tracking usernames
+	SessionsMu    sync.RWMutex
+	DB            db.GameStore // Database store (Phase 7.5)
+	Metrics       *Metrics     // Prometheus metrics (Phase 8)
+	Logger        *Logger      // Structured JSON logger (Phase 8)
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -48,22 +46,20 @@ type ClientSession struct {
 func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
-		Games:              make(map[string]*Game),
-		CodeToGame:         make(map[string]*Game),
-		CodeToOriginalHost: make(map[string]string),
-		ArchivedGames:      make([]ArchivedGame, 0),
-		Buzzwords:          buzzwords,
-		Rows:               rows,
-		Cols:               cols,
-		Port:               port,
-		Mux:                mux,
-		TokenManager:       NewTokenManager(""), // Will generate random secret
-		Sessions:           make(map[string]*ClientSession),
-		DB:                 nil, // Optional - can be set later with SetDB()
-		Metrics:            NewMetrics(),
-		Logger:             NewLogger(),
+		Games:         make(map[string]*Game),
+		CodeToGame:    make(map[string]*Game),
+		ArchivedGames: make([]ArchivedGame, 0),
+		Buzzwords:     buzzwords,
+		Rows:          rows,
+		Cols:          cols,
+		Port:          port,
+		Mux:           mux,
+		TokenManager:  NewTokenManager(""), // Will generate random secret
+		Sessions:      make(map[string]*ClientSession),
+		DB:            nil, // Optional - can be set later with SetDB()
+		Metrics:       NewMetrics(),
+		Logger:        NewLogger(),
 	}
-	srv.createNewGame()
 	return srv
 }
 
@@ -75,6 +71,8 @@ func (s *Server) SetDB(store db.GameStore) {
 // Start begins listening for connections
 func (s *Server) Start() error {
 	s.registerHandlers()
+	// Create initial game and display code to users
+	s.createNewGame()
 	return s.startHTTPServer()
 }
 
@@ -112,7 +110,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
-// createNewGame creates a new game and sets it as current
+// createNewGame creates a new game and registers it by code
 func (s *Server) createNewGame() {
 	s.GamesMu.Lock()
 	defer s.GamesMu.Unlock()
@@ -121,7 +119,6 @@ func (s *Server) createNewGame() {
 	newGame := NewGame(gameID, s.Buzzwords, s.Rows, s.Cols)
 	s.Games[gameID] = newGame
 	s.CodeToGame[newGame.Code] = newGame // Phase 7.3: Register by code
-	s.CurrentGame = newGame
 
 	log.Printf("Created new game: %s with code: %s", gameID, newGame.Code)
 
@@ -197,12 +194,14 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		code = loginMsg.Code
 	}
 
-	serverIP := "127.0.0.1"
-	if addr, err := net.ResolveTCPAddr("tcp", r.Host); err == nil {
-		serverIP = addr.IP.String()
+	if code == "" {
+		errMsg := ServerMessage{Type: "error", Message: "Game code required for all remote connections"}
+		websocket.JSON.Send(ws, errMsg)
+		ws.Close()
+		return nil, nil, fmt.Errorf("game code required")
 	}
 
-	game, err := s.getOrCreateGame(code, clientIP, serverIP)
+	game, err := s.getOrCreateGame(code)
 	if err != nil {
 		errMsg := ServerMessage{Type: "error", Message: err.Error()}
 		websocket.JSON.Send(ws, errMsg)
@@ -210,16 +209,25 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, err
 	}
 
-	// Create player and add to game
-	player, err := s.createPlayerInGame(game, username)
-	if err != nil {
-		errMsg := ServerMessage{Type: "error", Message: err.Error()}
-		websocket.JSON.Send(ws, errMsg)
-		ws.Close()
-		return nil, nil, err
-	}
+	// Check if player is reconnecting (already in game)
+	existingPlayer, exists := game.GetPlayer(username)
+	var player *Player
 
-	log.Printf("Player %s joined game %s from IP %s via WebSocket", username, game.ID, clientIP)
+	if exists && existingPlayer != nil {
+		// Player is reconnecting - reuse existing player instead of creating duplicate
+		player = existingPlayer
+		log.Printf("Player %s RECONNECTED to game %s (existing player reused)", username, game.ID)
+	} else {
+		// New player - create and add to game
+		player, err = s.createPlayerInGame(game, username)
+		if err != nil {
+			errMsg := ServerMessage{Type: "error", Message: err.Error()}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return nil, nil, err
+		}
+		log.Printf("Player %s JOINED game %s from IP %s via WebSocket", username, game.ID, clientIP)
+	}
 
 	// Update metrics (Phase 8)
 	s.Metrics.PlayerCount.Set(float64(s.countTotalPlayers()))
@@ -330,18 +338,12 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 		return nil, err
 	}
 
-	// Set HostID if this is the first player (no host yet)
-	// Note: AddPlayer already holds the lock, so we can safely access game state here
-	// But we need to set these after AddPlayer returns (lock is released)
+	// Set HostID if this is the first player (immutable once set)
 	isHost := false
 	if game.HostID == "" {
 		game.HostID = playerID
 		isHost = true
-		// Also set OriginalHostID if not already set (first time ever)
-		if game.OriginalHostID == "" {
-			game.OriginalHostID = playerID
-			log.Printf("👑 Player %s set as OriginalHostID for game %s with code %s", playerID, game.ID, game.Code)
-		}
+		log.Printf("👑 Player %s set as HostID for game %s with code %s", playerID, game.ID, game.Code)
 	}
 
 	// Record player in database (Phase 7.5)
@@ -367,19 +369,18 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 // sendWelcomeMessage sends the welcome message to a newly connected player with JWT token
 func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player, token string) error {
 	welcomeMsg := ServerMessage{
-		Type:           "welcome",
-		GameID:         game.ID,
-		Code:           game.Code,           // Phase 7.3: Include game code
-		HostID:         game.HostID,         // Include current host player ID
-		OriginalHostID: game.OriginalHostID, // Include original host player ID
-		PlayerID:       player.ID,
-		Username:       player.ID, // username is the player ID
-		Token:          token,     // Include JWT token
-		Buzzwords:      s.Buzzwords,
-		Rows:           s.Rows,
-		Cols:           s.Cols,
-		Players:        game.GetPlayerList(),
-		Message:        fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
+		Type:      "welcome",
+		GameID:    game.ID,
+		Code:      game.Code,   // Phase 7.3: Include game code
+		HostID:    game.HostID, // Include host player ID (immutable)
+		PlayerID:  player.ID,
+		Username:  player.ID, // username is the player ID
+		Token:     token,     // Include JWT token
+		Buzzwords: s.Buzzwords,
+		Rows:      s.Rows,
+		Cols:      s.Cols,
+		Players:   game.GetPlayerList(),
+		Message:   fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
 	}
 
 	if err := websocket.JSON.Send(ws, welcomeMsg); err != nil {
@@ -390,46 +391,18 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 	return nil
 }
 
-// getOrCreateGame retrieves a game by code (Phase 7.3) or falls back to CurrentGame for localhost/LAN
-func (s *Server) getOrCreateGame(code string, clientIP, serverIP string) (*Game, error) {
+// getOrCreateGame retrieves a game by code
+func (s *Server) getOrCreateGame(code string) (*Game, error) {
 	s.GamesMu.RLock()
 	defer s.GamesMu.RUnlock()
 
-	// Phase 7.3: If code provided, look up game by code
-	if code != "" {
-		if game, exists := s.CodeToGame[code]; exists {
-			// Game exists - it's valid for the original host to rejoin or restart
-			// Any other player can only join if game is active
-			return game, nil
-		}
-		return nil, fmt.Errorf("invalid game code: %s", code)
-	}
-
-	// No code provided - check if connection is local/LAN
-	ipType := ClassifyIP(clientIP, serverIP)
-	if ipType != Remote {
-		// Localhost or LAN - can auto-join current game
-		var game *Game
-		game = s.CurrentGame
-
-		// If current game is inactive, create a new one
-		if game != nil && !game.IsActive {
-			// Need to unlock before calling createNewGame which will lock
-			s.GamesMu.RUnlock()
-			s.createNewGame()
-			s.GamesMu.RLock()
-			game = s.CurrentGame
-			log.Printf("Current game was inactive, created new game: %s", game.ID)
-		}
-
-		if game == nil {
-			return nil, fmt.Errorf("no active game available")
-		}
+	// Code is required - look up game by code
+	if game, exists := s.CodeToGame[code]; exists {
 		return game, nil
 	}
 
-	// Remote connection without code - reject
-	return nil, fmt.Errorf("remote connections require a game code")
+	// Game not found
+	return nil, fmt.Errorf("invalid game code: %s", code)
 }
 
 // receivePlayerMessage reads and returns the next message from the WebSocket connection
@@ -490,11 +463,20 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 
 	// Create and broadcast win message
 	winMsg := ServerMessage{
-		Type:           "game_ended",
-		GameID:         game.ID,
-		Winner:         player.ID,
-		OriginalHostID: game.OriginalHostID,
-		Message:        fmt.Sprintf("Player %s has won!", player.ID),
+		Type:    "game_ended",
+		GameID:  game.ID,
+		Winner:  player.ID,
+		HostID:  game.HostID,
+		Message: fmt.Sprintf("Player %s has won!", player.ID),
+	}
+
+	// Check if host is still connected
+	hostPlayer, hostExists := game.GetPlayer(game.HostID)
+	if !hostExists || hostPlayer == nil {
+		winMsg.Message += "\n❌ Host has disconnected. Game cannot be restarted."
+		log.Printf("   ⚠️  Host is disconnected - game cannot be restarted")
+	} else {
+		log.Printf("   ✓ Host is connected - game can be restarted")
 	}
 
 	if err := s.broadcastToGame(game.ID, winMsg); err != nil {
@@ -507,14 +489,9 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 
 // handleGameRestart allows the host to restart a completed game with the same code and fresh board
 func (s *Server) handleGameRestart(game *Game, player *Player) error {
-	// Check if this is an abandoned game (no active host) - do this FIRST
-	if !game.IsActive && game.HostID == "" {
-		return fmt.Errorf("game was archived (host disconnected). Type 'q' to quit and contact the host (%s) for a new code", game.OriginalHostID)
-	}
-
 	// Only original host can restart
-	if player.ID != game.OriginalHostID {
-		return fmt.Errorf("only the original host can restart the game")
+	if player.ID != game.HostID {
+		return fmt.Errorf("only the host can restart the game")
 	}
 
 	// Archive the current game session before resetting
@@ -548,12 +525,12 @@ func (s *Server) archiveGame(game *Game) {
 	defer s.GamesMu.Unlock()
 
 	archived := ArchivedGame{
-		ID:             game.ID,
-		Code:           game.Code,
-		OriginalHostID: game.OriginalHostID,
-		Winner:         game.Winner,
-		CreatedAt:      game.CreatedAt,
-		EndedAt:        time.Now(),
+		ID:        game.ID,
+		Code:      game.Code,
+		HostID:    game.HostID,
+		Winner:    game.Winner,
+		CreatedAt: game.CreatedAt,
+		EndedAt:   time.Now(),
 	}
 	s.ArchivedGames = append(s.ArchivedGames, archived)
 	log.Printf("📋 Archived game %s (code: %s)", game.ID, game.Code)
@@ -571,8 +548,8 @@ func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
 
 // handlePlayerDisconnect removes player from game and closes the connection
 func (s *Server) handlePlayerDisconnect(game *Game, player *Player, ws *websocket.Conn) error {
-	log.Printf("🔌 HandlePlayerDisconnect called for player %s, game %s (IsActive=%v, HostID=%s, OriginalHostID=%s)",
-		player.ID, game.ID, game.IsActive, game.HostID, game.OriginalHostID)
+	log.Printf("🔌 HandlePlayerDisconnect called for player %s, game %s (IsActive=%v, HostID=%s)",
+		player.ID, game.ID, game.IsActive, game.HostID)
 
 	game.RemovePlayer(player.ID)
 	playerCount := game.PlayerCount()
@@ -595,20 +572,20 @@ func (s *Server) broadcastDisconnectionMessages(game *Game, player *Player) {
 	playerCount := game.PlayerCount()
 
 	// Host disconnection - notify everyone
-	if player.ID == game.OriginalHostID {
-		log.Printf("   ✓ Original host disconnected, %d player(s) remaining", playerCount)
+	if player.ID == game.HostID {
+		log.Printf("   ✓ Host disconnected, %d player(s) remaining", playerCount)
 		errorMsg := ServerMessage{
 			Type:    "error",
 			GameID:  game.ID,
 			Code:    game.Code,
-			Message: fmt.Sprintf("game was archived (host disconnected). Type 'q' to quit and contact the host (%s) for a new code", game.OriginalHostID),
-			HostID:  game.OriginalHostID,
+			Message: fmt.Sprintf("Host disconnected. Type 'q' to quit."),
+			HostID:  game.HostID,
 		}
 		log.Printf("   📢 Broadcasting error message to remaining players")
 		s.broadcastToGame(game.ID, errorMsg)
 
-		// Clear the host so we know the game is abandoned
-		game.HostID = ""
+		// NOTE: HostID is immutable - DO NOT clear it. Host can reconnect and remains host.
+		log.Printf("   ℹ️  Host ID preserved for potential reconnection: %s", game.HostID)
 
 		// Broadcast player_update with updated list
 		updateMsg := ServerMessage{
@@ -653,12 +630,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	statusData := map[string]interface{}{
 		"total_games": len(s.Games),
-		"current_game": map[string]interface{}{
-			"id":          s.CurrentGame.ID,
-			"players":     s.CurrentGame.PlayerCount(),
-			"is_active":   s.CurrentGame.IsActive,
-			"player_list": s.CurrentGame.GetPlayerList(),
-		},
+		"games":       len(s.CodeToGame),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -705,4 +677,3 @@ func (s *Server) countTotalPlayers() int {
 	}
 	return total
 }
-
