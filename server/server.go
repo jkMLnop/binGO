@@ -440,6 +440,11 @@ func (s *Server) processPlayerMessage(game *Game, player *Player, msg *ClientMes
 func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 	log.Printf("Player %s announced a win!", player.ID)
 
+	// Check if game is already ended
+	if !game.IsActive {
+		return fmt.Errorf("game has already ended with winner: %s", game.Winner)
+	}
+
 	// Verify player exists in game
 	_, exists := game.GetPlayer(player.ID)
 	if !exists {
@@ -579,7 +584,7 @@ func (s *Server) broadcastDisconnectionMessages(game *Game, player *Player) {
 	// Host disconnection - notify everyone
 	if player.ID == game.HostID {
 		log.Printf("   ✓ Host disconnected, %d player(s) remaining", playerCount)
-		
+
 		// NOTE: HostID is immutable - DO NOT clear it. Host can reconnect and remains host.
 		log.Printf("   ℹ️  Host ID preserved for potential reconnection: %s", game.HostID)
 

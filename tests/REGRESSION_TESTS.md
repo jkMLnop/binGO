@@ -70,12 +70,11 @@
 |--------|----------|-------|-----------------|--------|
 | 5.1 | Host sees restart prompt | Game ends (someone wins), host observes message | Host sees: "Type 'restart' to start a new game or 'q' to quit" | [X] |
 | 5.2 | Non-host sees waiting message | Game ends, non-host observes message | Non-host sees: "Waiting for host to restart..." | [X] |
-| 5.3 | Non-host sees disconnect message | Game ends, host disconnects, non-host tries to restart | Non-host sees: "❌ Host has disconnected. Game cannot be restarted." | [ ] |
-| 5.4 | Host types restart | Host types `restart` after game ends | Board resets with new buzzwords, all clients receive game_restart message and display fresh board simultaneously | [ ] |
-| 5.5 | New buzzwords on restart | Host types `restart`, observe new board | New buzzwords appear in cells, no previous marks visible | [ ] |
-| 5.6 | Non-host cannot restart | Non-host tries typing `restart` after game ends | Client shows "🔄 Requesting game restart..." then receives error "❌ only the host can restart the game" (game does not restart) | [ ] |
-| 5.7 | Game code persists across restart | Note code before game, type `restart`, check code | Same code still in use for next session | [ ] |
-| 5.8 | Multiple restarts work | Restart 2-3 times in sequence | Each restart resets board, loads new buzzwords, works seamlessly | [ ] |
+| 5.3 | Non-host sees disconnect message | Game ends, host disconnects | Non-host sees: "⚠️  WARNING: ❌ Host has disconnected. Game cannot be restarted." displayed at top without board reset | [X] |
+| 5.4 | Host types restart | Host types `restart` after game ends | Board resets with new buzzwords (all cells have new values, no previous marks), all clients receive game_restart message and display fresh board simultaneously | [X] |
+| 5.5 | Non-host cannot restart | Non-host tries typing `restart` after game ends | Client shows "🔄 Requesting game restart..." then receives error "❌ only the host can restart the game" (game does not restart) | [X] |
+| 5.6 | Game code persists across restart | Note code before game, type `restart`, check code | Same code still in use for next session | [X] |
+| 5.7 | Multiple restarts work | Restart 2-3 times in sequence | Each restart resets board, loads new buzzwords, works seamlessly | [X] |
 
 ---
 
@@ -83,10 +82,10 @@
 
 | Test # | Scenario | Steps | Expected Result | Status |
 |--------|----------|-------|-----------------|--------|
-| 6.1 | Host can reconnect after disconnect | Host disconnects (Ctrl+C or network drop), then reconnect to same game code | Host reconnects as same player, retains host status (HostID is immutable) | [ ] |
-| 6.2 | Host remains host after disconnect | Host disconnects mid-game, non-host continues | Non-host still waits for host to restart (no host reassignment) | [ ] |
-| 6.3 | Host can restart after reconnect | Host reconnects post-game, types `restart` | Restart works normally | [ ] |
-| 6.4 | Host rejoins with same code | Host disconnects and reconnects with same game code | Host rejoins the same game session with same code (game persists with new host) | [ ] |
+| 6.1 | Host can reconnect after disconnect | Host disconnects (Ctrl+C or network drop), then reconnect to same game code | Host reconnects as same player, retains host status (HostID is immutable) | [X] |
+| 6.2 | Host remains host after disconnect | Host disconnects mid-game, non-host continues | Non-host still waits for host to restart (no host reassignment) | [X] |
+| 6.3 | Host can restart after reconnect | Host reconnects post-game, types `restart` | Restart works normally | [X] |
+| 6.4 | Host rejoins with same code | Host disconnects and reconnects with same game code | Host rejoins same game session, retains host status (immutable HostID), gets fresh board with new buzzwords | [X] |
 | 6.5 | Non-host loses game access when host disconnects | Host disconnects after game ends, non-host tries to continue | Non-host sees host disconnected message. Game continues but cannot be restarted without host | [ ] |
 
 ---
