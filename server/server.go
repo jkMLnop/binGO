@@ -420,6 +420,14 @@ func (s *Server) processPlayerMessage(game *Game, player *Player, msg *ClientMes
 	case "win":
 		if err := s.handlePlayerWin(game, player); err != nil {
 			log.Printf("Error processing player message: %v", err)
+			// Send error message back to the requesting player
+			errMsg := ServerMessage{
+				Type:    "error",
+				Message: fmt.Sprintf("❌ %v", err),
+			}
+			if err := player.sendMessage(errMsg); err != nil {
+				log.Printf("Failed to send error to player: %v", err)
+			}
 		}
 	case "restart":
 		if err := s.handleGameRestart(game, player); err != nil {

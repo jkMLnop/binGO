@@ -86,7 +86,7 @@
 | 6.2 | Host remains host after disconnect | Host disconnects mid-game, non-host continues | Non-host still waits for host to restart (no host reassignment) | [X] |
 | 6.3 | Host can restart after reconnect | Host reconnects post-game, types `restart` | Restart works normally | [X] |
 | 6.4 | Host rejoins with same code | Host disconnects and reconnects with same game code | Host rejoins same game session, retains host status (immutable HostID), gets fresh board with new buzzwords | [X] |
-| 6.5 | Non-host loses game access when host disconnects | Host disconnects after game ends, non-host tries to continue | Non-host sees host disconnected message. Game continues but cannot be restarted without host | [ ] |
+| 6.5 | Non-host loses game access when host disconnects | Host disconnects after game ends, non-host tries to continue | Non-host sees host disconnected message. Game continues but cannot be restarted without host | [X] |
 
 ---
 
