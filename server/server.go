@@ -214,7 +214,15 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	var player *Player
 
 	if exists && existingPlayer != nil {
-		// Player is reconnecting - reuse existing player instead of creating duplicate
+		// Player is reconnecting - close old WebSocket and update to new one
+		existingPlayer.wsMu.Lock()
+		if existingPlayer.ws != nil {
+			log.Printf("Closing old WebSocket connection for reconnecting player %s", username)
+			existingPlayer.ws.Close()
+		}
+		existingPlayer.ws = ws
+		existingPlayer.wsMu.Unlock()
+		
 		player = existingPlayer
 		log.Printf("Player %s RECONNECTED to game %s (existing player reused)", username, game.ID)
 	} else {
@@ -232,6 +240,11 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	// Update metrics (Phase 8)
 	s.Metrics.PlayerCount.Set(float64(s.countTotalPlayers()))
 	s.Metrics.PlayersConnectedTotal.Inc()
+
+	// Store the WebSocket connection on the player for reconnection handling
+	player.wsMu.Lock()
+	player.ws = ws
+	player.wsMu.Unlock()
 
 	// Send welcome and broadcast
 	if err := s.welcomeAndBroadcast(ws, game, player, token); err != nil {

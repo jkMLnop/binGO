@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"golang.org/x/net/websocket"
 )
 
 // messageChannel represents a communication channel to a player
@@ -15,6 +17,8 @@ type messageChannel struct {
 type Player struct {
 	ID       string
 	messages *messageChannel
+	ws       *websocket.Conn // Current WebSocket connection (for reconnection handling)
+	wsMu     sync.Mutex      // Protect concurrent access to ws
 }
 
 // newPlayer creates a new player
