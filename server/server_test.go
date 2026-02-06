@@ -511,7 +511,7 @@ func TestImpersonationPrevention(t *testing.T) {
 	// - existingPlayer, exists := game.GetPlayer(username) → exists=true, has player object
 	// - loginMsg.Token == "" → no token provided
 	// Should reject with error
-	
+
 	// We can't fully test this without mocking WebSocket, but we can verify the logic
 	existingPlayer, exists := game.GetPlayer("alice")
 	if !exists {
