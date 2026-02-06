@@ -214,7 +214,16 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 	var player *Player
 
 	if exists && existingPlayer != nil {
-		// Player is reconnecting - close old WebSocket and update to new one
+		// Player already exists in the game
+		if loginMsg.Token == "" {
+			// Attempting to join as existing player WITHOUT a token = impersonation attempt
+			errMsg := ServerMessage{Type: "error", Message: "Username already in use in this game. Use your token to reconnect as this player."}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return nil, nil, fmt.Errorf("username %s already in game (impersonation attempt)", username)
+		}
+		
+		// Token-based reconnection - close old WebSocket and update to new one
 		existingPlayer.wsMu.Lock()
 		if existingPlayer.ws != nil {
 			log.Printf("Closing old WebSocket connection for reconnecting player %s", username)
