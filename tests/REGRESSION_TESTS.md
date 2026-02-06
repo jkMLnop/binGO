@@ -124,7 +124,7 @@
 | 9.2 | Code case sensitivity | Try code with lowercase letters (e.g., `bingo-25z26`) | Code must be uppercase (e.g., `BINGO-25Z26`), lowercase rejected with "invalid game code" error | [ ] |
 | 9.3 | Expired code behavior | Play game, archive it, verify code still works | Code remains valid for new sessions (never expires) | [ ] |
 | 9.4 | Host only can restart | Multiple clients in same game, non-host attempts restart | Only the host (first player to connect) can trigger restart | [ ] |
-| 9.5 | Username impersonation blocked | Player 1 joins as "alice", Player 2 tries to join as "alice" without token | Player 2 rejected with error "Username already in use in this game" | [ ] |
+| 9.5 | Duplicate login rejected | Player already in game, another client tries to join as same player (with or without token) | Second client rejected with error "Username already in use in this game" | [X] |
 
 ---
 

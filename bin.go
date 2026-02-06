@@ -126,7 +126,7 @@ func runClient(serverAddr string, code string) {
 
 	// Calculate max cell number for the board dimensions
 	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
-	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell, 'board' to redisplay, 'win' to announce, or 'q' to quit:"
+	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell, 'board' to redisplay, or 'q' to quit:"
 
 	// === Setup Server Listener ===
 	// Spawn goroutine to listen for server messages
