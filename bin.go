@@ -159,8 +159,6 @@ func runClient(serverAddr string, code string) {
 				inputChan <- "quit"
 			case "board":
 				inputChan <- "board"
-			case "win":
-				inputChan <- "win"
 			case "restart":
 				inputChan <- "restart"
 			case "help":
@@ -278,16 +276,6 @@ func runClient(serverAddr string, code string) {
 				printPrompt("")
 				continue
 
-			case "win":
-				if err := player.AnnounceWin(); err != nil {
-					fmt.Printf("❌ %v\n", err)
-					printPrompt("")
-					continue
-				}
-				fmt.Println("🎉 Announcing win to server...")
-				// Server will broadcast game_ended to all players
-				continue
-
 			case "restart":
 				if err := player.AnnounceRestart(); err != nil {
 					fmt.Printf("❌ Error: %v\n", err)
@@ -344,7 +332,6 @@ func printClientHelp() {
 	fmt.Println("\n📝 Commands:")
 	fmt.Println("  1-9              - Mark a cell")
 	fmt.Println("  'board'          - Redisplay the board")
-	fmt.Println("  'win'            - Announce you've won (must have winning pattern)")
 	fmt.Println("  'restart'        - Restart game (host only)")
 	fmt.Println("  'help'           - Show this help")
 	fmt.Println("  'quit' or 'q'    - Exit game")
