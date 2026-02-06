@@ -4,6 +4,13 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes (2026-02-05)
+
+#### Fixed
+- **Host Disconnect Messaging**: Fixed incorrect message type causing old board marks to display when host disconnects - now uses `error` type to avoid board redraw
+- **Duplicate Win Announcements**: Added check to prevent win announcements when game is already ended, sending error feedback to client instead of silently logging
+- **Dead Code Removal**: Removed manual `win` command from client interface (wins already announce automatically on mark detection)
+
 ### Phase 8.2 - Host Tracking Simplification (2026-02-04)
 
 #### Fixed
