@@ -126,7 +126,11 @@ func runClient(serverAddr string, code string) {
 
 	// Calculate max cell number for the board dimensions
 	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
-	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell, 'board' to redisplay, or 'q' to quit:"
+	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell or 'q' to quit:"
+	gameEndedPrompt := "\nGame has ended. Type 'q' to quit."
+
+	// Track game state
+	gameEnded := false
 
 	// === Setup Server Listener ===
 	// Spawn goroutine to listen for server messages
@@ -157,8 +161,6 @@ func runClient(serverAddr string, code string) {
 			switch input {
 			case "q", "quit":
 				inputChan <- "quit"
-			case "board":
-				inputChan <- "board"
 			case "restart":
 				inputChan <- "restart"
 			case "help":
@@ -218,6 +220,7 @@ func runClient(serverAddr string, code string) {
 				player.DisplayWelcome(player.WelcomeMsg)
 				printPrompt(promptMsg)
 			case "game_ended":
+				gameEnded = true
 				player.DisplayGameEnd(msg)
 				// Show restart option if user is host
 				if msg.HostID == player.PlayerID {
@@ -242,6 +245,7 @@ func runClient(serverAddr string, code string) {
 				// Update welcome message and clear warning on restart
 				player.WelcomeMsg = msg
 				warningMessage = ""
+				gameEnded = false
 				// Redisplay board (same as player_update to maintain consistency)
 				log.Println("DEBUG: Clearing screen and displaying board")
 				fmt.Print("\033[H\033[2J")
@@ -271,15 +275,14 @@ func runClient(serverAddr string, code string) {
 				fmt.Println("Goodbye!")
 				os.Exit(0)
 
-			case "board":
-				player.HandleBoard()
-				printPrompt("")
-				continue
-
 			case "restart":
 				if err := player.AnnounceRestart(); err != nil {
 					fmt.Printf("❌ Error: %v\n", err)
-					printPrompt("")
+					if gameEnded {
+						printPrompt(gameEndedPrompt)
+					} else {
+						printPrompt("")
+					}
 					continue
 				}
 				fmt.Println("🔄 Requesting game restart...")
@@ -288,19 +291,31 @@ func runClient(serverAddr string, code string) {
 
 			case "help":
 				printClientHelp()
-				printPrompt("")
+				if gameEnded {
+					printPrompt(gameEndedPrompt)
+				} else {
+					printPrompt("")
+				}
 				continue
 
 			case "invalid":
 				fmt.Printf("Invalid input. Please enter a number between 1-%d, or type 'help' for commands.\n", maxCellNum)
-				printPrompt("")
+				if gameEnded {
+					printPrompt(gameEndedPrompt)
+				} else {
+					printPrompt("")
+				}
 				continue
 
 			case "mark":
 				won, err := player.HandleMark(cellID, maxCellNum)
 				if err != nil {
 					fmt.Printf("Error: %v\n", err)
-					printPrompt("")
+					if gameEnded {
+						printPrompt(gameEndedPrompt)
+					} else {
+						printPrompt("")
+					}
 					continue
 				}
 
@@ -309,7 +324,11 @@ func runClient(serverAddr string, code string) {
 					// Announce win to server immediately (broadcasts game_ended to all players)
 					if err := player.AnnounceWin(); err != nil {
 						fmt.Printf("Error announcing win: %v\n", err)
-						printPrompt("")
+						if gameEnded {
+							printPrompt(gameEndedPrompt)
+						} else {
+							printPrompt("")
+						}
 						continue
 					}
 
@@ -322,7 +341,11 @@ func runClient(serverAddr string, code string) {
 
 				// Small delay to allow messages from server to be printed
 				time.Sleep(100 * time.Millisecond)
-				printPrompt(promptMsg)
+				if gameEnded {
+					printPrompt(gameEndedPrompt)
+				} else {
+					printPrompt(promptMsg)
+				}
 			}
 		}
 	}
@@ -331,7 +354,6 @@ func runClient(serverAddr string, code string) {
 func printClientHelp() {
 	fmt.Println("\n📝 Commands:")
 	fmt.Println("  1-9              - Mark a cell")
-	fmt.Println("  'board'          - Redisplay the board")
 	fmt.Println("  'restart'        - Restart game (host only)")
 	fmt.Println("  'help'           - Show this help")
 	fmt.Println("  'quit' or 'q'    - Exit game")

@@ -4,9 +4,12 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
-### Bug Fixes (2026-02-05)
+### Bug Fixes (2026-02-07)
 
 #### Fixed
+- **Post-Game Prompt UX**: Fixed issue where error messages after game end still showed cell marking prompts - now displays "Game has ended. Type 'q' to quit." when appropriate
+- **Duplicate Game Archiving**: Removed duplicate archive call when game restarts - games are now archived only once when the game ends, not again on restart
+- **Dead 'board' Command**: Removed non-functional 'board' input case from client that only redrew an already-visible board with no additional value
 - **Username Impersonation Vulnerability**: Reject any attempt to join as an existing player in the game, preventing account hijacking
 - **Host Disconnect Messaging**: Fixed incorrect message type causing old board marks to display when host disconnects - now uses `error` type to avoid board redraw
 - **Duplicate Win Announcements**: Added check to prevent win announcements when game is already ended, sending error feedback to client instead of silently logging

@@ -57,8 +57,26 @@ The evolution of binGO-CLI organized by development phases.
   - Local developers can test deployment flow: `dagger run deploy --env staging` before pushing
   - Enables Phase 10 K8s migration without changing pipeline structure
 
-- [ ] Game lifecycle management
-  - Auto-cleanup: Delete games older than 4 days (after archiving to wins_history)
+- [ ] Game archiving with database persistence
+  - Create `wins_history` table schema:
+    ```sql
+    CREATE TABLE wins_history (
+      id TEXT PRIMARY KEY,
+      game_id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      host_id TEXT NOT NULL,
+      winner_id TEXT NOT NULL,
+      player_count INTEGER,
+      created_at TIMESTAMP,
+      ended_at TIMESTAMP
+    );
+    ```
+  - Modify `archiveGame()` to insert to wins_history table instead of in-memory array
+  - Remove in-memory `ArchivedGames` slice (was temporary scaffolding)
+  - When game ends: Archive to DB immediately (currently happens in handlePlayerWin)
+  - Auto-cleanup: Delete records older than 4 days using cleanup routine
+
+- [ ] Game lifecycle management (continued)
   - Orphaned game detection (host left, no players remaining)
   - Graceful shutdown handling
 
@@ -102,8 +120,9 @@ The evolution of binGO-CLI organized by development phases.
   - Chat UI displays suggestion broadcasts and outcomes
 
 - [ ] Leaderboard queries
-  - Query wins_history to display top players
-  - Display personal stats (wins, games played)
+  - Query wins_history table (created in Phase 8) to display top players
+  - Display personal stats (wins, games played, win rate)
+  - Sort by various metrics (wins, win rate, games played)
 
 - [ ] Updated help text with new commands
 

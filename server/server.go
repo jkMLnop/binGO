@@ -515,8 +515,8 @@ func (s *Server) handleGameRestart(game *Game, player *Player) error {
 		return fmt.Errorf("only the host can restart the game")
 	}
 
-	// Archive the current game session before resetting
-	s.archiveGame(game)
+	// Note: Game was already archived when it ended (in handlePlayerWin).
+	// Restarting is a new session of the same game, don't archive again.
 
 	// Reset the game for a fresh session
 	game.ResetBoard(s.Buzzwords, s.Rows, s.Cols)
