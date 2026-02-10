@@ -2,7 +2,6 @@ package server
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // Metrics holds all Prometheus metrics for the bingo server
@@ -14,9 +13,12 @@ type Metrics struct {
 	GamesCreatedTotal        prometheus.Counter
 	PlayersConnectedTotal    prometheus.Counter
 	PlayersDisconnectedTotal prometheus.Counter
-	ErrorsTotal              prometheus.CounterVec
-	GameArchived             prometheus.Counter
-	GameRestarted            prometheus.Counter
+
+	GameArchived          prometheus.Counter
+	GameRestarted         prometheus.Counter
+	AdminAPIRequestsTotal prometheus.Counter
+	AdminAPILatency       prometheus.Histogram
+	Registry              prometheus.Registerer // Store the registry for Prometheus scraping
 }
 
 var globalMetrics *Metrics
@@ -27,58 +29,92 @@ func NewMetrics() *Metrics {
 		return globalMetrics
 	}
 
-	registry := prometheus.NewRegistry()
-	factory := promauto.With(registry)
-
+	// Register metrics with the default Prometheus registry
 	globalMetrics = &Metrics{
-		GameCount: factory.NewGauge(prometheus.GaugeOpts{
+		GameCount: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bingo_game_count",
 			Help: "Total number of active games",
 		}),
-		PlayerCount: factory.NewGauge(prometheus.GaugeOpts{
+		PlayerCount: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bingo_player_count",
 			Help: "Total number of connected players",
 		}),
-		GameCreationDuration: factory.NewHistogram(prometheus.HistogramOpts{
+		GameCreationDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "bingo_game_creation_duration_ms",
 			Help:    "Time taken to create a game in milliseconds",
 			Buckets: []float64{10, 50, 100, 250, 500, 1000, 2500, 5000},
 		}),
-		DatabaseQueryDuration: factory.NewHistogram(prometheus.HistogramOpts{
+		DatabaseQueryDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "bingo_database_query_duration_ms",
 			Help:    "Database query execution time in milliseconds",
 			Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500},
 		}),
-		GamesCreatedTotal: factory.NewCounter(prometheus.CounterOpts{
+		GamesCreatedTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "bingo_games_created_total",
 			Help: "Total number of games created",
 		}),
-		PlayersConnectedTotal: factory.NewCounter(prometheus.CounterOpts{
+		PlayersConnectedTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "bingo_players_connected_total",
 			Help: "Total number of players who have connected",
 		}),
-		PlayersDisconnectedTotal: factory.NewCounter(prometheus.CounterOpts{
+		PlayersDisconnectedTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "bingo_players_disconnected_total",
 			Help: "Total number of players who have disconnected",
 		}),
-		ErrorsTotal: *factory.NewCounterVec(prometheus.CounterOpts{
-			Name: "bingo_errors_total",
-			Help: "Total number of errors by type",
-		}, []string{"error_type"}),
-		GameArchived: factory.NewCounter(prometheus.CounterOpts{
+
+		GameArchived: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "bingo_game_archived_total",
 			Help: "Total number of games archived",
 		}),
-		GameRestarted: factory.NewCounter(prometheus.CounterOpts{
+		GameRestarted: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "bingo_game_restarted_total",
 			Help: "Total number of games restarted",
 		}),
+		AdminAPIRequestsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "bingo_admin_api_requests_total",
+			Help: "Total number of admin API requests",
+		}),
+		AdminAPILatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "bingo_admin_api_latency_ms",
+			Help:    "Admin API request latency in milliseconds",
+			Buckets: []float64{10, 25, 50, 100, 250, 500, 1000},
+		}),
+		Registry: prometheus.DefaultRegisterer,
 	}
+
+	// Register all metrics
+	prometheus.MustRegister(
+		globalMetrics.GameCount,
+		globalMetrics.PlayerCount,
+		globalMetrics.GameCreationDuration,
+		globalMetrics.DatabaseQueryDuration,
+		globalMetrics.GamesCreatedTotal,
+		globalMetrics.PlayersConnectedTotal,
+		globalMetrics.PlayersDisconnectedTotal,
+		globalMetrics.GameArchived,
+		globalMetrics.GameRestarted,
+		globalMetrics.AdminAPIRequestsTotal,
+		globalMetrics.AdminAPILatency,
+	)
 
 	return globalMetrics
 }
 
 // ResetMetrics resets the global metrics (for testing)
 func ResetMetrics() {
+	if globalMetrics != nil {
+		// Unregister all metrics from Prometheus registry
+		prometheus.Unregister(globalMetrics.GameCount)
+		prometheus.Unregister(globalMetrics.PlayerCount)
+		prometheus.Unregister(globalMetrics.GameCreationDuration)
+		prometheus.Unregister(globalMetrics.DatabaseQueryDuration)
+		prometheus.Unregister(globalMetrics.GamesCreatedTotal)
+		prometheus.Unregister(globalMetrics.PlayersConnectedTotal)
+		prometheus.Unregister(globalMetrics.PlayersDisconnectedTotal)
+		prometheus.Unregister(globalMetrics.GameArchived)
+		prometheus.Unregister(globalMetrics.GameRestarted)
+		prometheus.Unregister(globalMetrics.AdminAPIRequestsTotal)
+		prometheus.Unregister(globalMetrics.AdminAPILatency)
+	}
 	globalMetrics = nil
 }

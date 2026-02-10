@@ -164,6 +164,37 @@ ngrok creates a public tunnel to your local server using a reverse proxy. Your m
 - First player to get 3 in a row (horizontal, vertical, diagonal) wins
 - Winner sees a celebration animation, all players exit
 
+## Admin API
+
+The Admin API allows you to programmatically create, list, and manage games. All endpoints require authentication via the `X-Admin-Key` header.
+
+### Quick Start
+
+```bash
+# Start server
+./binGO-CLI -mode server -port 8080
+
+# In another terminal, set credentials
+export ADMIN_KEY="dev-admin-key-local-only"
+export BASE_URL="http://localhost:8080"
+
+# Create a game
+curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"
+
+# List all games
+curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"
+
+# Get game details
+curl -X GET $BASE_URL/admin/api/games/game-1 -H "X-Admin-Key: $ADMIN_KEY"
+
+# Delete a game
+curl -X DELETE $BASE_URL/admin/api/games/game-1 -H "X-Admin-Key: $ADMIN_KEY"
+```
+
+**For full documentation, see [docs/ADMIN_API.md](docs/ADMIN_API.md)**
+
+Configuration: Set `ADMIN_API_KEY` environment variable to customize the admin key for production.
+
 ## Board Sizes
 - **3x3 Speed Bingo** (current): Quick 9-cell game with numpad numbers 1-9
 - **5x5 Classic Bingo** (planned): Traditional 25-cell board with B-I-N-G-O letters and numbers 1-5

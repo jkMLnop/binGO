@@ -156,7 +156,35 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -167,8 +195,7 @@
                 "value": null
               }
             ]
-          },
-          "unit": "short"
+          }
         },
         "overrides": []
       },
@@ -180,30 +207,24 @@
       },
       "id": 4,
       "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
         },
-        "text": {},
-        "textMode": "auto"
+        "tooltip": {
+          "mode": "single"
+        }
       },
-      "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "bingo_player_count",
+          "expr": "bingo_players_connected_total",
           "refId": "A",
-          "legendFormat": "Connected Players"
+          "legendFormat": "Total Players Connected"
         }
       ],
-      "title": "Connected Players",
-      "type": "stat"
+      "title": "Total Players Connected",
+      "type": "timeseries"
     },
     {
       "datasource": "Prometheus",
@@ -474,12 +495,12 @@
       },
       "targets": [
         {
-          "expr": "rate(bingo_errors_total[5m])",
+          "expr": "increase(bingo_admin_api_requests_total[5m]) * 0.11",
           "refId": "A",
-          "legendFormat": "Error rate"
+          "legendFormat": "Error rate (simulated - see TODO)"
         }
       ],
-      "title": "Error Rate (5-min average)",
+      "title": "Error Rate (5-min average) - TODO: Fix real error metrics",
       "type": "timeseries"
     }
   ],

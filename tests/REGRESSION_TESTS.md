@@ -134,3 +134,75 @@
 |--------|----------|-------|-----------------|--------|
 | 10.1 | Standalone mode unaffected | Run `./binGO-CLI -mode standalone` | Standalone game works normally, no changes observed | [X] |
 | 10.2 | Local LAN mode unaffected | Run client on local network (no ngrok) | Local network functionality works as before | [ ] |
+
+---
+
+## 11. Admin API Regression Tests
+
+### Setup
+```bash
+# Start server with default dev admin key
+./binGO-CLI -mode server -port 8080
+
+# In another terminal, test endpoints
+export ADMIN_KEY="dev-admin-key-local-only"
+export BASE_URL="http://localhost:8080"
+```
+
+### Authentication Tests
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 11.1 | Missing admin key header | `curl -X GET $BASE_URL/admin/api/games` | Returns 401 Unauthorized with "missing X-Admin-Key header" | [X] |
+| 11.2 | Invalid admin key | `curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: wrong-key"` | Returns 403 Forbidden with "invalid X-Admin-Key" | [X] |
+| 11.3 | Valid admin key | `curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 OK with games list | [X] |
+| 11.4 | Custom admin key via env | `ADMIN_API_KEY=my-custom-key ./binGO-CLI -mode server -port 8080` then test with custom key | Returns 200 with custom key, 403 with default key | [X] |
+
+### POST /admin/api/games Tests
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 11.5 | Create game without body | `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with game data (id, code, status, player_count) | [X] |
+| 11.6 | Create game with player list | `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY" -d '{"players":["alice","bob"]}'` | Returns 200 with game data, player_count=0 (players added via WebSocket only) | [X] |
+| 11.7 | Game code format | Create game and check code | Code matches pattern `BINGO-[A-Z0-9]{5}` (11 chars total) | [X] |
+| 11.8 | Unique codes | Create 5 games | All codes are unique | [X] |
+
+### GET /admin/api/games Tests
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 11.9 | List games returns array | `curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with data.games array and data.count | [X] |
+| 11.10 | Correct count value | Create 5 games then list | data.count equals 5 and games array length equals 5 | [X] |
+
+### GET /admin/api/games/{id} Tests
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 11.11 | Get existing game | Create game, then `curl -X GET $BASE_URL/admin/api/games/game-1 -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with all fields (id, code, host_id, status, player_count, created_at, players, is_active) | [X] |
+| 11.12 | Get non-existent game | `curl -X GET $BASE_URL/admin/api/games/nonexistent -H "X-Admin-Key: $ADMIN_KEY"` | Returns 404 with "game nonexistent not found" | [X] |
+| 11.13 | Player IDs in detail | Create game: `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"`, connect players via client, then get detail: `curl -X GET $BASE_URL/admin/api/games/{id} -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with players array containing player IDs | [X] |
+
+### DELETE /admin/api/games/{id} Tests
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 11.14 | Delete existing game | Create game: `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"`, note the returned `id`, then delete: `curl -X DELETE $BASE_URL/admin/api/games/{id} -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200, is_active=false, status="ended" | [X] |
+| 11.15 | Delete non-existent game | `curl -X DELETE $BASE_URL/admin/api/games/nonexistent -H "X-Admin-Key: $ADMIN_KEY"` | Returns 404 with "game nonexistent not found" | [X] |
+
+### Integration with Gameplay Tests
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 11.16 | HTTP status codes & response structure | Test various scenarios | All responses use correct HTTP status (200/400/401/403/404) with success/error fields | [ ] |
+| 11.17 | Admin API creates playable game | Use POST /admin/api/games to create game, then connect client with returned code | Client successfully joins game with correct code | [X] |
+| 11.18 | Admin API tracks active players | Create game with admin API, connect 2 clients, get game detail | player_count increases from 0 to 2 | [X] |
+| 11.19 | Admin API reflects game status | Create game, play until win, get game detail | status changes from "active" to "ended" | [X] |
+| 11.20 | Delete game removes from play | Create game, delete via admin API, try to connect client | Client cannot join (game not found or access denied) | [X] |
+
+### Load & Concurrency Tests
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 11.21 | Create 50 games rapidly | Loop 50x: `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | All requests return 200, all games created successfully | [X] |
+| 11.22 | Concurrent requests | 5 parallel processes each creating 10 games | All 50 games created, no conflicts or errors | [X] |
+| 11.23 | Query performance | Create 100 games, GET /admin/api/games | Response time < 1 second, all games returned | [X] |

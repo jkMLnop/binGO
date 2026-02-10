@@ -86,6 +86,10 @@ func (s *Server) registerHandlers() {
 	s.Mux.HandleFunc("/api/game/", s.handleGetGameByCode)
 	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
 
+	// Admin API handlers (Phase 8) - register both with and without trailing path
+	s.Mux.HandleFunc("/admin/api/games", s.handleAdminGames)
+	s.Mux.HandleFunc("/admin/api/games/", s.handleAdminGames)
+
 	// Metrics endpoint (Phase 8)
 	s.Mux.Handle("/metrics", promhttp.Handler())
 }
@@ -401,6 +405,10 @@ func (s *Server) getOrCreateGame(code string) (*Game, error) {
 
 	// Code is required - look up game by code
 	if game, exists := s.CodeToGame[code]; exists {
+		// Check if game is deleted (inactive)
+		if !game.IsActive {
+			return nil, fmt.Errorf("game has been deleted by admin and is no longer available")
+		}
 		return game, nil
 	}
 
@@ -505,6 +513,11 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 
 // handleGameRestart allows the host to restart a completed game with the same code and fresh board
 func (s *Server) handleGameRestart(game *Game, player *Player) error {
+	// Check if game is deleted (inactive)
+	if !game.IsActive {
+		return fmt.Errorf("Game has been deleted by admin and cannot be restarted")
+	}
+
 	// Check if player is the host
 	if player.ID != game.HostID {
 		// Non-host trying to restart - check if host is still connected

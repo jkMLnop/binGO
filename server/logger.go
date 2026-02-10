@@ -133,8 +133,9 @@ func (l *Logger) DatabaseQuery(operation string, duration float64, success bool,
 
 // Error logs an error event
 func (l *Logger) Error(eventType, message string, err error, details map[string]interface{}) {
-	d := map[string]interface{}{
-		"error": err.Error(),
+	d := map[string]interface{}{}
+	if err != nil {
+		d["error"] = err.Error()
 	}
 	if details != nil {
 		for k, v := range details {

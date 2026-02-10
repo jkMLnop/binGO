@@ -29,23 +29,11 @@ The evolution of binGO-CLI organized by development phases.
 **Goal:** Make cloud server reliable under load; automate deployments
 
 **Tasks:**
-- [ ] Admin API for testing and game management
-  - Admin key validation middleware (check `X-Admin-Key` header against env var `ADMIN_API_KEY`)
-  - Game CRUD endpoints:
-    - `POST /admin/api/games` - Create game (optional body: `{players: ["p1", "p2"]}`)
-    - `GET /admin/api/games` - List all games with state
-    - `GET /admin/api/games/{id}` - Get detailed game state
-    - `DELETE /admin/api/games/{id}` - Force close a game
-  - Enables testing without localhost restriction; players can create games freely via WebSocket, tests use admin API
-  - Add `ADMIN_API_KEY` config (env var, defaults to dev key locally)
-  - Document endpoints with curl examples
-
-- [ ] Multi-game stability testing (using Admin API)
-  - Load test with dozens of concurrent games via `POST /admin/api/games`
-  - Verify game isolation (games don't interfere)
-  - Measure game creation latency and query performance via metrics endpoint
-  - Connection cleanup verification on client disconnect
-  - Test script hammers admin API endpoints while observing Grafana dashboards
+- [ ] **FIX PRIORITY**: Real error metrics for Prometheus
+  - Current: Error rate gauge shows simulated data (calculated from admin API request volume)
+  - Issue: Prometheus error counter metrics (bingo_errors_total, bingo_error_count) not exporting properly
+  - Required: Investigate why error metric .Inc() calls don't appear in /metrics output
+  - Goal: Replace simulated gauge query with real `rate(bingo_errors_total[5m])` query
 
 - [ ] Automated deployments with Dagger
   - Create `dagger/main.go` pipeline (replaces GitHub Actions YAML for deployments)
