@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"dagger.io/dagger"
 )
@@ -16,6 +17,26 @@ const (
 	flyAppStaging    = "bingo-server-staging"
 	defaultGoVersion = "1.25.3"
 )
+
+// projectRoot returns the Go project root directory regardless of whether the
+// pipeline is invoked from the repository root or the dagger/ subdirectory.
+// When running via `cd dagger && go run . <cmd>` (e.g. from Lefthook), the CWD
+// is the dagger/ subdirectory.  In that case the parent directory is the project
+// root (identified by the presence of a go.mod file one level up).
+func projectRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to determine working directory: %v", err)
+	}
+	// If the current dir has go.mod AND the parent also has go.mod, we are inside
+	// a nested module (dagger/) — step up to the project root.
+	if _, err := os.Stat("go.mod"); err == nil {
+		if _, err := os.Stat(filepath.Join("..", "go.mod")); err == nil {
+			return filepath.Join(cwd, "..")
+		}
+	}
+	return cwd
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -38,7 +59,7 @@ func main() {
 	}
 	defer client.Close()
 
-	source := client.Host().Directory(".", dagger.HostDirectoryOpts{
+	source := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
 		Exclude: []string{".git", "dagger", "bin", "bingo", "binGO-CLI", "binGO-CLI-*"},
 	})
 
