@@ -31,6 +31,13 @@ func newPlayer(id string) *Player {
 	}
 }
 
+// SetWS stores the active WebSocket connection on the player (used for graceful shutdown)
+func (p *Player) SetWS(ws *websocket.Conn) {
+	p.wsMu.Lock()
+	defer p.wsMu.Unlock()
+	p.ws = ws
+}
+
 // sendMessage safely sends a message to the player
 func (p *Player) sendMessage(msg interface{}) error {
 	select {
@@ -48,20 +55,11 @@ type Game struct {
 	HostID    string             // ID of the host player (immutable once set on first player connect)
 	Players   map[string]*Player // playerID -> Player
 	IsActive  bool               // Game is in progress
+	Orphaned  bool               // True when all players disconnected without a winner
 	Winner    string             // Player ID of winner (empty if no winner yet)
 	CreatedAt time.Time          // When this game session started
 	EndedAt   time.Time          // When this game session ended (zero if still active)
 	PlayersMu sync.RWMutex       // Protect Players map
-}
-
-// ArchivedGame stores completed game sessions for history
-type ArchivedGame struct {
-	ID        string
-	Code      string
-	HostID    string
-	Winner    string
-	CreatedAt time.Time
-	EndedAt   time.Time
 }
 
 // NewGame creates a new game session

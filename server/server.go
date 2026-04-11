@@ -17,22 +17,21 @@ import (
 
 // Server manages the WebSocket server and game sessions
 type Server struct {
-	Games         map[string]*Game // gameID -> Game (for backward compatibility)
-	CodeToGame    map[string]*Game // Code -> Game (Phase 7.3: code-based access)
-	ArchivedGames []ArchivedGame   // Completed game sessions for history
-	Buzzwords     [][]string
-	Rows          int
-	Cols          int
-	GamesMu       sync.RWMutex
-	Port          string
-	Server        *http.Server
-	Mux           *http.ServeMux            // Custom mux for this server
-	TokenManager  *TokenManager             // JWT token manager
-	Sessions      map[string]*ClientSession // IP -> ClientSession for tracking usernames
-	SessionsMu    sync.RWMutex
-	DB            db.GameStore // Database store (Phase 7.5)
-	Metrics       *Metrics     // Prometheus metrics (Phase 8)
-	Logger        *Logger      // Structured JSON logger (Phase 8)
+	Games        map[string]*Game // gameID -> Game (for backward compatibility)
+	CodeToGame   map[string]*Game // Code -> Game (Phase 7.3: code-based access)
+	Buzzwords    [][]string
+	Rows         int
+	Cols         int
+	GamesMu      sync.RWMutex
+	Port         string
+	Server       *http.Server
+	Mux          *http.ServeMux            // Custom mux for this server
+	TokenManager *TokenManager             // JWT token manager
+	Sessions     map[string]*ClientSession // IP -> ClientSession for tracking usernames
+	SessionsMu   sync.RWMutex
+	DB           db.GameStore // Database store (Phase 7.5)
+	Metrics      *Metrics     // Prometheus metrics (Phase 8)
+	Logger       *Logger      // Structured JSON logger (Phase 8)
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -46,19 +45,18 @@ type ClientSession struct {
 func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
-		Games:         make(map[string]*Game),
-		CodeToGame:    make(map[string]*Game),
-		ArchivedGames: make([]ArchivedGame, 0),
-		Buzzwords:     buzzwords,
-		Rows:          rows,
-		Cols:          cols,
-		Port:          port,
-		Mux:           mux,
-		TokenManager:  NewTokenManager(""), // Will generate random secret
-		Sessions:      make(map[string]*ClientSession),
-		DB:            nil, // Optional - can be set later with SetDB()
-		Metrics:       NewMetrics(),
-		Logger:        NewLogger(),
+		Games:        make(map[string]*Game),
+		CodeToGame:   make(map[string]*Game),
+		Buzzwords:    buzzwords,
+		Rows:         rows,
+		Cols:         cols,
+		Port:         port,
+		Mux:          mux,
+		TokenManager: NewTokenManager(""), // Will generate random secret
+		Sessions:     make(map[string]*ClientSession),
+		DB:           nil, // Optional - can be set later with SetDB()
+		Metrics:      NewMetrics(),
+		Logger:       NewLogger(),
 	}
 	return srv
 }
@@ -73,6 +71,7 @@ func (s *Server) Start() error {
 	s.registerHandlers()
 	// Create initial game and display code to users
 	s.createNewGame()
+	s.startCleanupRoutine()
 	return s.startHTTPServer()
 }
 
@@ -134,6 +133,7 @@ func (s *Server) createNewGame() {
 	ctx := context.Background()
 	if err := SaveGameToDB(ctx, s.DB, newGame, s.Buzzwords); err != nil {
 		log.Printf("Warning: failed to save game to DB: %v", err)
+		s.Metrics.RecordError("db")
 	}
 }
 
@@ -202,6 +202,7 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		errMsg := ServerMessage{Type: "error", Message: "Game code required for all remote connections"}
 		websocket.JSON.Send(ws, errMsg)
 		ws.Close()
+		s.Metrics.RecordError("input")
 		return nil, nil, fmt.Errorf("game code required")
 	}
 
@@ -248,6 +249,9 @@ func (s *Server) handlePlayerConnect(ws *websocket.Conn) (*Player, *Game, error)
 		return nil, nil, err
 	}
 
+	// Store the WebSocket connection on the player for graceful shutdown
+	player.SetWS(ws)
+
 	return player, game, nil
 }
 
@@ -267,6 +271,7 @@ func (s *Server) authenticatePlayer(ws *websocket.Conn, loginMsg ClientMessage) 
 			errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("Invalid token: %v", err)}
 			websocket.JSON.Send(ws, errMsg)
 			ws.Close()
+			s.Metrics.RecordError("auth")
 			return "", fmt.Errorf("invalid token: %w", err)
 		}
 		log.Printf("Player %s re-authenticated with token", username)
@@ -278,6 +283,7 @@ func (s *Server) authenticatePlayer(ws *websocket.Conn, loginMsg ClientMessage) 
 		errMsg := ServerMessage{Type: "error", Message: "Username or token required"}
 		websocket.JSON.Send(ws, errMsg)
 		ws.Close()
+		s.Metrics.RecordError("input")
 		return "", fmt.Errorf("no username or token provided")
 	}
 
@@ -359,6 +365,7 @@ func (s *Server) createPlayerInGame(game *Game, playerID string) (*Player, error
 		dbPlayerID, err := RecordPlayerInDB(ctx, s.DB, game.ID, playerID, "", isHost)
 		if err != nil {
 			log.Printf("Warning: failed to record player in DB: %v", err)
+			s.Metrics.RecordError("db")
 		} else {
 			// Store DB info for later win recording
 			SetPlayerDBInfo(player.ID, &PlayerDBInfo{
@@ -405,14 +412,18 @@ func (s *Server) getOrCreateGame(code string) (*Game, error) {
 
 	// Code is required - look up game by code
 	if game, exists := s.CodeToGame[code]; exists {
-		// Check if game is deleted (inactive)
 		if !game.IsActive {
+			s.Metrics.RecordError("game")
+			if game.Orphaned {
+				return nil, fmt.Errorf("game %s has ended: all players disconnected", code)
+			}
 			return nil, fmt.Errorf("game has been deleted by admin and is no longer available")
 		}
 		return game, nil
 	}
 
 	// Game not found
+	s.Metrics.RecordError("game")
 	return nil, fmt.Errorf("invalid game code: %s", code)
 }
 
@@ -459,19 +470,21 @@ func (s *Server) processPlayerMessage(game *Game, player *Player, msg *ClientMes
 func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 	log.Printf("Player %s announced a win!", player.ID)
 
-	// Check if game is already ended
-	if !game.IsActive {
+	// Check if game is already ended (admin-deleted/orphaned OR already has a winner)
+	if !game.IsActive || game.Winner != "" {
+		s.Metrics.RecordError("game")
 		return fmt.Errorf("game has already ended with winner: %s", game.Winner)
 	}
 
 	// Verify player exists in game
 	_, exists := game.GetPlayer(player.ID)
 	if !exists {
+		s.Metrics.RecordError("game")
 		return fmt.Errorf("player %s not found in game", player.ID)
 	}
 
-	// Update game state
-	game.IsActive = false
+	// Update game state (don't set IsActive=false; keep it true for restart)
+	// IsActive=false only for admin-deleted or orphaned games
 	game.Winner = player.ID
 	game.EndedAt = time.Now()
 	log.Printf("🏆 Player %s WON game %s!", player.ID, game.ID)
@@ -480,6 +493,7 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 	ctx := context.Background()
 	if err := RecordWinInDB(ctx, s.DB, game, player.ID); err != nil {
 		log.Printf("Warning: failed to record win in DB: %v", err)
+		s.Metrics.RecordError("db")
 	}
 
 	// Archive the completed game
@@ -513,8 +527,9 @@ func (s *Server) handlePlayerWin(game *Game, player *Player) error {
 
 // handleGameRestart allows the host to restart a completed game with the same code and fresh board
 func (s *Server) handleGameRestart(game *Game, player *Player) error {
-	// Check if game is deleted (inactive)
-	if !game.IsActive {
+	// Check if game is deleted (inactive) or orphaned
+	if !game.IsActive || game.Orphaned {
+		s.Metrics.RecordError("game")
 		return fmt.Errorf("Game has been deleted by admin and cannot be restarted")
 	}
 
@@ -523,8 +538,10 @@ func (s *Server) handleGameRestart(game *Game, player *Player) error {
 		// Non-host trying to restart - check if host is still connected
 		hostPlayer, hostExists := game.GetPlayer(game.HostID)
 		if !hostExists || hostPlayer == nil {
+			s.Metrics.RecordError("game")
 			return fmt.Errorf("❌ Host has disconnected. Game cannot be restarted.")
 		}
+		s.Metrics.RecordError("game")
 		return fmt.Errorf("only the host can restart the game")
 	}
 
@@ -553,21 +570,87 @@ func (s *Server) handleGameRestart(game *Game, player *Player) error {
 	return nil
 }
 
-// archiveGame saves a completed game session to the archive
+// archiveGame persists a completed game session to the database
 func (s *Server) archiveGame(game *Game) {
-	s.GamesMu.Lock()
-	defer s.GamesMu.Unlock()
-
-	archived := ArchivedGame{
-		ID:        game.ID,
-		Code:      game.Code,
-		HostID:    game.HostID,
-		Winner:    game.Winner,
-		CreatedAt: game.CreatedAt,
-		EndedAt:   time.Now(),
+	ctx := context.Background()
+	if err := ArchiveGameInDB(ctx, s.DB, game); err != nil {
+		log.Printf("Warning: failed to archive game in DB: %v", err)
+		s.Metrics.RecordError("db")
 	}
-	s.ArchivedGames = append(s.ArchivedGames, archived)
+	s.Metrics.GameArchived.Inc()
 	log.Printf("📋 Archived game %s (code: %s)", game.ID, game.Code)
+}
+
+// markGameOrphaned marks a game as orphaned (all players left before a winner was declared),
+// ends it, and archives it so the code can be cleanly reused.
+func (s *Server) markGameOrphaned(game *Game) {
+	game.IsActive = false
+	game.Orphaned = true
+	game.EndedAt = time.Now()
+	log.Printf("🕳️  Game %s (code: %s) orphaned — all players disconnected without a winner", game.ID, game.Code)
+	s.archiveGame(game)
+}
+
+// NotifyShutdown broadcasts a server_shutdown message to every connected player and
+// closes their WebSocket connections so the HTTP server can drain cleanly.
+func (s *Server) NotifyShutdown() {
+	shutdownMsg := ServerMessage{
+		Type:    "server_shutdown",
+		Message: "⚠️ Server is shutting down. Please reconnect later.",
+	}
+
+	s.GamesMu.RLock()
+	defer s.GamesMu.RUnlock()
+
+	notified := 0
+	for _, game := range s.Games {
+		game.PlayersMu.RLock()
+		for _, p := range game.Players {
+			_ = p.sendMessage(shutdownMsg)
+			// Close the WebSocket so the read loop in wsHandler unblocks
+			p.wsMu.Lock()
+			if p.ws != nil {
+				p.ws.Close()
+			}
+			p.wsMu.Unlock()
+			notified++
+		}
+		game.PlayersMu.RUnlock()
+	}
+
+	if notified > 0 {
+		log.Printf("🛑 Notified %d player(s) of server shutdown", notified)
+		time.Sleep(500 * time.Millisecond) // brief pause so messages can flush
+	}
+}
+
+// startCleanupRoutine starts a background goroutine that periodically removes
+// game archive records older than 4 days.
+func (s *Server) startCleanupRoutine() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		s.runArchiveCleanup() // Run once immediately on startup
+		for range ticker.C {
+			s.runArchiveCleanup()
+		}
+	}()
+}
+
+// runArchiveCleanup deletes old entries from the game_archives table
+func (s *Server) runArchiveCleanup() {
+	if s.DB == nil {
+		return
+	}
+	ctx := context.Background()
+	n, err := s.DB.CleanupOldArchives(ctx)
+	if err != nil {
+		log.Printf("Warning: archive cleanup failed: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("🧹 Cleaned up %d old game archive(s) (older than 4 days)", n)
+	}
 }
 
 // forwardPlayerMessages forwards messages from player's channel to their WebSocket connection
@@ -575,6 +658,7 @@ func (s *Server) forwardPlayerMessages(player *Player, ws *websocket.Conn) {
 	for msg := range player.messages.send {
 		if err := websocket.JSON.Send(ws, msg); err != nil {
 			log.Printf("Error sending message to %s: %v", player.ID, err)
+			s.Metrics.RecordError("ws")
 			return
 		}
 	}
@@ -592,6 +676,11 @@ func (s *Server) handlePlayerDisconnect(game *Game, player *Player, ws *websocke
 	// Update metrics (Phase 8)
 	s.Metrics.PlayerCount.Set(float64(s.countTotalPlayers()))
 	s.Metrics.PlayersDisconnectedTotal.Inc()
+
+	// Orphaned game detection: all players left an active game (no winner)
+	if playerCount == 0 && game.IsActive {
+		s.markGameOrphaned(game)
+	}
 
 	// Broadcast disconnection messages if players remain
 	if playerCount > 0 {

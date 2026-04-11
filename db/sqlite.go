@@ -83,6 +83,18 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_players_game_id ON players(game_id);
 	CREATE INDEX IF NOT EXISTS idx_hosts_username ON hosts(username);
 	CREATE INDEX IF NOT EXISTS idx_wins_player_username ON wins_history(player_username);
+
+	CREATE TABLE IF NOT EXISTS game_archives (
+		id TEXT PRIMARY KEY,
+		game_id TEXT NOT NULL,
+		code TEXT NOT NULL,
+		host_id TEXT NOT NULL,
+		winner_id TEXT NOT NULL,
+		player_count INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		ended_at INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_game_archives_ended_at ON game_archives(ended_at);
 	`
 
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -537,6 +549,45 @@ func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*Leaderb
 	}
 
 	return entries, nil
+}
+
+// ArchiveGame persists a completed game session to the game_archives table
+func (s *SQLiteStore) ArchiveGame(ctx context.Context, gameID, code, hostID, winnerID string, playerCount int, createdAt, endedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	archiveID := generateID()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO game_archives (id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		archiveID, gameID, code, hostID, winnerID, playerCount,
+		createdAt.Unix(), endedAt.Unix(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to archive game: %w", err)
+	}
+	return nil
+}
+
+// CleanupOldArchives deletes game_archives records older than 4 days
+func (s *SQLiteStore) CleanupOldArchives(ctx context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cutoff := time.Now().Add(-4 * 24 * time.Hour).Unix()
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM game_archives WHERE ended_at < ?`,
+		cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup old archives: %w", err)
+	}
+
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	return int(n), nil
 }
 
 // generateID generates a unique ID (simple UUID-like string)

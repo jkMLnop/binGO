@@ -1,3 +1,6 @@
+# Environment / credentials — never commit real secrets
+.env
+
 # Ignore buzzword file
 buzzwords_full.csv
 

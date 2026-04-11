@@ -10,19 +10,36 @@ This guide walks through setting up the complete monitoring stack for Phase 8:
 
 ## Local Development Setup
 
-### 1. Configure Credentials (Optional for Local Development)
+### 1. Configure Credentials
 
-For local development, default credentials are used. For production or shared environments, set secure credentials:
+A `.env.example` file is provided with all supported variables and their safe defaults.
+Copy it and fill in real values before starting the stack:
 
 ```bash
-# Create a .env file with secure credentials
-cat > .env << EOF
-GRAFANA_USER=admin
-GRAFANA_PASSWORD=your_secure_password_here
-EOF
+cp .env.example .env
+# Edit .env with your preferred editor
 ```
 
-These will be loaded by `docker-compose up`.
+The `.env` file is gitignored — never commit it.
+
+**Environment variables:**
+
+| Variable | Default (fallback) | Description |
+|---|---|---|
+| `GRAFANA_USER` | `admin` | Grafana UI login username |
+| `GRAFANA_PASSWORD` | `change_me_in_production` | Grafana UI login password |
+| `ADMIN_API_KEY` | `dev-admin-key-local-only` | Secret for authenticating admin API requests |
+| `LOG_LEVEL` | `info` | Server log verbosity (`debug`, `info`, `warn`, `error`) |
+
+**For production**, generate a strong admin key:
+
+```bash
+openssl rand -hex 32
+```
+
+Then set it in `.env` and also provide it to any admin clients or CI pipelines that call the admin API.
+
+> **Note:** If no `.env` file is present, `docker-compose` will use the fallback defaults shown above. The fallback `ADMIN_API_KEY` is intentionally weak (`dev-admin-key-local-only`) to make it obvious if it leaks — never use it outside localhost.
 
 ### 2. Start the Complete Stack
 

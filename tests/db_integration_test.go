@@ -5,6 +5,7 @@ package tests
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/jkMLnop/binGO-CLI/db"
 	"github.com/jkMLnop/binGO-CLI/server"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // TestGameCreationPersistence verifies that games are saved to DB and queryable via API
@@ -259,12 +261,11 @@ func TestAPIGameLookup(t *testing.T) {
 
 	// Create a mock game in memory so the API can find it
 	srv.CodeToGame[gameCode] = &server.Game{
-		ID:             gameID,
-		Code:           gameCode,
-		OriginalHostID: hostID,
-		HostID:         hostID,
-		IsActive:       true,
-		Players:        make(map[string]*server.Player),
+		ID:       gameID,
+		Code:     gameCode,
+		HostID:   hostID,
+		IsActive: true,
+		Players:  make(map[string]*server.Player),
 	}
 
 	// Test API endpoint using httptest (simulating HTTP call)
@@ -369,6 +370,132 @@ func TestAPILeaderboardEndpoint(t *testing.T) {
 	}
 
 	t.Log("✓ Leaderboard API endpoint works correctly")
+}
+
+// TestArchiveGameIntegration verifies the full ArchiveGameInDB path and cleanup together
+func TestArchiveGameIntegration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_archive_integration.db")
+
+	store, err := db.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create DB store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init DB: %v", err)
+	}
+
+	// Create a server.Game and call ArchiveGameInDB (the server-layer helper)
+	buzzwords := [][]string{{"synergy"}, {"leverage"}, {"paradigm"}, {"disruption"}, {"innovation"}, {"blockchain"}, {"AI"}, {"cloud"}, {"agile"}}
+	game := server.NewGame("game-int-1", buzzwords, 3, 3)
+	game.Winner = "alice"
+	game.IsActive = false
+
+	if err := server.ArchiveGameInDB(ctx, store, game); err != nil {
+		t.Fatalf("ArchiveGameInDB failed: %v", err)
+	}
+
+	// Independently insert an old record (>4 days) directly via the store
+	fiveDaysAgo := time.Now().Add(-5 * 24 * time.Hour)
+	if err := store.ArchiveGame(ctx, "old-game", "BINGO-OLD00", "host-1", "winner-old", 2, fiveDaysAgo.Add(-10*time.Minute), fiveDaysAgo); err != nil {
+		t.Fatalf("failed to insert old archive: %v", err)
+	}
+
+	// Run cleanup: should remove the old record, keep game-int-1
+	deleted, err := store.CleanupOldArchives(ctx)
+	if err != nil {
+		t.Fatalf("CleanupOldArchives failed: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("expected 1 deleted record, got %d", deleted)
+	}
+
+	// Verify game-int-1 archive was NOT deleted by confirming a second cleanup
+	// deletes nothing (i.e. the recent record is still there)
+	deleted2, err2 := store.CleanupOldArchives(ctx)
+	if err2 != nil {
+		t.Fatalf("second cleanup failed: %v", err2)
+	}
+	if deleted2 != 0 {
+		t.Errorf("expected 0 records on second cleanup, got %d", deleted2)
+	}
+
+	t.Logf("✓ ArchiveGameInDB + CleanupOldArchives integration path works correctly")
+}
+
+// TestOrphanedGameArchivesToDB verifies that when a game is orphaned (no winner),
+// ArchiveGameInDB writes a row with an empty winner_id, distinct from a normal win archive.
+func TestOrphanedGameArchivesToDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_orphan_archive.db")
+
+	store, err := db.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create DB store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init DB: %v", err)
+	}
+
+	buzzwords := [][]string{{"synergy"}, {"leverage"}, {"paradigm"}, {"disruption"}, {"innovation"}, {"blockchain"}, {"AI"}, {"cloud"}, {"agile"}}
+
+	// Build an orphaned game: IsActive=false, Orphaned=true, Winner="" (zero value)
+	game := server.NewGame("game-orphan-db", buzzwords, 3, 3)
+	game.IsActive = false
+	game.Orphaned = true
+	game.EndedAt = time.Now()
+	// game.Winner intentionally left as "" to mimic the orphan path in markGameOrphaned
+
+	if err := server.ArchiveGameInDB(ctx, store, game); err != nil {
+		t.Fatalf("ArchiveGameInDB failed: %v", err)
+	}
+
+	// Verify the persisted row has an empty winner_id
+	sqlDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open raw DB: %v", err)
+	}
+	defer sqlDB.Close()
+
+	var winnerID string
+	if err := sqlDB.QueryRow(
+		`SELECT winner_id FROM game_archives WHERE game_id = ?`, game.ID,
+	).Scan(&winnerID); err != nil {
+		t.Fatalf("failed to query game_archives: %v", err)
+	}
+
+	if winnerID != "" {
+		t.Errorf("orphaned game should have empty winner_id in game_archives, got %q", winnerID)
+	}
+
+	// Also verify a normal win archive has a non-empty winner_id (contrast check)
+	wonGame := server.NewGame("game-won-db", buzzwords, 3, 3)
+	wonGame.IsActive = false
+	wonGame.Winner = "alice"
+	wonGame.EndedAt = time.Now()
+
+	if err := server.ArchiveGameInDB(ctx, store, wonGame); err != nil {
+		t.Fatalf("ArchiveGameInDB for won game failed: %v", err)
+	}
+
+	var wonWinnerID string
+	if err := sqlDB.QueryRow(
+		`SELECT winner_id FROM game_archives WHERE game_id = ?`, wonGame.ID,
+	).Scan(&wonWinnerID); err != nil {
+		t.Fatalf("failed to query won game_archives: %v", err)
+	}
+
+	if wonWinnerID != "alice" {
+		t.Errorf("won game should have winner_id=alice, got %q", wonWinnerID)
+	}
+
+	t.Logf("✓ orphaned archive: winner_id=%q | won archive: winner_id=%q", winnerID, wonWinnerID)
 }
 
 // TestGameExpirationCleanup verifies 4-day expiration logic

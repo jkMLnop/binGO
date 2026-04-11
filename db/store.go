@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // GameStore defines the interface for persisting game state, players, and buzzword lists.
@@ -39,6 +40,10 @@ type GameStore interface {
 	RecordWin(ctx context.Context, playerUsername string, gameCode string) error
 	GetPlayerWins(ctx context.Context, playerUsername string) (int, error)
 	GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error)
+
+	// Game archive operations
+	ArchiveGame(ctx context.Context, gameID, code, hostID, winnerID string, playerCount int, createdAt, endedAt time.Time) error
+	CleanupOldArchives(ctx context.Context) (deletedCount int, err error)
 }
 
 // Game represents a game session
@@ -78,4 +83,16 @@ type Host struct {
 type LeaderboardEntry struct {
 	Username string
 	Wins     int
+}
+
+// GameArchive represents a completed game session persisted for history
+type GameArchive struct {
+	ID          string
+	GameID      string
+	Code        string
+	HostID      string
+	WinnerID    string
+	PlayerCount int
+	CreatedAt   int64 // Unix timestamp
+	EndedAt     int64 // Unix timestamp
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/jkMLnop/binGO-CLI/db"
 )
@@ -104,6 +105,25 @@ func RecordWinInDB(ctx context.Context, store db.GameStore, game *Game, winnerUs
 	}
 
 	log.Printf("Win recorded in DB: username=%s, gameCode=%s", winnerUsername, game.Code)
+	return nil
+}
+
+// ArchiveGameInDB persists a completed game session to the game_archives table
+func ArchiveGameInDB(ctx context.Context, store db.GameStore, game *Game) error {
+	if store == nil {
+		return nil // DB not enabled
+	}
+
+	endedAt := game.EndedAt
+	if endedAt.IsZero() {
+		endedAt = time.Now()
+	}
+
+	if err := store.ArchiveGame(ctx, game.ID, game.Code, game.HostID, game.Winner, game.PlayerCount(), game.CreatedAt, endedAt); err != nil {
+		return fmt.Errorf("failed to archive game in DB: %w", err)
+	}
+
+	log.Printf("Game archived in DB: id=%s, code=%s, winner=%s", game.ID, game.Code, game.Winner)
 	return nil
 }
 

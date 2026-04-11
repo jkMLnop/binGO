@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jkMLnop/binGO-CLI/client"
@@ -73,9 +74,9 @@ func runServer(port string, dbPath string) {
 		log.Println("Running without database (use -db flag to enable)")
 	}
 
-	// Handle graceful shutdown
+	// Handle graceful shutdown (SIGINT = Ctrl-C, SIGTERM = Docker/k8s stop)
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -86,6 +87,9 @@ func runServer(port string, dbPath string) {
 	// Wait for interrupt
 	<-sigChan
 	log.Println("\nShutting down server...")
+
+	// Notify all connected players before closing
+	srv.NotifyShutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -4,6 +4,117 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Phase 8.7 - Real Error Metrics for Prometheus (2026-03-04)
+
+#### Fixed
+- **`bingo_errors_total` was never created** — the metric was referenced in `alert-rules.yml`, both Grafana dashboard JSONs, and `docs/MONITORING_SETUP.md` but didn't exist in `metrics.go`. The Grafana panel fell back to a fake formula (`increase(bingo_admin_api_requests_total[5m]) * 0.11`).
+
+#### Added
+- **`Metrics.ErrorsTotal *prometheus.CounterVec`** — labeled by `error_type`; registered in `metrics.go` alongside all other metrics; unregistered in `ResetMetrics()`
+  - `auth` — invalid/expired JWT token on WebSocket connect
+  - `input` — missing game code or missing username/token in login message
+  - `game` — invalid game code, orphaned/deleted game, already-ended game, non-host restart attempt, host disconnected
+  - `db` — failed writes to SQLite (save game, record player, record win, archive game)
+  - `ws` — failed WebSocket send in `forwardPlayerMessages`
+- **`Metrics.RecordError(errorType string)`** helper method — single call site used throughout `server.go`
+- **11 `RecordError` call sites** added across `server.go`: `authenticatePlayer`, `handlePlayerConnect`, `getOrCreateGame`, `handlePlayerWin`, `handleGameRestart`, `archiveGame`, `createNewGame`, `createPlayerInGame`, `forwardPlayerMessages`
+
+#### Changed
+- **Both Grafana dashboard JSONs** (`grafana-dashboards/bingo-dashboard.json` and `grafana-provisioning/dashboards/bingo-dashboard.json`): Error Rate panel now queries `rate(bingo_errors_total[5m])` with `legendFormat: "{{error_type}}"` (one line per error type); panel title changed from `"Error Rate (5-min average) - TODO: Fix real error metrics"` to `"Error Rate (5-min average)"`
+
+#### Tests
+- `TestErrorMetricInvalidGameCode` — `error_type="game"` increments by 1 on unknown code lookup
+- `TestErrorMetricAlreadyEndedGame` — `error_type="game"` increments by 1 on second win attempt
+- `TestErrorMetricNonHostRestart` — `error_type="game"` increments by 1 when non-host tries to restart
+- `TestErrorMetricScrapeable` — triggers an error, then serves `/metrics` via `httptest` and asserts `bingo_errors_total{error_type="game"} 1` appears in the Prometheus scrape response body
+
+---
+
+### Phase 8.6 - Game Lifecycle Management (2026-03-04)
+
+#### Changed
+- **`handlePlayerWin` behavior change**: `IsActive` is no longer set to `false` on win — only `game.Winner` is set and `game.EndedAt` is recorded; `IsActive=false` is now reserved exclusively for admin-deleted or orphaned games, which allows the host to restart a won game without admin intervention
+- **Duplicate-win guard improved**: condition changed from `!game.IsActive` to `!game.IsActive || game.Winner != ""` so a second win announcement is rejected even though the game stays active
+
+#### Added
+- **Orphaned game detection**: When the last player disconnects from a game that has no winner, `handlePlayerDisconnect` now calls `markGameOrphaned()` instead of silently leaving the game in `s.Games` as active
+  - `Game.Orphaned bool` field added to distinguish orphaned games from admin-deleted ones
+  - `markGameOrphaned()`: sets `IsActive = false`, `Orphaned = true`, `EndedAt = time.Now()`, logs the event, and archives the game (with empty `winner_id`)
+- **Clearer join error for orphaned games**: `getOrCreateGame()` now returns `"game <CODE> has ended: all players disconnected"` instead of the admin-deleted message when a player tries to join a code whose game was orphaned
+- **`Player.SetWS(*websocket.Conn)`**: New method to store the active WebSocket on a player; called at the end of `handlePlayerConnect` so `NotifyShutdown` can close connections cleanly
+- **`Server.NotifyShutdown()`**: Broadcasts a `server_shutdown` message to every connected player, then closes their WebSocket connections so the HTTP server can drain within its shutdown timeout; logs the number of players notified
+- **SIGTERM handling in `bin.go`**: `signal.Notify` now catches both `os.Interrupt` (Ctrl-C) and `syscall.SIGTERM` (Docker/k8s `docker stop`); `srv.NotifyShutdown()` is called before `srv.Stop(ctx)`
+
+#### Tests
+- `TestOrphanedGameMarkedOnLastDisconnect`: Verifies `markGameOrphaned` sets `IsActive=false`, `Orphaned=true`, and non-zero `EndedAt`
+- `TestOrphanedGameNotJoinable`: Verifies `getOrCreateGame` returns the correct error message for an orphaned code (not the admin-deleted one)
+- `TestNotifyShutdownDoesNotPanicWithNilWS`: Verifies `NotifyShutdown` delivers `server_shutdown` messages to both players and does not panic when `player.ws` is nil (unit-test environment)
+- `TestPartialDisconnectDoesNotOrphan`: Verifies the `playerCount == 0` guard — a game with remaining players is never orphaned when a single player leaves
+- `TestWinnerGameNotOrphaned`: Verifies a game ended by a win has `Orphaned=false` and `IsActive=true` (only the orphan/admin-delete path sets `IsActive=false`)
+- `TestOrphanedGamePreservesHostID`: Verifies `HostID` remains unchanged after `markGameOrphaned` (HostID is always immutable)
+- `TestOrphanedGameArchivesToDB` (integration): Creates an orphaned game state (`Winner=""`), calls `ArchiveGameInDB`, and verifies the DB row has an empty `winner_id`; also confirms a normal win archive stores the correct `winner_id` in the same test (contrast check)
+- `TestHandlePlayerWinArchivesGameToDB`: End-to-end unit test verifying the full `handlePlayerWin` → `archiveGame` → `ArchiveGameInDB` path writes a row to `game_archives` with correct `code`, `host_id`, `winner_id`, and `player_count`
+- `TestAdminKeyMiddlewareEnvVar`: Validates that `ADMIN_API_KEY` env var overrides the hardcoded default; covers custom key accepted, default key rejected when custom is set, default key works when env var is empty, and wrong key always rejected
+- **Container E2E tests** (`tests/container_e2e_test.go`, build tag `container`): 6 Testcontainers-based tests automating former manual Docker-stack regression checks
+  - `TestContainerAdminKeyCustom` — custom `ADMIN_API_KEY` env var displaces default key
+  - `TestContainerAdminKeyFallback` — absent env var falls back to hardcoded dev key
+  - `TestContainerSIGTERMNotifiesClients` — `docker stop` sends `server_shutdown` to connected players
+  - `TestContainerOrphanedGame` — all players disconnect → orphan log line + join error
+  - `TestContainerVolumeArchivePersistence` — win archived to SQLite; DB row survives container restart
+  - `TestContainerCleanupGoroutine` — stale archive rows (>4 days) deleted on startup
+- **Container regression tests** (`tests/container_regression_test.go`, build tag `container`): 8 Testcontainers-based regression tests
+  - `TestRegressionCleanupRecentSurvives`, `TestRegressionMultiWinArchive`, `TestRegressionAdminAuthMatrix`, `TestRegressionAdminCreateGame`, `TestRegressionAdminListGames`, `TestRegressionAdminGetDeleteGame`, `TestRegressionAdminStatusCodes`, `TestRegressionAdminConcurrency`, `TestRegressionZeroPlayerShutdown`
+
+---
+
+### Phase 8.5 - Game Archiving (2026-03-04)
+
+#### Added
+- **`game_archives` table**: New SQLite table persisting completed game sessions
+  - Schema: `id, game_id, code, host_id, winner_id, player_count, created_at, ended_at`
+  - Indexed on `ended_at` for efficient age-based cleanup queries
+- **`GameStore.ArchiveGame()`**: New interface method (and SQLiteStore implementation) for writing a game archive record
+- **`GameStore.CleanupOldArchives()`**: New interface method (and SQLiteStore implementation) that deletes records older than 4 days
+- **`ArchiveGameInDB()` helper** in `server/db.go`: nil-safe wrapper used by the server
+- **Background cleanup goroutine**: Started in `Server.Start()`, runs `CleanupOldArchives` immediately on startup then every hour; logs count of deleted records when > 0
+- **`GameArchive` struct** in `db/store.go`: New type representing a persisted completed game session
+
+#### Changed
+- **`archiveGame()`** in `server/server.go`: Now writes to `game_archives` table via `ArchiveGameInDB()` and increments the `bingo_game_archived_total` Prometheus counter, replacing the previous in-memory append
+- **`Server` struct**: Removed in-memory `ArchivedGames []ArchivedGame` slice (was temporary scaffolding)
+- **`game.go`**: Removed `ArchivedGame` struct (no longer needed)
+
+#### Tests
+- `TestArchiveGame`: Verifies two archive entries can be persisted without error
+- `TestCleanupOldArchives`: Verifies records older than 4 days are deleted while recent records are kept; second cleanup run returns 0
+- `TestArchiveGameIntegration` (integration): Verifies the full `ArchiveGameInDB` + `CleanupOldArchives` path together — archives a game, inserts an old record, runs cleanup, confirms only the old record is deleted
+
+---
+
+### Phase 8.4 - Production Credentials Setup (2026-03-04)
+
+#### Added
+- **`.env.example` template**: Documents all supported environment variables with safe placeholder defaults
+  - `GRAFANA_USER` / `GRAFANA_PASSWORD` — Grafana UI credentials
+  - `ADMIN_API_KEY` — secret for authenticating admin API requests
+  - `LOG_LEVEL` — server log verbosity
+  - Each variable annotated with purpose and production guidance
+- **`.gitignore` update**: `.env` added to prevent accidental credential commits
+- **`docker-compose.yml` update**: `ADMIN_API_KEY` and `LOG_LEVEL` now use `${VAR:-fallback}` syntax so values flow from `.env` without breaking existing local setups
+- **`docs/MONITORING_SETUP.md` credentials section**: Replaced vague local-dev note with full variable reference table, `cp .env.example .env` workflow, `openssl rand -hex 32` guidance for production keys, and explanation of why the fallback key is intentionally weak
+- **`Dockerfile`**: Added `sqlite` CLI package (`apk add sqlite`) to the final Alpine image for debugging and testing inside the container
+- **`docs/ROADMAP.md`**: Updated Phase 8 — checked off error metrics fix; removed completed game archiving and production credentials tasks; added context propagation & error wrapping audit; added Dagger pipeline testing notes
+- **`tests/README.md`**: Added container E2E test section with run instructions (`go test -tags=container -timeout=10m ./tests -v`), prerequisites, and test-to-regression-test mapping table
+- **`tests/REGRESSION_TESTS.md`**: Restructured — added automated test note at top; new Section 12 (Production Credentials via `.env`/docker-compose); simplified Section 11 (Admin API) to integration-with-gameplay tests only; rewrote Section 7 as "Database Persistence (Phase 8.5)"
+
+#### Fixed
+- **`tests/multiplayer_test.go`**: Changed `localGame.Board.MarkCell(move)` to `localGame.MarkCell(move)` to match updated API
+
+#### Dependencies
+- **`go.mod` / `go.sum`**: Added `testcontainers-go v0.40.0`, `docker/docker v28.5.1`, and transitive dependencies (Docker SDK, containerd, OCI, Moby, etc.) for container-based tests
+
+---
+
 ### Phase 8.3 - Multi-Game Stability Testing (2026-02-10)
 
 #### Added

@@ -29,12 +29,6 @@ The evolution of binGO-CLI organized by development phases.
 **Goal:** Make cloud server reliable under load; automate deployments
 
 **Tasks:**
-- [ ] **FIX PRIORITY**: Real error metrics for Prometheus
-  - Current: Error rate gauge shows simulated data (calculated from admin API request volume)
-  - Issue: Prometheus error counter metrics (bingo_errors_total, bingo_error_count) not exporting properly
-  - Required: Investigate why error metric .Inc() calls don't appear in /metrics output
-  - Goal: Replace simulated gauge query with real `rate(bingo_errors_total[5m])` query
-
 - [ ] Automated deployments with Dagger
   - Create `dagger/main.go` pipeline (replaces GitHub Actions YAML for deployments)
   - `dagger run build` - builds Docker image locally
@@ -44,40 +38,24 @@ The evolution of binGO-CLI organized by development phases.
   - Pipeline steps: Run tests → Build Docker image → Push to registry → Deploy to Fly.io
   - Local developers can test deployment flow: `dagger run deploy --env staging` before pushing
   - Enables Phase 10 K8s migration without changing pipeline structure
-
-- [ ] Game archiving with database persistence
-  - Create `wins_history` table schema:
-    ```sql
-    CREATE TABLE wins_history (
-      id TEXT PRIMARY KEY,
-      game_id TEXT NOT NULL,
-      code TEXT NOT NULL,
-      host_id TEXT NOT NULL,
-      winner_id TEXT NOT NULL,
-      player_count INTEGER,
-      created_at TIMESTAMP,
-      ended_at TIMESTAMP
-    );
-    ```
-  - Modify `archiveGame()` to insert to wins_history table instead of in-memory array
-  - Remove in-memory `ArchivedGames` slice (was temporary scaffolding)
-  - When game ends: Archive to DB immediately (currently happens in handlePlayerWin)
-  - Auto-cleanup: Delete records older than 4 days using cleanup routine
-
-- [ ] Game lifecycle management (continued)
-  - Orphaned game detection (host left, no players remaining)
-  - Graceful shutdown handling
+  - **Testing the pipeline** (estimated ~half a day total):
+    - Dagger pipelines are plain Go functions (Dagger Go SDK) → testable with standard `go test`
+    - Unit tests: assert pipeline stages return correct `*dagger.Container` configs without running real infra
+    - Dagger supports dry-run mode to validate wiring without executing builds
+    - Terratest is an option if K8s/Helm infra is added in Phase 10, less relevant here
+    - One real end-to-end run against staging confirms Fly.io token injection works (main unknown)
 
 - [ ] Security hardening
   - Rate limiting (prevent code brute-force)
   - DDoS mitigation (connection limits per IP)
   - Logging/monitoring for abuse patterns
 
-- [ ] Production credentials setup
-  - `.env.example` template with Grafana/database credential placeholders
-  - `.gitignore` update to exclude actual `.env` file
-  - Documentation guide (`docs/MONITORING_SETUP.md`) for secure credential configuration
-  - Environment variable support in `docker-compose.yml` for all sensitive values
+- [ ] Context propagation & error wrapping audit
+  - Review all Go functions for missing `context.Context` parameters (DB calls, HTTP handlers, goroutines)
+  - Ensure all errors are wrapped with `fmt.Errorf("...: %w", err)` so stack context is preserved
+  - Replace bare `errors.New` / `fmt.Errorf` (without `%w`) at call boundaries that discard the original error
+  - Verify `ctx` is passed through to `sqlite.go` store methods and cancelled correctly on shutdown
+  - Add `context.WithTimeout` where long-running DB or network operations lack a deadline
 
 #### Phase 9: Client Features & Improved UX
 **Goal:** Support hosting games on cloud server; add leaderboards; support custom buzzword lists

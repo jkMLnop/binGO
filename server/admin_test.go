@@ -65,6 +65,73 @@ func TestAdminKeyMiddleware(t *testing.T) {
 	}
 }
 
+// TestAdminKeyMiddlewareEnvVar validates that adminKeyMiddleware reads ADMIN_API_KEY
+// from the environment rather than always falling back to the hardcoded default.
+// This serves as the integration test for the production credentials setup.
+func TestAdminKeyMiddlewareEnvVar(t *testing.T) {
+	buzzwords := [][]string{
+		{"test1", "test2", "test3"},
+		{"test4", "test5", "test6"},
+		{"test7", "test8", "test9"},
+	}
+
+	tests := []struct {
+		name       string
+		envKey     string // value to set in ADMIN_API_KEY env var ("" = not set)
+		headerKey  string // value to send in X-Admin-Key header
+		expectCode int
+	}{
+		{
+			name:       "custom env key accepted",
+			envKey:     "my-production-secret-key",
+			headerKey:  "my-production-secret-key",
+			expectCode: http.StatusOK,
+		},
+		{
+			name:       "default key rejected when custom env key is set",
+			envKey:     "my-production-secret-key",
+			headerKey:  DefaultAdminKey,
+			expectCode: http.StatusForbidden,
+		},
+		{
+			name:       "default key works when env var is not set",
+			envKey:     "", // unset — middleware falls back to DefaultAdminKey
+			headerKey:  DefaultAdminKey,
+			expectCode: http.StatusOK,
+		},
+		{
+			name:       "wrong key rejected regardless of env var",
+			envKey:     "my-production-secret-key",
+			headerKey:  "completely-wrong-key",
+			expectCode: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envKey != "" {
+				t.Setenv(AdminKeyEnvVar, tt.envKey)
+			} else {
+				t.Setenv(AdminKeyEnvVar, "") // ensure clean state; t.Setenv restores on cleanup
+			}
+
+			server := NewServer(buzzwords, 3, 3, "8080")
+			ResetMetrics()
+
+			req := httptest.NewRequest(http.MethodGet, "/admin/api/games", nil)
+			req.Header.Set("X-Admin-Key", tt.headerKey)
+			w := httptest.NewRecorder()
+
+			server.handleListGames(w, req)
+
+			if w.Code != tt.expectCode {
+				t.Errorf("got status %d, want %d (env=%q header=%q)",
+					w.Code, tt.expectCode, tt.envKey, tt.headerKey)
+			}
+		})
+	}
+}
+
 func TestCreateGame(t *testing.T) {
 	buzzwords := [][]string{
 		{"test1", "test2", "test3"},

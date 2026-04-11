@@ -495,12 +495,12 @@
       },
       "targets": [
         {
-          "expr": "increase(bingo_admin_api_requests_total[5m]) * 0.11",
+          "expr": "rate(bingo_errors_total[5m])",
           "refId": "A",
-          "legendFormat": "Error rate (simulated - see TODO)"
+          "legendFormat": "{{error_type}}"
         }
       ],
-      "title": "Error Rate (5-min average) - TODO: Fix real error metrics",
+      "title": "Error Rate (5-min average)",
       "type": "timeseries"
     }
   ],

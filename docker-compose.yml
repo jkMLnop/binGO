@@ -11,8 +11,8 @@ services:
     volumes:
       - bingo-data:/app/data
     environment:
-      - LOG_LEVEL=info
-      - ADMIN_API_KEY=dev-admin-key-local-only
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-dev-admin-key-local-only}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/status"]

@@ -18,7 +18,8 @@ type Metrics struct {
 	GameRestarted         prometheus.Counter
 	AdminAPIRequestsTotal prometheus.Counter
 	AdminAPILatency       prometheus.Histogram
-	Registry              prometheus.Registerer // Store the registry for Prometheus scraping
+	ErrorsTotal           *prometheus.CounterVec // labeled by error_type: auth, game, db, ws, input
+	Registry              prometheus.Registerer  // Store the registry for Prometheus scraping
 }
 
 var globalMetrics *Metrics
@@ -79,6 +80,10 @@ func NewMetrics() *Metrics {
 			Help:    "Admin API request latency in milliseconds",
 			Buckets: []float64{10, 25, 50, 100, 250, 500, 1000},
 		}),
+		ErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bingo_errors_total",
+			Help: "Total number of errors by type (auth, game, db, ws, input)",
+		}, []string{"error_type"}),
 		Registry: prometheus.DefaultRegisterer,
 	}
 
@@ -95,6 +100,7 @@ func NewMetrics() *Metrics {
 		globalMetrics.GameRestarted,
 		globalMetrics.AdminAPIRequestsTotal,
 		globalMetrics.AdminAPILatency,
+		globalMetrics.ErrorsTotal,
 	)
 
 	return globalMetrics
@@ -115,6 +121,13 @@ func ResetMetrics() {
 		prometheus.Unregister(globalMetrics.GameRestarted)
 		prometheus.Unregister(globalMetrics.AdminAPIRequestsTotal)
 		prometheus.Unregister(globalMetrics.AdminAPILatency)
+		prometheus.Unregister(globalMetrics.ErrorsTotal)
 	}
 	globalMetrics = nil
+}
+
+// RecordError increments the bingo_errors_total counter for the given error type.
+// Valid types: "auth", "game", "db", "ws", "input"
+func (m *Metrics) RecordError(errorType string) {
+	m.ErrorsTotal.WithLabelValues(errorType).Inc()
 }

@@ -1,5 +1,9 @@
 # ngrok-Based Multiplayer - Manual Regression Tests
 
+> **Note:** Many former manual tests are now automated in
+> `tests/container_regression_test.go` and `tests/container_e2e_test.go`.
+> Run them with: `go test -tags=container -timeout=10m ./tests -v`
+
 ## Test Setup
 
 **Prerequisites:**
@@ -92,14 +96,33 @@
 
 ---
 
-## 7. Game Archiving - NEW FUNCTIONALITY (Server-Side)
+## 7. Game Archiving - Database Persistence (Phase 8.5)
+
+### Setup
+```bash
+docker-compose up -d --build
+export ADMIN_KEY="dev-admin-key-local-only"
+export BASE_URL="http://localhost:8080"
+
+# Create a game via Admin API to get a game code
+curl -X POST http://localhost:8080/admin/api/games \
+  -H "X-Admin-Key: dev-admin-key-local-only"
+
+# sample server response
+{"success":true,"data":{"id":"game-2","code":"BINGO-3Q93C","host_id":"","status":"active","player_count":0,"created_at":1772969328}}
+```
+
+**To connect clients:**
+```bash
+# In separate terminal windows, connect clients to localhost:8080 with the game code
+./binGO-CLI -mode client -server localhost:8080 -code BINGO-3Q93C
+```
+
+### 7D — Archive doesn't affect gameplay continuity
 
 | Test # | Scenario | Steps | Expected Result | Status |
 |--------|----------|-------|-----------------|--------|
-| 7.1 | Game archived on end | Play until someone wins | Server stores game in archive (no client-visible change) | [X] |
-| 7.2 | Archiving is logged | Play a game to completion and check server logs | Server logs "📋 Archived game <id> (code: <CODE>)" when game ends | [X] |
-| 7.3 | Code still usable after archive | Game ends, restart happens, new game starts with same code | Code works for multiple sessions indefinitely | [X] |
-| 7.4 | Archive doesn't affect gameplay | Win game, archive created, restart, play new game | No performance impact, no errors during restart | [X] |
+| 7.6 | Archive doesn't affect gameplay | Play 3 complete game cycles (win → restart → win → restart → win) | No errors in `docker-compose logs bingo-server`; join/mark/win all work normally across all three cycles | [X] |
 
 ---
 
@@ -142,67 +165,86 @@
 ### Setup
 ```bash
 # Start server with default dev admin key
-./binGO-CLI -mode server -port 8080
-
-# In another terminal, test endpoints
+docker-compose up -d --build
 export ADMIN_KEY="dev-admin-key-local-only"
 export BASE_URL="http://localhost:8080"
 ```
 
-### Authentication Tests
+**Note:** Tests use Docker container on localhost, not the binary server. Game codes are obtained via Admin API and used to connect clients to `localhost:8080`.
 
-| Test # | Scenario | Command | Expected Result | Status |
-|--------|----------|---------|-----------------|--------|
-| 11.1 | Missing admin key header | `curl -X GET $BASE_URL/admin/api/games` | Returns 401 Unauthorized with "missing X-Admin-Key header" | [X] |
-| 11.2 | Invalid admin key | `curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: wrong-key"` | Returns 403 Forbidden with "invalid X-Admin-Key" | [X] |
-| 11.3 | Valid admin key | `curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 OK with games list | [X] |
-| 11.4 | Custom admin key via env | `ADMIN_API_KEY=my-custom-key ./binGO-CLI -mode server -port 8080` then test with custom key | Returns 200 with custom key, 403 with default key | [X] |
-
-### POST /admin/api/games Tests
-
-| Test # | Scenario | Command | Expected Result | Status |
-|--------|----------|---------|-----------------|--------|
-| 11.5 | Create game without body | `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with game data (id, code, status, player_count) | [X] |
-| 11.6 | Create game with player list | `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY" -d '{"players":["alice","bob"]}'` | Returns 200 with game data, player_count=0 (players added via WebSocket only) | [X] |
-| 11.7 | Game code format | Create game and check code | Code matches pattern `BINGO-[A-Z0-9]{5}` (11 chars total) | [X] |
-| 11.8 | Unique codes | Create 5 games | All codes are unique | [X] |
-
-### GET /admin/api/games Tests
-
-| Test # | Scenario | Command | Expected Result | Status |
-|--------|----------|---------|-----------------|--------|
-| 11.9 | List games returns array | `curl -X GET $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with data.games array and data.count | [X] |
-| 11.10 | Correct count value | Create 5 games then list | data.count equals 5 and games array length equals 5 | [X] |
-
-### GET /admin/api/games/{id} Tests
-
-| Test # | Scenario | Command | Expected Result | Status |
-|--------|----------|---------|-----------------|--------|
-| 11.11 | Get existing game | Create game, then `curl -X GET $BASE_URL/admin/api/games/game-1 -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with all fields (id, code, host_id, status, player_count, created_at, players, is_active) | [X] |
-| 11.12 | Get non-existent game | `curl -X GET $BASE_URL/admin/api/games/nonexistent -H "X-Admin-Key: $ADMIN_KEY"` | Returns 404 with "game nonexistent not found" | [X] |
-| 11.13 | Player IDs in detail | Create game: `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"`, connect players via client, then get detail: `curl -X GET $BASE_URL/admin/api/games/{id} -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200 with players array containing player IDs | [X] |
-
-### DELETE /admin/api/games/{id} Tests
-
-| Test # | Scenario | Command | Expected Result | Status |
-|--------|----------|---------|-----------------|--------|
-| 11.14 | Delete existing game | Create game: `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"`, note the returned `id`, then delete: `curl -X DELETE $BASE_URL/admin/api/games/{id} -H "X-Admin-Key: $ADMIN_KEY"` | Returns 200, is_active=false, status="ended" | [X] |
-| 11.15 | Delete non-existent game | `curl -X DELETE $BASE_URL/admin/api/games/nonexistent -H "X-Admin-Key: $ADMIN_KEY"` | Returns 404 with "game nonexistent not found" | [X] |
 
 ### Integration with Gameplay Tests
 
 | Test # | Scenario | Steps | Expected Result | Status |
 |--------|----------|-------|-----------------|--------|
-| 11.16 | HTTP status codes & response structure | Test various scenarios | All responses use correct HTTP status (200/400/401/403/404) with success/error fields | [ ] |
 | 11.17 | Admin API creates playable game | Use POST /admin/api/games to create game, then connect client with returned code | Client successfully joins game with correct code | [X] |
 | 11.18 | Admin API tracks active players | Create game with admin API, connect 2 clients, get game detail | player_count increases from 0 to 2 | [X] |
 | 11.19 | Admin API reflects game status | Create game, play until win, get game detail | status changes from "active" to "ended" | [X] |
 | 11.20 | Delete game removes from play | Create game, delete via admin API, try to connect client | Client cannot join (game not found or access denied) | [X] |
 
-### Load & Concurrency Tests
+---
+
+## 12. Production Credentials Setup (docker-compose + .env)
+
+Validates that the full stack reads credentials from `.env` correctly and that defaults are properly isolated.
+
+### Setup
+
+```bash
+# From repo root
+cp .env.example .env
+```
+
+### 12A — Grafana login uses credentials from .env
+
+Edit `.env`:
+```
+GRAFANA_USER=testadmin
+GRAFANA_PASSWORD=testpass123
+```
+
+Restart the stack (use `-v` to remove the Grafana volume so credentials are re-initialized):
+```bash
+docker-compose down -v && docker-compose up -d
+```
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 12.1 | Grafana accepts .env credentials | Open `http://localhost:3000`, log in with `testadmin` / `testpass123` | Login succeeds, Grafana dashboard loads | [X] |
+| 12.2 | Default `admin`/`admin` rejected | Try to log in with `admin` / `admin` | Login fails (wrong credentials) | [X] |
+
+### 12B — Fallback to defaults when no .env file present
+
+```bash
+docker-compose down
+mv .env .env.bak  # remove .env so no file is present
+docker-compose up -d
+```
 
 | Test # | Scenario | Command | Expected Result | Status |
 |--------|----------|---------|-----------------|--------|
-| 11.21 | Create 50 games rapidly | Loop 50x: `curl -X POST $BASE_URL/admin/api/games -H "X-Admin-Key: $ADMIN_KEY"` | All requests return 200, all games created successfully | [X] |
-| 11.22 | Concurrent requests | 5 parallel processes each creating 10 games | All 50 games created, no conflicts or errors | [X] |
-| 11.23 | Query performance | Create 100 games, GET /admin/api/games | Response time < 1 second, all games returned | [X] |
+| 12.3 | Grafana accessible with default creds | Open `http://localhost:3000`, log in with `admin` / `admin` | Login succeeds | [X] |
+
+### 12C — Full multiplayer game with custom credentials
+
+Validates that credential changes don't break the WebSocket game path.
+
+```bash
+# Restore .env with a custom admin key
+mv .env.bak .env
+# Set ADMIN_API_KEY=test-regression-key-12a in .env
+docker-compose down && docker-compose up -d --build
+```
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 12.4 | Create game via admin API with custom key | `curl -X POST http://localhost:8080/admin/api/games -H "X-Admin-Key: test-regression-key-12a"` | Returns `{"success":true,...}` with a valid game code — note the `code` for 12.5 | [X] |
+| 12.5 | Players can join and play | Connect 2 clients: `./binGO-CLI -mode client -server localhost:8080 -code <code>` | Both clients join, boards render, cells can be marked | [X] |
+| 12.6 | Game plays to win with custom creds active | One player marks a winning row | Win announcement broadcast to both clients; no auth errors in `docker-compose logs bingo-server` | [X] |
+
+### Teardown
+
+```bash
+docker-compose down
+mv .env.bak .env  # or delete if you want a clean state
+```

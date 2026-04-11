@@ -21,8 +21,8 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o binG
 # Final stage
 FROM alpine:3.19
 
-# Install SQLite runtime dependencies
-RUN apk add --no-cache ca-certificates sqlite-libs
+# Install SQLite runtime dependencies + CLI for debugging/testing
+RUN apk add --no-cache ca-certificates sqlite-libs sqlite
 
 WORKDIR /app
 

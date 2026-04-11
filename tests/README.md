@@ -44,10 +44,21 @@ docker-compose up -d  # Start infrastructure first
 go test -tags=e2e ./tests -v
 ```
 
+**Run container E2E tests (Testcontainers — builds & manages Docker automatically):**
+```bash
+# Docker must be running; no manual docker-compose needed
+go test -tags=container -timeout=10m ./tests -v
+```
+
 **Run all tests including E2E:**
 ```bash
 docker-compose up -d
 go test -tags=integration,e2e ./tests -v
+```
+
+**Run all automated tests (unit + integration + container E2E):**
+```bash
+go test -tags=integration,container -timeout=10m ./tests ./... 2>&1
 ```
 
 **Run specific test:**
@@ -89,6 +100,34 @@ go test -tags=e2e ./tests -v
 ```
 
 **Status:** ✅ **Multi-game stability verified, 172.28 players/sec throughput**
+
+---
+
+### `container_e2e_test.go` (Phase 8+ — Testcontainers)
+
+Automates the Docker-stack manual regression tests from Sections 7, 12, and 13 of [REGRESSION_TESTS.md](REGRESSION_TESTS.md). Testcontainers builds the server image from the local `Dockerfile` and manages container lifecycle so no `docker-compose up` is required.
+
+**Build tag:** `//go:build container`
+
+**Prerequisites:**
+- Docker Desktop (macOS/Windows) or Docker Engine (Linux) running
+- macOS: Docker Desktop must share `/private` (enabled by default)
+
+| Test | Manual tests automated |
+|------|------------------------|
+| `TestContainerAdminKeyCustom` | 12.1 — custom `ADMIN_API_KEY` env var displaces default key (403 with default, 200 with custom) |
+| `TestContainerAdminKeyFallback` | 12.4 — absent `ADMIN_API_KEY` falls back to hardcoded dev key (200) |
+| `TestContainerSIGTERMNotifiesClients` | 13.5, 13.6 — `docker stop` sends `server_shutdown` to all connected players; log confirms count |
+| `TestContainerOrphanedGame` | 13.1, 13.2 — all players disconnect without winner → orphan log line appears; reconnect attempt returns "all players disconnected" error |
+| `TestContainerVolumeArchivePersistence` | 7.1, 7.5 — win is archived to SQLite; DB row survives container stop/restart; second container starts healthy on the same volume |
+| `TestContainerCleanupGoroutine` | 7.7 — stale archive rows (>4 days) are deleted on server startup |
+
+**Run:**
+```bash
+go test -tags=container -timeout=10m ./tests -v
+```
+
+**Status:** ✅ Compiles and ready. Full run requires Docker.
 
 ---
 

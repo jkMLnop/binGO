@@ -256,7 +256,7 @@ func playMultiplayerGame(t *testing.T, playerName string, serverAddr string, mov
 
 	// Mark cells and check for win
 	for _, move := range moves {
-		err := localGame.Board.MarkCell(move)
+		err := localGame.MarkCell(move)
 		if err != nil {
 			t.Logf("[%s] Cell already marked: %v", playerName, err)
 		} else {

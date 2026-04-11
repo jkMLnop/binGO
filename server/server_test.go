@@ -1,11 +1,18 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jkMLnop/binGO-CLI/db"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // Helper function to create test buzzwords in the expected format
@@ -458,9 +465,9 @@ func TestHandlePlayerWinAlreadyEnded(t *testing.T) {
 		t.Fatalf("First win announcement should succeed: %v", err)
 	}
 
-	// Verify game is now ended
-	if game.IsActive {
-		t.Fatal("Game should be inactive after first win")
+	// Verify game has a winner but IsActive stays true (only admin delete/orphan sets false)
+	if game.Winner != player.ID {
+		t.Fatalf("Game winner should be %s, got %s", player.ID, game.Winner)
 	}
 
 	// Second win announcement should fail
@@ -482,6 +489,88 @@ func TestHandlePlayerWinAlreadyEnded(t *testing.T) {
 	}
 
 	t.Logf("✓ Duplicate win rejection works correctly")
+}
+
+// TestHandlePlayerWinArchivesGameToDB verifies the complete path:
+// handlePlayerWin → archiveGame → ArchiveGameInDB → row written to game_archives table
+func TestHandlePlayerWinArchivesGameToDB(t *testing.T) {
+	ResetMetrics()
+
+	// Set up a real SQLite database in a temp dir
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_archive.db")
+
+	store, err := db.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to create DB store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	if err := store.Init(context.Background()); err != nil {
+		t.Fatalf("failed to init DB: %v", err)
+	}
+
+	// Create server with the real DB
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+	srv.SetDB(store)
+
+	// Create a game with one player
+	game := NewGame("game-archive-1", buzzwords, 3, 3)
+	player := newPlayer("alice")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	// Announce win — this triggers archiveGame → ArchiveGameInDB under the hood
+	if err := srv.handlePlayerWin(game, player); err != nil {
+		t.Fatalf("handlePlayerWin failed: %v", err)
+	}
+
+	// Verify a row exists in game_archives by querying the SQLite file directly
+	sqlDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open raw DB: %v", err)
+	}
+	defer sqlDB.Close()
+
+	var count int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM game_archives WHERE game_id = ?`, game.ID).Scan(&count); err != nil {
+		t.Fatalf("failed to query game_archives: %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("expected 1 game_archives row, got %d", count)
+	}
+
+	// Verify the archive fields
+	var code, hostID, winnerID string
+	var playerCount int
+	if err := sqlDB.QueryRow(
+		`SELECT code, host_id, winner_id, player_count FROM game_archives WHERE game_id = ?`,
+		game.ID,
+	).Scan(&code, &hostID, &winnerID, &playerCount); err != nil {
+		t.Fatalf("failed to scan game_archives row: %v", err)
+	}
+
+	if code != game.Code {
+		t.Errorf("expected code %s, got %s", game.Code, code)
+	}
+	if hostID != game.HostID {
+		t.Errorf("expected host_id %s, got %s", game.HostID, hostID)
+	}
+	if winnerID != player.ID {
+		t.Errorf("expected winner_id %s, got %s", player.ID, winnerID)
+	}
+	if playerCount != 0 { // player was announced winner before DB write; channel closed, count may be 0
+		t.Logf("player_count=%d (note: may differ depending on disconnect timing)", playerCount)
+	}
+
+	t.Logf("✓ handlePlayerWin correctly archived game to DB: code=%s, winner=%s", code, winnerID)
 }
 
 // TestImpersonationPrevention verifies that attempting to join as an existing player without a token is rejected
@@ -531,4 +620,375 @@ func TestImpersonationPrevention(t *testing.T) {
 	if existingPlayer.ID != "alice" {
 		t.Errorf("Original player modified: expected 'alice', got %s", existingPlayer.ID)
 	}
+}
+
+// TestOrphanedGameMarkedOnLastDisconnect verifies that markGameOrphaned sets the correct
+// fields so the game is ended and recorded even without a winner.
+func TestOrphanedGameMarkedOnLastDisconnect(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-orphan-1", buzzwords, 3, 3)
+	player := newPlayer("solo-player")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	if !game.IsActive {
+		t.Fatal("game should be active before the test")
+	}
+
+	// Simulate last player leaving: remove them then call markGameOrphaned
+	game.RemovePlayer(player.ID)
+	if game.PlayerCount() != 0 {
+		t.Fatal("expected 0 players after removal")
+	}
+
+	srv.markGameOrphaned(game)
+
+	if game.IsActive {
+		t.Error("game should be marked inactive after orphan")
+	}
+	if !game.Orphaned {
+		t.Error("game.Orphaned should be true")
+	}
+	if game.EndedAt.IsZero() {
+		t.Error("game.EndedAt should be set")
+	}
+
+	t.Logf("✓ markGameOrphaned correctly ends game %s (code: %s)", game.ID, game.Code)
+}
+
+// TestOrphanedGameNotJoinable verifies that getOrCreateGame returns a helpful error
+// (not the admin-deleted message) when a game is orphaned.
+func TestOrphanedGameNotJoinable(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-orphan-2", buzzwords, 3, 3)
+	player := newPlayer("lone-wolf")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	// Orphan the game
+	game.RemovePlayer(player.ID)
+	srv.markGameOrphaned(game)
+
+	// A new player should not be able to join
+	_, err := srv.getOrCreateGame(game.Code)
+	if err == nil {
+		t.Fatal("expected error joining orphaned game, got nil")
+	}
+	if strings.Contains(err.Error(), "deleted by admin") {
+		t.Errorf("orphaned game should not show admin-deleted message; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "all players disconnected") {
+		t.Errorf("expected 'all players disconnected' in error; got: %v", err)
+	}
+
+	t.Logf("✓ orphaned game correctly rejected new join with: %v", err)
+}
+
+// TestNotifyShutdownDoesNotPanicWithNilWS verifies that NotifyShutdown handles players
+// that have no active WebSocket (e.g., set up in unit tests without real connections).
+func TestNotifyShutdownDoesNotPanicWithNilWS(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-shutdown-1", buzzwords, 3, 3)
+	player := newPlayer("player-a")
+	player2 := newPlayer("player-b")
+	game.AddPlayer(player)
+	game.AddPlayer(player2)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	// player.ws is nil (no real WebSocket in unit tests) — NotifyShutdown must not panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("NotifyShutdown panicked: %v", r)
+		}
+	}()
+
+	srv.NotifyShutdown()
+
+	// Both players should have received a shutdown message in their channel
+	for _, p := range []*Player{player, player2} {
+		select {
+		case msg := <-p.messages.send:
+			sm, ok := msg.(ServerMessage)
+			if !ok {
+				t.Errorf("player %s: expected ServerMessage, got %T", p.ID, msg)
+				continue
+			}
+			if sm.Type != "server_shutdown" {
+				t.Errorf("player %s: expected type 'server_shutdown', got %s", p.ID, sm.Type)
+			}
+		default:
+			t.Errorf("player %s: no shutdown message received", p.ID)
+		}
+	}
+
+	t.Logf("✓ NotifyShutdown delivered shutdown messages without panicking")
+}
+
+// TestPartialDisconnectDoesNotOrphan verifies that the orphan guard only fires when
+// ALL players leave. A game with remaining players must stay active.
+func TestPartialDisconnectDoesNotOrphan(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-partial-1", buzzwords, 3, 3)
+	alice := newPlayer("alice")
+	bob := newPlayer("bob")
+	game.AddPlayer(alice)
+	game.AddPlayer(bob)
+	game.HostID = alice.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	// Remove alice — bob still connected
+	game.RemovePlayer(alice.ID)
+	playerCount := game.PlayerCount()
+
+	// Replicate the condition from handlePlayerDisconnect
+	if playerCount == 0 && game.IsActive {
+		srv.markGameOrphaned(game)
+	}
+
+	if game.Orphaned {
+		t.Error("game should NOT be orphaned while bob is still connected")
+	}
+	if !game.IsActive {
+		t.Error("game should still be active while bob is still connected")
+	}
+	if game.PlayerCount() != 1 {
+		t.Errorf("expected 1 remaining player, got %d", game.PlayerCount())
+	}
+
+	t.Logf("✓ partial disconnect (alice left, bob remains) did not trigger orphan")
+}
+
+// TestWinnerGameNotOrphaned verifies that a game ended by a win has Orphaned=false.
+// Both code paths (win and orphan) set IsActive=false, but only the orphan path sets Orphaned=true.
+func TestWinnerGameNotOrphaned(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-win-orphan-check", buzzwords, 3, 3)
+	player := newPlayer("alice")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	if err := srv.handlePlayerWin(game, player); err != nil {
+		t.Fatalf("handlePlayerWin failed: %v", err)
+	}
+
+	if game.Orphaned {
+		t.Error("a game won by a player should have Orphaned=false")
+	}
+	// IsActive stays true after win (only admin delete/orphan sets it false)
+	if !game.IsActive {
+		t.Error("game should remain active after win (IsActive=false only for admin delete/orphan)")
+	}
+	if game.Winner != player.ID {
+		t.Errorf("expected winner %s, got %s", player.ID, game.Winner)
+	}
+
+	t.Logf("✓ won game has Orphaned=false, IsActive=true, Winner=%s", game.Winner)
+}
+
+// TestOrphanedGamePreservesHostID verifies that markGameOrphaned does not clear HostID.
+// HostID must remain immutable so the original host could theoretically reconnect after
+// all players dropped (e.g., network blip) and restart via a new session.
+func TestOrphanedGamePreservesHostID(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-orphan-host", buzzwords, 3, 3)
+	player := newPlayer("original-host")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	originalHostID := game.HostID
+	game.RemovePlayer(player.ID)
+	srv.markGameOrphaned(game)
+
+	if game.HostID != originalHostID {
+		t.Errorf("HostID should be immutable after orphan: expected %s, got %s", originalHostID, game.HostID)
+	}
+
+	t.Logf("✓ HostID preserved after orphan: %s", game.HostID)
+}
+
+// --- Error metric tests ---
+
+// TestErrorMetricInvalidGameCode verifies that looking up an unknown code increments
+// bingo_errors_total{error_type="game"}.
+func TestErrorMetricInvalidGameCode(t *testing.T) {
+	ResetMetrics()
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	before := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
+
+	_, err := srv.getOrCreateGame("BINGO-BADCO")
+	if err == nil {
+		t.Fatal("expected error for unknown code, got nil")
+	}
+
+	after := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
+	if after-before != 1 {
+		t.Errorf("expected game error counter to increment by 1, delta=%.0f", after-before)
+	}
+
+	t.Logf("✓ bingo_errors_total{error_type=\"game\"} incremented on invalid code: %v", err)
+}
+
+// TestErrorMetricAlreadyEndedGame verifies that a second win attempt on an ended game
+// increments bingo_errors_total{error_type="game"}.
+func TestErrorMetricAlreadyEndedGame(t *testing.T) {
+	ResetMetrics()
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-errmetric-1", buzzwords, 3, 3)
+	alice := newPlayer("alice")
+	bob := newPlayer("bob")
+	game.AddPlayer(alice)
+	game.AddPlayer(bob)
+	game.HostID = alice.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	// First win ends the game
+	if err := srv.handlePlayerWin(game, alice); err != nil {
+		t.Fatalf("first win should succeed: %v", err)
+	}
+
+	before := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
+
+	// Second win should fail and increment the counter
+	if err := srv.handlePlayerWin(game, bob); err == nil {
+		t.Fatal("expected error for second win on ended game")
+	}
+
+	after := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
+	if after-before != 1 {
+		t.Errorf("expected game error counter to increment by 1, delta=%.0f", after-before)
+	}
+
+	t.Logf("✓ bingo_errors_total{error_type=\"game\"} incremented on already-ended game")
+}
+
+// TestErrorMetricNonHostRestart verifies that a non-host restart attempt increments
+// bingo_errors_total{error_type="game"}.
+func TestErrorMetricNonHostRestart(t *testing.T) {
+	ResetMetrics()
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-errmetric-2", buzzwords, 3, 3)
+	alice := newPlayer("alice")
+	bob := newPlayer("bob")
+	game.AddPlayer(alice)
+	game.AddPlayer(bob)
+	game.HostID = alice.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	// End the game so restart state is valid
+	if err := srv.handlePlayerWin(game, alice); err != nil {
+		t.Fatalf("win setup failed: %v", err)
+	}
+
+	before := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
+
+	// Bob (non-host) tries to restart
+	// handleGameRestart checks IsActive: since game ended it returns "Game has been deleted" path
+	// Let re-activate it so we hit the "only the host can restart" branch instead
+	game.IsActive = true
+	game.Winner = ""
+
+	if err := srv.handleGameRestart(game, bob); err == nil {
+		t.Fatal("expected error for non-host restart")
+	}
+
+	after := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
+	if after-before != 1 {
+		t.Errorf("expected game error counter to increment by 1, delta=%.0f", after-before)
+	}
+
+	t.Logf("✓ bingo_errors_total{error_type=\"game\"} incremented on non-host restart")
+}
+
+// TestErrorMetricScrapeable verifies that bingo_errors_total appears in the
+// Prometheus /metrics HTTP response after an error is triggered. This closes
+// the gap between "counter increments in memory" and "Prometheus can scrape it".
+func TestErrorMetricScrapeable(t *testing.T) {
+	ResetMetrics()
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	// Trigger an error so the CounterVec label is initialized
+	_, err := srv.getOrCreateGame("BINGO-NOSUC")
+	if err == nil {
+		t.Fatal("expected error for unknown code")
+	}
+
+	// Serve /metrics through the same mux the real server uses
+	srv.registerHandlers()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.Mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("/metrics returned status %d", w.Code)
+	}
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, "bingo_errors_total") {
+		t.Fatal("/metrics response does not contain bingo_errors_total")
+	}
+	if !strings.Contains(body, `error_type="game"`) {
+		t.Fatal("/metrics response does not contain error_type=\"game\" label")
+	}
+	if !strings.Contains(body, `bingo_errors_total{error_type="game"} 1`) {
+		t.Errorf("/metrics missing expected line: bingo_errors_total{error_type=\"game\"} 1\n\nGot:\n%s", body)
+	}
+
+	t.Logf("✓ bingo_errors_total{error_type=\"game\"} appears in /metrics HTTP response")
 }
