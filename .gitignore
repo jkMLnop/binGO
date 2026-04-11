@@ -16,4 +16,7 @@ coverage.out
 /binGO
 /binGO-*
 
+# Dagger compiled binary
+/dagger/dagger
+
 bingo_demo.mp4

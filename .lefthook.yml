@@ -1,0 +1,17 @@
+# Lefthook — Git hooks for enforcing test guardrails before push.
+#
+# Runs the same Dagger pipeline functions locally that CI runs remotely.
+# Every push runs the full test suite (unit + integration + container regression)
+# so that regressions are caught before they reach the remote.
+#
+# Install: go install github.com/evilmartians/lefthook@latest && lefthook install
+# Bypass:  git push --no-verify (escape hatch for emergencies)
+
+pre-push:
+  commands:
+    unit-integration:
+      run: cd dagger && go run . test
+      fail_text: "Unit/integration tests failed — fix before pushing."
+    container:
+      run: cd dagger && go run . test-container
+      fail_text: "Container regression tests failed — fix before pushing."

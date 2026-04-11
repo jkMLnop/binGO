@@ -4,6 +4,55 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Phase 8.8 - Dagger CI/CD Pipeline + Lefthook Guardrails (2026-04-11)
+
+#### Philosophy
+Automate guardrails as far as possible — if an SOP can be enforced by tooling, it should be. The pipeline is the mechanism; Lefthook is the enforcement trigger. Every `git push` runs the full test suite (unit + integration + container regression) locally before code reaches the remote. CI then runs the same Dagger functions server-side, ensuring identical behavior locally and in CI. Container tests (SIGTERM handling, volume persistence, cleanup goroutines) are complementary to Dagger's build+deploy coverage — they catch behavioral regressions that a deploy pipeline cannot.
+
+#### Added
+- **`dagger/main.go`** — Dagger Go SDK pipeline replacing all GitHub Actions jobs. Functions: `test`, `test-container`, `build`, `publish`, `deploy`, `release`, `all`
+  - `go run ./dagger test` — unit + integration tests in CGO+SQLite container (~30s)
+  - `go run ./dagger test-container` — container regression suite via Docker socket (~10min)
+  - `go run ./dagger build --version <tag>` — builds Docker image with version injection
+  - `go run ./dagger publish --version <tag>` — pushes to `ghcr.io/jkmlnop/bingo-cli`
+  - `go run ./dagger deploy --env staging|production` — deploys to Fly.io
+  - `go run ./dagger release --version v8.x.x` — cross-compile macOS Intel + Linux, GitHub Release
+  - `go run ./dagger all --env staging` — full pipeline: Test → Build → Publish → Deploy
+- **`dagger/main_test.go`** — pipeline unit tests: env routing validation, constants, help text
+- **`dagger/go.mod`** — separate Go module isolating Dagger SDK dependency from main module
+- **`.lefthook.yml`** — Git pre-push hooks enforcing `test` + `test-container` before every push. Install: `go install github.com/evilmartians/lefthook@latest && lefthook install`. Bypass: `git push --no-verify`
+- **`fly.staging.toml`** — Fly.io staging config for `bingo-server-staging` app
+- **`docs/DEVOPS.md`** — documents DevOps philosophy, tool roles, test tiers, local workflow, secrets setup, and Fly.io one-time setup
+- **`var version = "dev"` in `bin.go`** — build-time version injection via `-ldflags "-X main.version=<value>"`. `-version` flag prints version and exits
+
+#### Changed
+- **`Dockerfile`** — added `ARG VERSION=dev` and `ARG GO_VERSION=1.25.3`; version injected into binary via `-ldflags`; `FROM golang:${GO_VERSION}-alpine` now consumes the build arg (was hard-coded)
+- **`.github/workflows/ci.yml`** — replaced all CI jobs with thin Dagger triggers:
+  - PR to `main` → `go run ./dagger test` (fast feedback, no deploy)
+  - Push to `main` → `go run ./dagger all --env staging` (test → build → publish → deploy to staging)
+  - Tag `v*` → `go run ./dagger all --env production` + `go run ./dagger release` (prod deploy + GitHub Release)
+
+#### Environments
+- **Staging:** `bingo-server-staging.fly.dev` — deployed on every push to `main`
+- **Production:** `bingo-server.fly.dev` — deployed on `v*` tags
+- **Registry:** `ghcr.io/jkmlnop/bingo-cli` — reusable for Phase 10 K8s migration
+
+#### Required Setup (one-time)
+- GitHub secret: `FLY_API_TOKEN`
+- `flyctl apps create bingo-server-staging --org personal`
+- `flyctl volumes create bingo_data --region sjc --app bingo-server-staging`
+- `flyctl secrets set ADMIN_API_KEY=<key> --app bingo-server-staging`
+
+#### Tests
+- `TestFlyConfigStaging` — staging env resolves to correct app name + config file
+- `TestFlyConfigProduction` — production env resolves correctly
+- `TestFlyConfigInvalid` — 6 invalid env names all return errors
+- `TestRegistryBase` — registry constant matches expected format
+- `TestDefaultGoVersion` — Go version constant is set and correct
+- `TestPrintUsageDoesNotPanic` — help text renders without panic
+
+---
+
 ### Phase 8.7 - Real Error Metrics for Prometheus (2026-03-04)
 
 #### Fixed

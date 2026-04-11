@@ -1,5 +1,6 @@
 # Build stage
-FROM golang:1.25.3-alpine AS builder
+ARG GO_VERSION=1.25.3
+FROM golang:${GO_VERSION}-alpine AS builder
 
 WORKDIR /app
 
@@ -15,8 +16,10 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary with SQLite support
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o binGO .
+# Build the binary with SQLite support and version injection
+ARG VERSION=dev
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo \
+    -ldflags "-X main.version=${VERSION}" -o binGO .
 
 # Final stage
 FROM alpine:3.19

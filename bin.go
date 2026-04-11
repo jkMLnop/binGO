@@ -19,13 +19,22 @@ import (
 	"github.com/jkMLnop/binGO-CLI/standalone"
 )
 
+// version is set at build time via -ldflags "-X main.version=<value>"
+var version = "dev"
+
 func main() {
 	mode := flag.String("mode", "standalone", "standalone, server, or client")
 	serverAddr := flag.String("server", "localhost:8080", "server address for client mode (e.g., localhost:8080, 192.168.1.100:8080)")
 	code := flag.String("code", "", "game code for joining (Phase 7.3: required for remote connections)")
 	port := flag.String("port", "8080", "port for server mode")
 	dbPath := flag.String("db", "", "path to SQLite database file (Phase 7.5: optional, e.g., ./bingo.db)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	switch *mode {
 	case "standalone":

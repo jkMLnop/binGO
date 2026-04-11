@@ -29,22 +29,6 @@ The evolution of binGO-CLI organized by development phases.
 **Goal:** Make cloud server reliable under load; automate deployments
 
 **Tasks:**
-- [ ] Automated deployments with Dagger
-  - Create `dagger/main.go` pipeline (replaces GitHub Actions YAML for deployments)
-  - `dagger run build` - builds Docker image locally
-  - `dagger run deploy --env staging` - deploy to Fly.io staging environment
-  - `dagger run deploy --env production` - deploy to Fly.io production
-  - GitHub Actions triggers Dagger pipeline on `main` branch (staging) and version tags (production)
-  - Pipeline steps: Run tests → Build Docker image → Push to registry → Deploy to Fly.io
-  - Local developers can test deployment flow: `dagger run deploy --env staging` before pushing
-  - Enables Phase 10 K8s migration without changing pipeline structure
-  - **Testing the pipeline** (estimated ~half a day total):
-    - Dagger pipelines are plain Go functions (Dagger Go SDK) → testable with standard `go test`
-    - Unit tests: assert pipeline stages return correct `*dagger.Container` configs without running real infra
-    - Dagger supports dry-run mode to validate wiring without executing builds
-    - Terratest is an option if K8s/Helm infra is added in Phase 10, less relevant here
-    - One real end-to-end run against staging confirms Fly.io token injection works (main unknown)
-
 - [ ] Security hardening
   - Rate limiting (prevent code brute-force)
   - DDoS mitigation (connection limits per IP)

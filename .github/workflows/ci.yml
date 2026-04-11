@@ -1,6 +1,11 @@
 name: CI/CD
 
-# Automatically test on push/PR and build + release on tags
+# Dagger-based pipeline — all logic lives in dagger/main.go.
+# This workflow is a thin trigger layer that calls Dagger functions.
+#
+# Push to main    → test + build + publish + deploy to staging
+# PR to main      → test only (fast feedback, no deploy)
+# Tag v*          → test + build + publish + deploy to production + GitHub Release
 on:
   push:
     branches: [main]
@@ -8,7 +13,11 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DAGGER_VERSION: "0.15.3"
+
 jobs:
+  # Fast tests on every push and PR — unit + integration (~30s)
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -20,35 +29,19 @@ jobs:
         with:
           go-version: '1.25.3'
 
-      - name: Run tests
-        run: go test ./...
+      - name: Install Dagger CLI
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | sh
 
-      - name: Run tests with coverage
-        run: go test -v -coverprofile=coverage.out ./...
+      - name: Run tests via Dagger
+        working-directory: dagger
+        run: go run . test
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.out
-
-  build:
-    name: Build ${{ matrix.os }}
+  # Deploy to staging on push to main
+  deploy-staging:
+    name: Deploy to Staging
     needs: test
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - os: macOS Intel
-            runner: macos-latest
-            goos: darwin
-            goarch: amd64
-            output: binGO-CLI-intel-mac
-          - os: Linux x86_64
-            runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            output: binGO-CLI-linux
-
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
 
@@ -57,47 +50,54 @@ jobs:
         with:
           go-version: '1.25.3'
 
-      - name: Build ${{ matrix.os }}
-        run: |
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o ${{ matrix.output }}
+      - name: Install Dagger CLI
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | sh
+
+      - name: Build + Publish + Deploy to Staging
+        working-directory: dagger
         env:
-          CGO_ENABLED: 0
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          go run . all --env staging --version "$VERSION" --registry-user jkmlnop
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.output }}
-          path: ${{ matrix.output }}
-
-  release:
-    name: Create Release
-    needs: build
+  # Deploy to production + create GitHub Release on version tags
+  deploy-production:
+    name: Deploy to Production
+    needs: test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
-
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          path: artifacts
+          go-version: '1.25.3'
 
-      - name: Create checksums
+      - name: Install Dagger CLI
+        run: curl -fsSL https://dl.dagger.io/dagger/install.sh | sh
+
+      - name: Build + Publish + Deploy to Production
+        working-directory: dagger
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd artifacts
-          find . -type f ! -name "SHA256SUMS" -exec sha256sum {} \; > SHA256SUMS
-          cat SHA256SUMS
+          VERSION=${GITHUB_REF#refs/tags/}
+          go run . all --env production --version "$VERSION" --registry-user jkmlnop
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            artifacts/binGO-CLI-intel-mac/binGO-CLI-intel-mac
-            artifacts/binGO-CLI-linux/binGO-CLI-linux
-            artifacts/SHA256SUMS
+      - name: Create GitHub Release
+        working-directory: dagger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          go run . release --version "$VERSION"
           draft: false
           prerelease: false
         env:

@@ -1,0 +1,43 @@
+# Fly.io Configuration for binGO-CLI Staging Server
+# Deploy with: fly deploy -c fly.staging.toml
+# Or via Dagger: dagger call deploy --env staging
+
+app = "bingo-server-staging"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[build.args]
+  GO_VERSION = "1.25.3"
+
+[env]
+  LOG_LEVEL = "info"
+  GOMAXPROCS = "4"
+
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  max_machines_running = 1
+  processes = ["app"]
+
+[http_service.concurrency]
+  type = "connections"
+  hard_limit = 100
+  soft_limit = 80
+
+
+
+# Persistent volume for SQLite database
+[[mounts]]
+  source = "bingo_data"
+  destination = "/app/data"
+
+[[processes]]
+  name = "app"
+  cmd = "./binGO -mode server -port 8080 -db /app/data/bingo.db"
+  auto_stop_machines = true
+  auto_start_machines = true
