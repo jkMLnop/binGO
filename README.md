@@ -242,10 +242,25 @@ binGO-CLI/
 │   ├── DEPLOYMENT.md           # Cloud deployment guide (Fly.io)
 │   └── MONITORING_SETUP.md     # Monitoring & observability setup
 ├── tests/                      # Integration & regression tests
-│   ├── multiplayer_test.go     # 8+ multiplayer integration tests
-│   ├── db_integration_test.go  # 7 database persistence tests (Phase 7.5)
-│   ├── README.md               # Test documentation
-│   └── REGRESSION_TESTS.md     # 49 manual regression tests
+│   ├── multiplayer_test.go         # 12+ multiplayer integration tests
+│   ├── db_integration_test.go      # 7 database persistence tests
+│   ├── container_e2e_test.go       # Testcontainers-based E2E tests
+│   ├── container_regression_test.go # Container regression suite
+│   ├── full_system_load_test.go    # E2E load test (requires docker-compose)
+│   ├── README.md                   # Test documentation
+│   └── REGRESSION_TESTS.md         # Manual regression test checklist
+├── dagger/                     # Dagger CI/CD pipeline (separate Go module)
+│   ├── main.go                 # Pipeline: test, build, publish, deploy, release
+│   └── main_test.go            # Pipeline unit tests
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions (thin trigger → Dagger)
+├── .lefthook.yml               # Git pre-push hooks (enforces tests before push)
+├── Dockerfile                  # Multi-stage Alpine build
+├── docker-compose.yml          # bingo-server + Prometheus + Grafana
+├── fly.toml                    # Fly.io production config
+├── fly.staging.toml            # Fly.io staging config
+├── prometheus.yml              # Prometheus scrape config
 ├── buzzwords.csv               # Default sample dataset
 ├── buzzwords_full.csv          # Extended buzzword set
 ├── bingo.db                    # SQLite database (created with -db flag)
@@ -264,30 +279,49 @@ binGO-CLI/
 
 ## Testing
 
-Run tests locally with `go test ./...` or see [tests/README.md](tests/README.md) for detailed test documentation.
+```bash
+# Unit tests (fast, no Docker)
+go test ./...
 
-## CI/CD & Releases
+# Unit + integration tests
+go test -tags=integration ./tests -v
 
-This repo uses GitHub Actions to automatically:
-- **Test**: Run full test suite on every push and PR
-- **Build**: Compile binaries for macOS Intel and Linux x86_64
-- **Release**: Create GitHub releases with checksums when you push a tag
+# Container regression tests (Docker must be running)
+go test -tags=container -timeout=10m ./tests -v
+
+# Run the same pipeline CI uses (via Dagger)
+cd dagger && go run . test
+```
+
+See [tests/README.md](tests/README.md) for full test documentation.
+
+## CI/CD
+
+All pipeline logic lives in `dagger/main.go` (a separate Go module). GitHub Actions (`.github/workflows/ci.yml`) is a thin trigger layer that calls Dagger functions. [Lefthook](.lefthook.yml) enforces the same pipeline locally before every `git push`.
+
+| Trigger | Pipeline |
+|---------|----------|
+| PR to `main` | `dagger test` (unit + integration) |
+| Push to `main` | `dagger test` → build Docker image → publish to ghcr.io → deploy to staging (Fly.io) |
+| Tag `v*` | Full pipeline → deploy to production (Fly.io) + GitHub Release with cross-compiled binaries |
 
 ### Creating a Release
 
-Simply tag your commit:
+Tag a commit and push — the pipeline runs automatically:
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
-GitHub Actions will:
-1. Run all tests
-2. Build binaries for both platforms
-3. Create a release with both binaries + SHA256 checksums
-4. Binaries available at: `https://github.com/jkMLnop/binGO-CLI/releases`
+GitHub Actions will run the full pipeline and create a GitHub Release with cross-compiled binaries (macOS Intel, Linux x86_64) and SHA256 checksums.
 
-(Free tier GitHub Actions: 2,000 minutes/month—this workflow uses ~2 min per run)
+### Local pre-push enforcement (Lefthook)
+
+```bash
+go install github.com/evilmartians/lefthook@latest && lefthook install
+# Every git push now runs unit+integration tests (via Dagger) and container tests automatically
+git push --no-verify  # bypass in emergencies
+```
 
 ## Project Roadmap
 

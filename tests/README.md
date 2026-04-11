@@ -213,33 +213,56 @@ go test ./shared -v
 
 ## Running All Tests
 
-**Unit tests only (fast):**
+**Unit tests only (fast, no Docker):**
 ```bash
 go test ./...
 ```
 
-**All tests including integration:**
+**Unit + integration tests:**
 ```bash
 go test -tags=integration ./tests -v
 ```
 
-**All tests including E2E (requires docker-compose up):**
+**Container regression tests (Docker must be running):**
+```bash
+go test -tags=container -timeout=10m ./tests -v
+```
+
+**Run the exact pipeline CI uses (via Dagger):**
+```bash
+# Unit + integration (same as `dagger test` in CI)
+cd dagger && go run . test
+
+# Container regression (same as Lefthook pre-push hook)
+go test -tags=container -timeout=10m ./tests -v
+```
+
+**E2E load test (requires `docker-compose up -d` first):**
 ```bash
 docker-compose up -d
-go test -tags=integration,e2e ./tests -v
+go test -tags=e2e ./tests -v
 ```
 
 Current status: **50+ automated tests passing** ✅
-- **1/1 Phase 8.3 E2E load test** (multi-game stability with Docker)
 - **7/7 Phase 7.5 integration tests** (database & API)
-- **20+/20+ multiplayer integration tests** (WebSocket coordination)
+- **12+/12+ multiplayer integration tests** (WebSocket coordination)
+- **15/15 container regression tests** (Testcontainers Docker lifecycle)
 - **40+/40+ unit tests** (shared, server, client, db packages)
 
-**Manual regression tests:** **49/49 tests passing** ✅
-- See [REGRESSION_TESTS.md](REGRESSION_TESTS.md) for complete coverage
+**Manual regression tests:** see [REGRESSION_TESTS.md](REGRESSION_TESTS.md) for complete coverage.
 
 ## CI/CD Integration
 
-Tests are automatically run on every push and pull request via GitHub Actions.
+All pipeline logic lives in `dagger/main.go` (a separate Go module). GitHub Actions (`.github/workflows/ci.yml`) is a thin trigger that calls Dagger functions:
 
-See [CI/CD & Releases](../README.md#cicd--releases) in the main README for details.
+| Trigger | What runs |
+|---------|-----------|
+| PR to `main` | `dagger test` (unit + integration in a container) |
+| Push to `main` | `dagger test` → build image → publish to ghcr.io → deploy staging |
+| Tag `v*` | Full pipeline → deploy production + GitHub Release |
+
+[Lefthook](.lefthook.yml) enforces tests locally before every `git push`:
+- `unit-integration`: runs `cd dagger && go run . test` (same as CI)
+- `container`: runs `go test -tags=container -timeout=10m ./tests -v` directly on the host
+
+Bypass with `git push --no-verify` in emergencies.
