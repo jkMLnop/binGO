@@ -5,8 +5,10 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -103,6 +105,38 @@ func startTestServer(port string) (*server.Server, error) {
 	return srv, nil
 }
 
+// createGameForTest creates a game via the admin API and returns its code.
+// All players in the test must include this code in their login message.
+func createGameForTest(t *testing.T, serverPort string) string {
+	t.Helper()
+	apiURL := fmt.Sprintf("http://localhost:%s/admin/api/games", serverPort)
+	req, err := http.NewRequest(http.MethodPost, apiURL, nil)
+	if err != nil {
+		t.Fatalf("createGameForTest: failed to build request: %v", err)
+	}
+	req.Header.Set("X-Admin-Key", "dev-admin-key-local-only")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("createGameForTest: admin API call failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Code string `json:"code"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("createGameForTest: failed to decode response: %v", err)
+	}
+	if !result.Success || result.Data.Code == "" {
+		t.Fatalf("createGameForTest: admin API did not return a game code")
+	}
+	return result.Data.Code
+}
+
 // TestMultiplayerGameFlow tests server with 2 connected clients
 // Player 1 marks cells to win, Player 2 participates
 // Run with: go test ./tests -tags=integration -run TestMultiplayerGameFlow -v
@@ -120,6 +154,9 @@ func TestMultiplayerGameFlow(t *testing.T) {
 	// Give server time to start
 	time.Sleep(500 * time.Millisecond)
 
+	// Pre-create game so players have a valid code to join
+	gameCode := createGameForTest(t, serverPort)
+
 	// Player 1 marks: 7, 8, 9 (top row = win)
 	player1Moves := []string{"7", "8", "9"}
 	// Player 2 marks: 1, 2 (no win)
@@ -133,7 +170,7 @@ func TestMultiplayerGameFlow(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		p1GameEnded, p1Won = playMultiplayerGame(t, "Player1", serverAddr, player1Moves)
+		p1GameEnded, p1Won = playMultiplayerGame(t, "Player1", serverAddr, player1Moves, gameCode)
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -142,7 +179,7 @@ func TestMultiplayerGameFlow(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		p2GameEnded, p2Won = playMultiplayerGame(t, "Player2", serverAddr, player2Moves)
+		p2GameEnded, p2Won = playMultiplayerGame(t, "Player2", serverAddr, player2Moves, gameCode)
 	}()
 
 	wg.Wait()
@@ -165,7 +202,7 @@ func TestMultiplayerGameFlow(t *testing.T) {
 }
 
 // playMultiplayerGame connects a client to server and plays with given moves
-func playMultiplayerGame(t *testing.T, playerName string, serverAddr string, moves []string) (bool, bool) {
+func playMultiplayerGame(t *testing.T, playerName string, serverAddr string, moves []string, gameCode string) (bool, bool) {
 	wsURL := url.URL{Scheme: "ws", Host: serverAddr, Path: "/ws"}
 
 	ws, err := websocket.Dial(wsURL.String(), "", "http://localhost")
@@ -183,10 +220,11 @@ func playMultiplayerGame(t *testing.T, playerName string, serverAddr string, mov
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Send login message with username
+	// Send login message with username and game code
 	loginMsg := map[string]interface{}{
 		"action":   "login",
 		"username": playerName,
+		"code":     gameCode,
 	}
 	err = websocket.JSON.Send(ws, loginMsg)
 	if err != nil {
@@ -301,6 +339,8 @@ func TestClientDisconnectMidGame(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9998")
+
 	// Connect Player 1
 	ws1, err := websocket.Dial("ws://localhost:9998/ws", "", "http://localhost")
 	if err != nil {
@@ -309,7 +349,7 @@ func TestClientDisconnectMidGame(t *testing.T) {
 	defer ws1.Close()
 
 	// Send login
-	loginMsg := map[string]interface{}{"action": "login", "username": "Player1"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "Player1", "code": gameCode}
 	err = websocket.JSON.Send(ws1, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login: %v", err)
@@ -330,7 +370,7 @@ func TestClientDisconnectMidGame(t *testing.T) {
 	defer ws2.Close()
 
 	// Send login
-	loginMsg = map[string]interface{}{"action": "login", "username": "Player2"}
+	loginMsg = map[string]interface{}{"action": "login", "username": "Player2", "code": gameCode}
 	err = websocket.JSON.Send(ws2, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login: %v", err)
@@ -356,7 +396,7 @@ func TestClientDisconnectMidGame(t *testing.T) {
 	defer ws3.Close()
 
 	// Send login for ws3
-	loginMsg3 := map[string]interface{}{"action": "login", "username": "Player3"}
+	loginMsg3 := map[string]interface{}{"action": "login", "username": "Player3", "code": gameCode}
 	err = websocket.JSON.Send(ws3, loginMsg3)
 	if err != nil {
 		t.Errorf("Failed to send login: %v", err)
@@ -384,6 +424,8 @@ func TestWinBroadcasting(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9997")
+
 	// Connect 2 players (for simplicity)
 	players := make([]*websocket.Conn, 2)
 	for i := 0; i < 2; i++ {
@@ -395,7 +437,7 @@ func TestWinBroadcasting(t *testing.T) {
 		defer ws.Close()
 
 		// Send login
-		loginMsg := map[string]interface{}{"action": "login", "username": fmt.Sprintf("Player%d", i+1)}
+		loginMsg := map[string]interface{}{"action": "login", "username": fmt.Sprintf("Player%d", i+1), "code": gameCode}
 		err = websocket.JSON.Send(ws, loginMsg)
 		if err != nil {
 			t.Fatalf("Failed to send login player %d: %v", i+1, err)
@@ -450,6 +492,8 @@ func TestPlayerReconnection(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9995")
+
 	// Connect initial player
 	ws1, err := websocket.Dial("ws://localhost:9995/ws", "", "http://localhost")
 	if err != nil {
@@ -457,7 +501,7 @@ func TestPlayerReconnection(t *testing.T) {
 	}
 
 	// Send login
-	loginMsg := map[string]interface{}{"action": "login", "username": "Player1"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "Player1", "code": gameCode}
 	err = websocket.JSON.Send(ws1, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login: %v", err)
@@ -482,7 +526,7 @@ func TestPlayerReconnection(t *testing.T) {
 	defer ws2.Close()
 
 	// Send login for reconnection
-	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player1Reconnect"}
+	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player1Reconnect", "code": gameCode}
 	err = websocket.JSON.Send(ws2, loginMsg2)
 	if err != nil {
 		t.Errorf("Failed to send login on reconnect: %v", err)
@@ -508,6 +552,8 @@ func TestConcurrentPlayerJoins(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9994")
+
 	// Rapidly connect 5 players concurrently
 	numPlayers := 5
 	var wg sync.WaitGroup
@@ -525,7 +571,7 @@ func TestConcurrentPlayerJoins(t *testing.T) {
 			defer ws.Close()
 
 			// Send login
-			loginMsg := map[string]interface{}{"action": "login", "username": fmt.Sprintf("Player%d", playerNum)}
+			loginMsg := map[string]interface{}{"action": "login", "username": fmt.Sprintf("Player%d", playerNum), "code": gameCode}
 			err = websocket.JSON.Send(ws, loginMsg)
 			if err != nil {
 				results <- err
@@ -578,18 +624,19 @@ func TestIPSpoofing(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9996")
+
 	t.Log("--- IP Spoofing Test ---")
 	t.Log("Scenario: Two players from different IPs trying to claim same username")
 
-	// Player A connects with username "alice"
+	// Player A connects with username "alice" — should succeed
 	wsA, err := websocket.Dial("ws://localhost:9996/ws?id=alice", "", "http://localhost")
 	if err != nil {
 		t.Fatalf("Failed to connect Player A: %v", err)
 	}
 	defer wsA.Close()
 
-	// Send login
-	loginMsg := map[string]interface{}{"action": "login", "username": "alice"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "alice", "code": gameCode}
 	err = websocket.JSON.Send(wsA, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login Player A: %v", err)
@@ -602,68 +649,46 @@ func TestIPSpoofing(t *testing.T) {
 	}
 
 	playerIDA, ok := welcomeA["player_id"].(string)
-	if !ok {
-		t.Fatalf("Failed to extract player_id from welcome")
+	if !ok || playerIDA == "" {
+		t.Fatalf("Player A did not receive a valid player_id (type=%s): %v", welcomeA["type"], welcomeA)
 	}
 	t.Logf("[Player A] Connected as: %s", playerIDA)
 
-	// Small delay to ensure Player A is established
 	time.Sleep(100 * time.Millisecond)
 
-	// Player B (different IP, but we can't truly spoof in localhost tests)
-	// Instead, we simulate by attempting to connect with same player ID
-	// In a real scenario over ngrok/internet, Player B could forge IP headers
+	// Player B tries the same username in the same game — should be rejected
 	wsB, err := websocket.Dial("ws://localhost:9996/ws?id=alice", "", "http://localhost")
 	if err != nil {
 		t.Fatalf("Failed to connect Player B: %v", err)
 	}
 	defer wsB.Close()
 
-	// Send login attempt with same username
-	loginMsgB := map[string]interface{}{"action": "login", "username": "alice"}
+	loginMsgB := map[string]interface{}{"action": "login", "username": "alice", "code": gameCode}
 	err = websocket.JSON.Send(wsB, loginMsgB)
 	if err != nil {
 		t.Fatalf("Failed to send login Player B: %v", err)
 	}
 
-	var welcomeB map[string]interface{}
-	err = websocket.JSON.Receive(wsB, &welcomeB)
+	var responseB map[string]interface{}
+	err = websocket.JSON.Receive(wsB, &responseB)
 	if err != nil {
-		t.Fatalf("Player B failed to receive welcome: %v", err)
+		t.Fatalf("Player B failed to receive response: %v", err)
 	}
 
-	playerIDB, ok := welcomeB["player_id"].(string)
-	if !ok {
-		t.Fatalf("Failed to extract player_id from welcome")
-	}
-	t.Logf("[Player B] Connected as: %s", playerIDB)
-
-	// CURRENT BEHAVIOR (no auth):
-	// Both players get the same ID, but server rejects duplicate (see game.go AddPlayer)
-	// So this currently fails gracefully
-
-	// AFTER PHASE 7.2:
-	// This test should FAIL because Player B should not be able to assume Player A's identity
-	// Expected behavior:
-	// - Player A gets token bound to their IP
-	// - Player B tries with same username but different IP
-	// - Server rejects Player B (username already taken on different IP, OR B gets different username)
-
-	if playerIDA == playerIDB {
-		t.Logf("⚠️  VULNERABILITY: Both players got same ID '%s'", playerIDA)
-		t.Logf("    (Currently blocked by duplicate check, but should be prevented by IP-binding)")
-		t.Logf("    EXPECTED AFTER 7.2: Player B should get different ID or be rejected")
+	// Expected: Player B is rejected because "alice" is already in the game
+	if responseB["type"] == "error" {
+		t.Logf("✓ Player B correctly rejected (duplicate username): %v", responseB["message"])
 	} else {
-		t.Logf("✓ Players got different IDs: A='%s', B='%s'", playerIDA, playerIDB)
-		t.Logf("  (Current auto-ID system doesn't allow spoofing)")
+		// If both get in, log the IDs for analysis
+		playerIDB, _ := responseB["player_id"].(string)
+		if playerIDA == playerIDB {
+			t.Errorf("⚠️  VULNERABILITY: Both players got same ID '%s'", playerIDA)
+		} else {
+			t.Logf("Players got different IDs: A='%s', B='%s'", playerIDA, playerIDB)
+		}
 	}
 
-	// Get list of players in game to verify both are present or one was rejected
-	time.Sleep(200 * time.Millisecond)
-
-	// Try to retrieve game status via status endpoint
-	t.Logf("Note: This test documents the attack vector for Phase 7.2 implementation.")
-	t.Logf("      After implementing IP-bound JWT tokens, spoofing attempts should be cryptographically prevented.")
+	t.Logf("Note: IP-bound JWT tokens prevent username hijacking across network boundaries.")
 }
 
 // TestIPSpoofingDetection tests that server logs/prevents hijack attempts
@@ -697,8 +722,27 @@ func TestTokenPersistenceOnReconnect(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	// Pre-create game so the player has a valid code to join
+	gameCode := createGameForTest(t, "9993")
+
 	// --- INITIAL CONNECTION ---
 	t.Log("Step 1: Player connects and receives token")
+
+	// Connect a second player to keep the game alive during disconnect/reconnect
+	// (without a second player, the game would be orphaned when PersistenceTest disconnects)
+	wsObserver, err := websocket.Dial("ws://localhost:9993/ws", "", "http://localhost")
+	if err != nil {
+		t.Fatalf("Failed to connect observer: %v", err)
+	}
+	defer wsObserver.Close()
+	observerLogin := map[string]interface{}{"action": "login", "username": "Observer", "code": gameCode}
+	if err := websocket.JSON.Send(wsObserver, observerLogin); err != nil {
+		t.Fatalf("Failed to send observer login: %v", err)
+	}
+	var observerWelcome map[string]interface{}
+	if err := websocket.JSON.Receive(wsObserver, &observerWelcome); err != nil {
+		t.Fatalf("Failed to receive observer welcome: %v", err)
+	}
 
 	ws1, err := websocket.Dial("ws://localhost:9993/ws", "", "http://localhost")
 	if err != nil {
@@ -706,7 +750,7 @@ func TestTokenPersistenceOnReconnect(t *testing.T) {
 	}
 
 	// Send login
-	loginMsg := map[string]interface{}{"action": "login", "username": "PersistenceTest"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "PersistenceTest", "code": gameCode}
 	err = websocket.JSON.Send(ws1, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login: %v", err)
@@ -745,11 +789,12 @@ func TestTokenPersistenceOnReconnect(t *testing.T) {
 	}
 	defer ws2.Close()
 
-	// Send login with same token
+	// Send login with same token and game code
 	reconnectMsg := map[string]interface{}{
 		"action":   "login",
 		"username": "PersistenceTest",
 		"token":    token1,
+		"code":     gameCode,
 	}
 	err = websocket.JSON.Send(ws2, reconnectMsg)
 	if err != nil {
@@ -798,6 +843,8 @@ func TestHostImmutability(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9994")
+
 	// Player 1 (Host) connects
 	wsHost, err := websocket.Dial("ws://localhost:9994/ws", "", "http://localhost")
 	if err != nil {
@@ -805,7 +852,7 @@ func TestHostImmutability(t *testing.T) {
 	}
 	defer wsHost.Close()
 
-	loginMsg := map[string]interface{}{"action": "login", "username": "Host"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "Host", "code": gameCode}
 	err = websocket.JSON.Send(wsHost, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send host login: %v", err)
@@ -831,7 +878,7 @@ func TestHostImmutability(t *testing.T) {
 	}
 	defer wsPlayer2.Close()
 
-	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player2"}
+	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player2", "code": gameCode}
 	err = websocket.JSON.Send(wsPlayer2, loginMsg2)
 	if err != nil {
 		t.Fatalf("Failed to send player 2 login: %v", err)
@@ -860,6 +907,7 @@ func TestHostImmutability(t *testing.T) {
 		"action":   "login",
 		"username": "Host",
 		"token":    hostToken,
+		"code":     gameCode,
 	}
 	err = websocket.JSON.Send(wsHostReconnect, reconnectMsg)
 	if err != nil {
@@ -898,13 +946,15 @@ func TestHostCanRestartAfterReconnect(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9991")
+
 	// Host connects and plays to win quickly
 	wsHost, err := websocket.Dial("ws://localhost:9991/ws", "", "http://localhost")
 	if err != nil {
 		t.Fatalf("Failed to connect host: %v", err)
 	}
 
-	loginMsg := map[string]interface{}{"action": "login", "username": "HostRestart"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "HostRestart", "code": gameCode}
 	err = websocket.JSON.Send(wsHost, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send host login: %v", err)
@@ -924,7 +974,7 @@ func TestHostCanRestartAfterReconnect(t *testing.T) {
 	}
 	defer wsPlayer2.Close()
 
-	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player2"}
+	loginMsg2 := map[string]interface{}{"action": "login", "username": "Player2", "code": gameCode}
 	err = websocket.JSON.Send(wsPlayer2, loginMsg2)
 	if err != nil {
 		t.Fatalf("Failed to send player 2 login: %v", err)
@@ -962,6 +1012,7 @@ func TestHostCanRestartAfterReconnect(t *testing.T) {
 		"action":   "login",
 		"username": "HostRestart",
 		"token":    hostToken,
+		"code":     gameCode,
 	}
 	err = websocket.JSON.Send(wsHostReconnect, reconnectMsg)
 	if err != nil {
@@ -1010,13 +1061,15 @@ func TestReconnectionDoesNotTriggerCollision(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9990")
+
 	// Player 1 connects
 	ws1, err := websocket.Dial("ws://localhost:9990/ws", "", "http://localhost")
 	if err != nil {
 		t.Fatalf("Failed to connect player 1: %v", err)
 	}
 
-	loginMsg := map[string]interface{}{"action": "login", "username": "CollisionTest"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "CollisionTest", "code": gameCode}
 	err = websocket.JSON.Send(ws1, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login: %v", err)
@@ -1048,6 +1101,7 @@ func TestReconnectionDoesNotTriggerCollision(t *testing.T) {
 		"action":   "login",
 		"username": "CollisionTest",
 		"token":    token,
+		"code":     gameCode,
 	}
 	err = websocket.JSON.Send(ws1Reconnect, reconnectMsg)
 	if err != nil {
@@ -1086,13 +1140,15 @@ func TestBoardStateResetOnReconnect(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
+	gameCode := createGameForTest(t, "9989")
+
 	// Player connects and marks some cells
 	ws1, err := websocket.Dial("ws://localhost:9989/ws", "", "http://localhost")
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
 
-	loginMsg := map[string]interface{}{"action": "login", "username": "BoardTest"}
+	loginMsg := map[string]interface{}{"action": "login", "username": "BoardTest", "code": gameCode}
 	err = websocket.JSON.Send(ws1, loginMsg)
 	if err != nil {
 		t.Fatalf("Failed to send login: %v", err)
@@ -1131,6 +1187,7 @@ func TestBoardStateResetOnReconnect(t *testing.T) {
 		"action":   "login",
 		"username": "BoardTest",
 		"token":    token,
+		"code":     gameCode,
 	}
 	err = websocket.JSON.Send(ws2, reconnectMsg)
 	if err != nil {
