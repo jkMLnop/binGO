@@ -13,6 +13,12 @@ pre-push:
       run: cd dagger && go run . test
       fail_text: "Unit/integration tests failed — fix before pushing."
     container:
-      run: cd dagger && go run . test-container
+      # Container tests run directly on the host (not inside a Dagger container)
+      # because testcontainers creates sibling Docker containers via the host
+      # socket. When those tests also run inside a Dagger container, "localhost"
+      # inside the Dagger layer can't reach the sibling containers' mapped ports.
+      # Running directly avoids the nested-Docker networking problem while still
+      # exercising the full Docker container lifecycle.
+      run: go test -tags=container -timeout=10m ./tests -v
       fail_text: "Container regression tests failed — fix before pushing."
 

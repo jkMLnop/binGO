@@ -128,6 +128,17 @@ func runTestContainer(ctx context.Context, client *dagger.Client, source *dagger
 	dockerSocket := client.Host().UnixSocket("/var/run/docker.sock")
 	_, err := goBase(client, source).
 		WithUnixSocket("/var/run/docker.sock", dockerSocket).
+		// When tests run inside a Dagger container with the host Docker socket
+		// mounted, sibling containers are created on the host network.
+		// - RYUK disabled: Ryuk's Reaper binds a port on the host; inside the
+		//   Dagger container "localhost" can't reach that port. Tests already
+		//   call container.Terminate() explicitly, so Ryuk is not needed.
+		// - HOST_OVERRIDE: c.Host() returns this value so mapped ports are
+		//   looked up on the Docker Desktop hostname instead of localhost.
+		//   Works on macOS/Windows (Docker Desktop). On Linux CI the container
+		//   tests are not run inside Dagger (Lefthook runs them directly).
+		WithEnvVariable("TESTCONTAINERS_RYUK_DISABLED", "true").
+		WithEnvVariable("TESTCONTAINERS_HOST_OVERRIDE", "host.docker.internal").
 		WithExec([]string{"go", "test", "-tags=container", "-timeout=10m", "./tests", "-v"}).
 		Sync(ctx)
 	if err != nil {

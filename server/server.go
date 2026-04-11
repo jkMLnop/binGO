@@ -602,15 +602,24 @@ func (s *Server) NotifyShutdown() {
 	s.GamesMu.RLock()
 	defer s.GamesMu.RUnlock()
 
+	// First pass: deliver the shutdown message to every player.
+	// For players with a live WebSocket we write directly (bypassing the async
+	// message channel) so the frame is guaranteed to be on the wire before we
+	// close the connection. For players without a live WebSocket (e.g. created
+	// in unit tests) we fall back to the channel so callers can still verify
+	// that the message was produced.
+	var wsConns []*websocket.Conn
+
 	notified := 0
 	for _, game := range s.Games {
 		game.PlayersMu.RLock()
 		for _, p := range game.Players {
-			_ = p.sendMessage(shutdownMsg)
-			// Close the WebSocket so the read loop in wsHandler unblocks
 			p.wsMu.Lock()
 			if p.ws != nil {
-				p.ws.Close()
+				_ = websocket.JSON.Send(p.ws, shutdownMsg)
+				wsConns = append(wsConns, p.ws)
+			} else {
+				_ = p.sendMessage(shutdownMsg)
 			}
 			p.wsMu.Unlock()
 			notified++
@@ -620,7 +629,11 @@ func (s *Server) NotifyShutdown() {
 
 	if notified > 0 {
 		log.Printf("🛑 Notified %d player(s) of server shutdown", notified)
-		time.Sleep(500 * time.Millisecond) // brief pause so messages can flush
+		// Give clients time to receive and process the message before we close.
+		time.Sleep(500 * time.Millisecond)
+		for _, ws := range wsConns {
+			ws.Close()
+		}
 	}
 }
 
@@ -677,8 +690,10 @@ func (s *Server) handlePlayerDisconnect(game *Game, player *Player, ws *websocke
 	s.Metrics.PlayerCount.Set(float64(s.countTotalPlayers()))
 	s.Metrics.PlayersDisconnectedTotal.Inc()
 
-	// Orphaned game detection: all players left an active game (no winner)
-	if playerCount == 0 && game.IsActive {
+	// Orphaned game detection: all players left an active game with no winner.
+	// Note: IsActive stays true after a win (to allow restart), so we must also
+	// check that no winner was declared before marking the game orphaned.
+	if playerCount == 0 && game.IsActive && game.Winner == "" {
 		s.markGameOrphaned(game)
 	}
 

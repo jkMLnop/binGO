@@ -768,7 +768,7 @@ func TestPartialDisconnectDoesNotOrphan(t *testing.T) {
 	playerCount := game.PlayerCount()
 
 	// Replicate the condition from handlePlayerDisconnect
-	if playerCount == 0 && game.IsActive {
+	if playerCount == 0 && game.IsActive && game.Winner == "" {
 		srv.markGameOrphaned(game)
 	}
 
