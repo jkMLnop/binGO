@@ -197,7 +197,10 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 	secret := client.SetSecret("fly-token", flyToken)
 	imageRef := fmt.Sprintf("%s:%s", registryBase, version)
 	fmt.Printf("=== Deploying %s to %s (%s) ===\n", imageRef, env, appName)
-	_, err = client.Container().From("flyio/flyctl:latest").
+	_, err = client.Container().From("alpine:latest").
+		WithExec([]string{"sh", "-c", "apk add --no-cache curl bash && curl -L https://fly.io/install.sh | sh"}).
+		WithEnvVariable("FLYCTL_INSTALL", "/root/.fly").
+		WithEnvVariable("PATH", "/root/.fly/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").
 		WithSecretVariable("FLY_API_TOKEN", secret).
 		WithMountedDirectory("/app", source).
 		WithWorkdir("/app").
