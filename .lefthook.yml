@@ -19,6 +19,20 @@ pre-push:
       # inside the Dagger layer can't reach the sibling containers' mapped ports.
       # Running directly avoids the nested-Docker networking problem while still
       # exercising the full Docker container lifecycle.
-      run: go test -tags=container -timeout=10m ./tests -v
+      #
+      # Skip when no files that affect the built Docker image have changed.
+      # Container tests build the Dockerfile and test the binary inside it,
+      # so only Go source, Dockerfile, and dependency changes can break them.
+      # Docs, configs, dashboards, scripts, and dagger/ changes are safe to skip.
+      skip:
+        - merge
+        - rebase
+      run: |
+        if git diff --name-only HEAD @{push} 2>/dev/null | grep -qE '\.(go|mod|sum)$|^Dockerfile$'; then
+          echo "Container-relevant files changed — running container tests..."
+          go test -tags=container -timeout=10m ./tests -v
+        else
+          echo "No container-relevant files changed — skipping container tests."
+        fi
       fail_text: "Container regression tests failed — fix before pushing."
 
