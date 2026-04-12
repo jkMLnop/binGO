@@ -65,8 +65,8 @@ func (p *Player) Connect(username string, token string, code string) (ServerMess
 	wsURL = strings.TrimSuffix(wsURL, "/ws")
 
 	// Auto-detect protocol based on server URL
-	if strings.Contains(wsURL, "ngrok") {
-		// ngrok uses HTTPS, so use wss:// (WebSocket Secure)
+	if strings.Contains(wsURL, "ngrok") || strings.Contains(wsURL, "fly.dev") {
+		// ngrok and Fly.io use HTTPS, so use wss:// (WebSocket Secure)
 		wsURL = "wss://" + wsURL + "/ws"
 	} else {
 		// Local/LAN connections use plain ws://
