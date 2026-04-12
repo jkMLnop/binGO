@@ -200,7 +200,7 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 		WithSecretVariable("FLY_API_TOKEN", secret).
 		WithMountedDirectory("/app", source).
 		WithWorkdir("/app").
-		WithExec([]string{"flyctl", "deploy", "--app", appName, "--config", configFile, "--image", imageRef, "--yes"}).
+		WithExec([]string{"flyctl", "deploy", "--app", appName, "--config", configFile, "--image", imageRef, "--yes", "--wait-timeout=300"}).
 		Sync(ctx)
 	if err != nil {
 		return fmt.Errorf("deploy to %s (%s): %w", env, appName, err)

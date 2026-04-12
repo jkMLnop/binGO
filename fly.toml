@@ -28,6 +28,12 @@ primary_region = "sjc"
   hard_limit = 100
   soft_limit = 80
 
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "15s"
+  method = "GET"
+  path = "/api/status"
+  timeout = "5s"
 
 
 # Persistent volume for SQLite database
