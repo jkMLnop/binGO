@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -200,9 +201,18 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 		WithSecretVariable("FLY_API_TOKEN", secret).
 		WithMountedDirectory("/app", source).
 		WithWorkdir("/app").
-		WithExec([]string{"deploy", "--app", appName, "--config", configFile, "--image", imageRef, "--yes", "--wait-timeout=300"}).
+		WithExec([]string{"deploy", "--app", appName, "--config", configFile, "--image", imageRef, "--yes"}).
 		Sync(ctx)
 	if err != nil {
+		var execErr *dagger.ExecError
+		if errors.As(err, &execErr) {
+			if execErr.Stdout != "" {
+				fmt.Printf("[flyctl stdout]:\n%s\n", execErr.Stdout)
+			}
+			if execErr.Stderr != "" {
+				fmt.Fprintf(os.Stderr, "[flyctl stderr]:\n%s\n", execErr.Stderr)
+			}
+		}
 		return fmt.Errorf("deploy to %s (%s): %w", env, appName, err)
 	}
 	fmt.Printf("=== Deployed to %s ===\n", env)
