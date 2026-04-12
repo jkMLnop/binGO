@@ -28,6 +28,14 @@ The evolution of binGO-CLI organized by development phases.
 #### Phase 8: Production Hardening & Scaling
 **Goal:** Make cloud server reliable under load; automate deployments
 
+**Observability architecture decision (Apr 2026):**
+Local `docker-compose` Prometheus+Grafana stack is for local dev only — it does not scrape staging/prod. Scraping remote Fly.io servers from a dev laptop is fragile (metrics lost when laptop is offline, no alerting, not shareable).
+
+Chosen approach per tier:
+- **Local dev:** `docker-compose up` → Prometheus scrapes `bingo-server:8080`, Grafana at `localhost:3000`
+- **Staging / Production (Phase 8):** Grafana Cloud free tier (hosted Prometheus + Grafana). Scrapes `https://bingo-server-staging.fly.dev/metrics` and `https://bingo-server.fly.dev/metrics` directly. Persistent dashboards, no infra to maintain, 10k series / 14-day retention free.
+- **Phase 10 (K8s):** Self-hosted Prometheus on cluster with Thanos or federation for multi-replica aggregation and long-term retention. Mirrors the `GameStore` interface pattern — swap the observability implementation when scale demands it.
+
 **Tasks:**
 - [ ] Security hardening
   - Rate limiting (prevent code brute-force)
@@ -40,6 +48,30 @@ The evolution of binGO-CLI organized by development phases.
   - Replace bare `errors.New` / `fmt.Errorf` (without `%w`) at call boundaries that discard the original error
   - Verify `ctx` is passed through to `sqlite.go` store methods and cancelled correctly on shutdown
   - Add `context.WithTimeout` where long-running DB or network operations lack a deadline
+
+- [ ] Make load test target-configurable for remote environments
+  - `full_system_load_test.go` is hardcoded to `127.0.0.1:8080` and `dev-admin-key-local-only`
+  - Read `LOAD_TEST_URL` env var (default `http://127.0.0.1:8080`) for base URL
+  - Read `ADMIN_API_KEY` env var (default `dev-admin-key-local-only`) for admin auth
+  - Auto-derive WebSocket scheme from base URL: `https://` → `wss://`, `http://` → `ws://`
+  - Usage: `LOAD_TEST_URL=https://bingo-server-staging.fly.dev ADMIN_API_KEY=test-regression-key-12a go test -tags=e2e ./tests -v`
+  - No other app changes needed — admin API, WebSocket protocol, and `/metrics` endpoint are identical on all environments
+  - Fill in `load-test-with-monitoring.sh` wrapper script with env var support and Grafana dashboard URL output
+
+- [ ] Grafana Cloud monitoring for staging & production
+  - **Why:** Local `docker-compose` Prometheus+Grafana only runs when laptop is on — no persistent metrics, no alerting, not shareable. Grafana Cloud free tier solves all three with zero infra.
+  - **Free tier limits:** 10,000 active series, 14-day retention, 3 users — more than sufficient for single-instance Fly.io deployments.
+  - Setup steps:
+    1. Create free account at https://grafana.com/products/cloud/
+    2. In Grafana Cloud → Connections → Add new connection → Hosted Prometheus, note the remote-write URL and API key
+    3. Configure Grafana Alloy (lightweight agent) or use Prometheus `remote_write` to push `bingo_*` metrics from each Fly.io app
+       - Option A (simpler): Add a Grafana Alloy sidecar process to the Fly.io app that scrapes `localhost:8080/metrics` and remote-writes to Grafana Cloud
+       - Option B: Run a tiny `prometheus` instance per Fly.io app with `remote_write` config pointing to Grafana Cloud
+    4. Create dashboards in Grafana Cloud mirroring the local `bingo-dashboard.json` panels
+    5. Add `instance` or `env` label (`staging` / `production`) to differentiate tiers in shared dashboards
+    6. Set up alerting rules: `bingo_errors_total` rate spike, game count drop to 0, scrape target down
+  - Update `load-test-with-monitoring.sh` to print Grafana Cloud dashboard URL instead of `localhost:3000`
+  - **Do NOT add remote scrape targets to local `prometheus.yml`** — local stack stays local-only
 
 #### Phase 9: Client Features & Improved UX
 **Goal:** Support hosting games on cloud server; add leaderboards; support custom buzzword lists
@@ -100,10 +132,29 @@ The evolution of binGO-CLI organized by development phases.
   - Debug session correlation (which pod handled which request)
   - Correlate traces with Phase 8 structured logs using trace IDs
 
+- [ ] Self-hosted Prometheus & Grafana on K8s (replaces Grafana Cloud)
+  - **Why:** Grafana Cloud free tier has 10k series / 14-day retention limits. Multi-replica K8s with PostgreSQL, tracing, and service mesh will exceed these. Self-hosted gives unlimited retention, custom recording rules, and Thanos for long-term storage.
+  - Deploy Prometheus via `kube-prometheus-stack` Helm chart (bundles Prometheus, Grafana, Alertmanager, node-exporter)
+  - Configure `ServiceMonitor` CRDs to auto-discover bingo-server pods (replaces static scrape targets)
+  - Add Thanos sidecar for S3/GCS long-term metric storage beyond local TSDB retention
+  - Migrate Grafana Cloud dashboards to self-hosted Grafana (export JSON → import)
+  - Configure Alertmanager with PagerDuty/Slack integrations for production alerts
+  - Add federation endpoint if running multiple Prometheus instances (one per namespace)
+  - Correlate Prometheus metrics with OpenTelemetry traces using exemplars (trace ID links in Grafana panels)
+  - Mirrors the `GameStore` interface pattern — observability backend is swappable without changing application instrumentation code (`bingo_*` metrics stay the same)
+
 - [ ] Testing under K8s
   - Multi-replica game coordination
   - Database failover scenarios
   - Performance benchmarking under load with tracing insights
+
+- [ ] Distributed load testing (replaces single-machine Go test at scale)
+  - **Why:** `full_system_load_test.go` runs from a single machine — sufficient for Fly.io single-instance, but can't saturate multi-replica K8s from one client
+  - Adopt k6 (Grafana OSS) or Grafana Cloud k6 for distributed load generation
+  - Write k6 scripts mirroring the existing Go load test scenarios (game creation, WebSocket player lifecycle, concurrent marks)
+  - Run k6 from multiple nodes or use Grafana Cloud k6 to generate load from distributed regions
+  - Integrate k6 metrics with self-hosted Prometheus/Grafana for unified dashboards (load test results alongside app metrics)
+  - Keep existing `full_system_load_test.go` for quick smoke tests; k6 for capacity planning and stress testing
 
 #### Phase 11: Web Client & Shareable Links
 **Goal:** Browser-based bingo client with URL-based game sharing (like Zoom meeting links)
