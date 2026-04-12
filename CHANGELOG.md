@@ -4,6 +4,43 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Post-v8.2.0 Updates (2026-04-12)
+
+#### Fixed
+- **WebSocket `wss://` for Fly.io connections** (`c15d106`) — `client/player.go` now auto-detects `wss://` for `fly.dev` hostnames (previously only handled `ngrok` URLs), fixing connection failures to staging/production servers
+
+#### Added
+- **Lefthook container test skip optimization** (`c8ce3a0`) — container tests (~120s) are now skipped during `git push` when only non-build files change (docs, YAML, markdown). Uses `git diff --name-only HEAD @{push}` to check for `.go`, `.mod`, `.sum`, or `Dockerfile` changes. Also skips on merge/rebase commits. Verified with positive (`.go` change → container ran 125s) and negative (docs-only → container skipped 0.06s) test cases
+
+#### Changed
+- **`docs/ROADMAP.md`** (`58d0613`) — added observability architecture decision (Grafana Cloud free tier for staging/prod, self-hosted Prometheus for dev only, full self-hosted stack for Phase 10 K8s); added detailed monitoring tasks to Phase 8 and Phase 10; added load test configurability and distributed load testing (k6) tasks
+
+---
+
+### v8.2.0 — CI/CD Pipeline & Deployment Fixes (2026-04-11)
+
+#### Fixed
+- **Dagger deploy pipeline** — 6 iterative fixes to get Fly.io deployment working from Dagger:
+  - Replaced `flyio/flyctl` Docker image with self-installed `flyctl` on Alpine (`bdc287a`)
+  - Fixed `flyctl` argument ordering — init wrapper execs it (`0d05457`)
+  - Removed `--wait-timeout` flag, unsupported in flyctl version (`e08cb8a`)
+  - Fixed duplicate `"flyctl"` prefix in `WithExec` args (`9c927eb`)
+  - Added `--wait-timeout=300` and HTTP health check config to `fly.toml`/`fly.staging.toml` (`348e8c5`)
+- **CI workflow YAML** (`6d2fd63`) — fixed duplicate env key and shell syntax errors in `.github/workflows/ci.yml`
+- **CI test job** (`81ce923`) — fixed failing CI test job configuration
+- **Container test pipeline** (`9beb8f3`) — `test-container` Dagger function now correctly resolves project root relative to script CWD
+- **SIGTERM flush race** (`5184110`) — fixed race condition in `NotifyShutdown` where shutdown messages could fail to flush before WebSocket close
+- **Orphan-after-win double-archive** (`5184110`) — prevented duplicate `ArchiveGameInDB` calls when all players disconnect from a game that already had a winner
+- **Multiplayer test logins** (`09052b6`) — all multiplayer tests now include required game code in login messages
+
+#### Changed
+- **`docs/DEVOPS.md`** (`10dbb1b`) — updated CI/CD and testing documentation to reflect Dagger/Lefthook pipeline
+
+#### Tests
+- Lefthook pre-push hook verification (`723472c`) — confirmed hooks fire correctly on `git push`
+
+---
+
 ### Phase 8.8 - Dagger CI/CD Pipeline + Lefthook Guardrails (2026-04-11)
 
 #### Philosophy
