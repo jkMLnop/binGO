@@ -126,6 +126,7 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 | `bingo_game_restarted_total` | Counter | |
 | `bingo_admin_api_requests_total` | Counter | |
 | `bingo_errors_total` | CounterVec | Labels: `error_type` = `auth\|game\|db\|ws\|input` |
+| `bingo_rate_limited_total` | CounterVec | Labels: `endpoint` = `ws\|code_guess` |
 | `bingo_game_creation_duration_ms` | Histogram | |
 | `bingo_database_query_duration_ms` | Histogram | |
 | `bingo_admin_api_latency_ms` | Histogram | |
@@ -219,8 +220,10 @@ All CI/CD logic lives in `dagger/main.go` (separate Go module: `dagger/go.mod`).
 
 ## Current State (v8.1.0)
 
-Completed through Phase 8.8. Remaining Phase 8 work:
-- Security hardening (rate limiting, DDoS mitigation)
+Completed through Phase 8.8:
+- Security hardening: per-IP WebSocket connection limit (5/IP, HTTP 429), game-code brute-force protection (5 failures/60 s token bucket), `RateLimitExceeded` structured log, `bingo_rate_limited_total` Prometheus metric, sanitized `X-Forwarded-For` parsing
+
+Remaining Phase 8 work:
 - Context propagation & error wrapping audit
 
 See `docs/ROADMAP.md` for Phase 9+ plans (client menu, buzzword suggestions, leaderboards, K8s, web client).
@@ -230,6 +233,7 @@ See `docs/ROADMAP.md` for Phase 9+ plans (client menu, buzzword suggestions, lea
 | File | Why |
 |---|---|
 | `server/server.go` | Core server — all WebSocket handling, game flow, shutdown |
+| `server/ratelimit.go` | Per-IP WS conn limiting, code-guess rate limiting, cleanup |
 | `server/metrics.go` | All Prometheus metric definitions + `ResetMetrics()` |
 | `server/admin.go` | Admin API CRUD + auth middleware |
 | `server/game.go` | `Game` and `Player` structs, `NewGame()`, `AddPlayer()`, `RemovePlayer()` |

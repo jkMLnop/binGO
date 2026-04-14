@@ -148,6 +148,20 @@ func (l *Logger) Error(eventType, message string, err error, details map[string]
 	l.logEvent("ERROR", eventType, message, d)
 }
 
+// RateLimitExceeded logs a structured WARN event when a request is rejected by
+// the rate limiter. attemptCount is the connection or attempt number that was
+// blocked (informational; pass 0 when not applicable).
+func (l *Logger) RateLimitExceeded(ip, endpoint string, attemptCount int) {
+	d := map[string]interface{}{
+		"ip":            ip,
+		"endpoint":      endpoint,
+	}
+	if attemptCount > 0 {
+		d["attempt_count"] = attemptCount
+	}
+	l.logEvent("WARN", "rate_limit_exceeded", "Rate limit exceeded", d)
+}
+
 // mergeMaps merges extra into base (extra keys take precedence) and returns base.
 // Both arguments may be nil.
 func mergeMaps(base, extra map[string]interface{}) map[string]interface{} {

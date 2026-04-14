@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/websocket"
+	"golang.org/x/time/rate"
 )
 
 // Server manages the WebSocket server and game sessions
@@ -35,7 +37,12 @@ type Server struct {
 	Metrics     *Metrics     // Prometheus metrics (Phase 8)
 	Logger      *Logger      // Structured JSON logger (Phase 8)
 	Tracer      trace.Tracer // OTel tracer (Phase 8)
-	cleanupStop chan struct{} // signals startCleanupRoutine to exit
+	cleanupStop    chan struct{}             // signals startCleanupRoutine to exit
+	// Rate-limiting state (Phase 8.8)
+	ConnCounts     map[string]int           // active WS connections per IP
+	ConnCountsMu   sync.Mutex               // protects ConnCounts
+	CodeLimiters   map[string]*rate.Limiter  // per-IP token-bucket for code guesses
+	CodeLimitersMu sync.Mutex               // protects CodeLimiters
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -56,9 +63,11 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 		Cols:         cols,
 		Port:         port,
 		Mux:          mux,
-		TokenManager: NewTokenManager(""), // Will generate random secret
-		Sessions:     make(map[string]*ClientSession),
-		DB:          nil,
+		TokenManager:   NewTokenManager(""), // Will generate random secret
+		Sessions:       make(map[string]*ClientSession),
+		ConnCounts:     make(map[string]int),
+		CodeLimiters:   make(map[string]*rate.Limiter),
+		DB:             nil,
 		Metrics:     NewMetrics(),
 		Logger:      NewLogger(),
 		Tracer:      trace.NewNoopTracerProvider().Tracer("bingo-server"),
@@ -88,7 +97,7 @@ func (s *Server) Start() error {
 
 // registerHandlers registers all HTTP handlers
 func (s *Server) registerHandlers() {
-	s.Mux.Handle("/ws", websocket.Handler(s.wsHandler))
+	s.Mux.Handle("/ws", s.wsConnLimitMiddleware(websocket.Handler(s.wsHandler)))
 	s.Mux.HandleFunc("/status", s.handleStatus)
 
 	// API handlers (Phase 7.5)
@@ -235,6 +244,15 @@ func (s *Server) handlePlayerConnect(ctx context.Context, ws *websocket.Conn) (*
 
 	game, err := s.getOrCreateGame(code)
 	if err != nil {
+		// Consume a token from the per-IP limiter; reject immediately when exhausted.
+		if !s.getCodeLimiter(clientIP).Allow() {
+			s.Logger.RateLimitExceeded(clientIP, "code_guess", 0)
+			s.Metrics.RecordRateLimit("code_guess")
+			errMsg := ServerMessage{Type: "error", Message: "Too many failed attempts. Please wait before trying again."}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return nil, nil, fmt.Errorf("rate limited: too many invalid code attempts from %s", clientIP)
+		}
 		errMsg := ServerMessage{Type: "error", Message: err.Error()}
 		websocket.JSON.Send(ws, errMsg)
 		ws.Close()
@@ -347,13 +365,17 @@ func (s *Server) welcomeAndBroadcast(ws *websocket.Conn, game *Game, player *Pla
 	return s.broadcastToGame(game.ID, updateMsg)
 }
 
-// extractClientIP extracts the client IP from the request
+// extractClientIP extracts the real client IP from the request.
+// The server always runs behind a trusted proxy (Fly.io / ngrok), so the
+// leftmost value in X-Forwarded-For is the original client IP.
 func (s *Server) extractClientIP(r *http.Request) string {
-	// Try X-Forwarded-For header first (for proxied connections like ngrok)
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return xff
+		// XFF may be a comma-separated list; leftmost entry is the real client.
+		if idx := strings.IndexByte(xff, ','); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
 	}
-	// Fall back to RemoteAddr
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}
@@ -685,6 +707,7 @@ func (s *Server) startCleanupRoutine() {
 			select {
 			case <-ticker.C:
 				s.runArchiveCleanup()
+				s.cleanupRateLimiters()
 			case <-s.cleanupStop:
 				return
 			}

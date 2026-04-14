@@ -16,6 +16,8 @@
 //   11.16 status codes                  → TestRegressionAdminStatusCodes
 //   11.21–11.23 concurrency             → TestRegressionAdminConcurrency
 //   13.4 zero-player shutdown           → TestRegressionZeroPlayerShutdown
+//   14.1 WS connection-flood (429)      → TestRegressionWSConnLimit
+//   14.2 code-guess brute-force         → TestRegressionCodeGuessRateLimit
 
 package tests
 
@@ -637,5 +639,170 @@ func TestRegressionZeroPlayerShutdown(t *testing.T) {
 		t.Errorf("13.4 FAIL: found shutdown notification log with zero players\n--- logs ---\n%s", logs)
 	} else {
 		t.Log("✓ 13.4: No shutdown notification log when zero players connected")
+	}
+}
+
+// ─── 14: Rate-limiting guardrails (Phase 8.8) ────────────────────────────────
+
+// wsAttemptBadCode dials the server WebSocket, sends a login with a
+// deliberately-invalid game code, reads the first error response from the
+// server, and closes the connection. Returns the "message" field from the
+// server's error response, or an empty string if the connection was closed
+// before any message arrived.
+func wsAttemptBadCode(t *testing.T, baseURL, username, badCode string) string {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws"
+	ws, err := websocket.Dial(wsURL, "", "http://localhost")
+	if err != nil {
+		t.Fatalf("wsAttemptBadCode dial: %v", err)
+	}
+	defer ws.Close()
+
+	loginMsg := map[string]interface{}{
+		"action":   "login",
+		"username": username,
+		"code":     badCode,
+	}
+	if err := websocket.JSON.Send(ws, loginMsg); err != nil {
+		t.Fatalf("wsAttemptBadCode send: %v", err)
+	}
+
+	var resp map[string]interface{}
+	_ = ws.SetDeadline(time.Now().Add(10 * time.Second))
+	if err := websocket.JSON.Receive(ws, &resp); err != nil {
+		// Connection may have been closed by the server before a message arrived.
+		return ""
+	}
+	_ = ws.SetDeadline(time.Time{})
+	msg, _ := resp["message"].(string)
+	return msg
+}
+
+// TestRegressionWSConnLimit verifies that the server rejects a 6th concurrent
+// WebSocket connection from the same IP with HTTP 429, while the first 5
+// connections are accepted. Also confirms the bingo_rate_limited_total
+// Prometheus metric is emitted and a rate_limit_exceeded log event appears.
+//
+// Automates manual regression test 14.1 (DDoS / connection-flood guardrail).
+func TestRegressionWSConnLimit(t *testing.T) {
+	ctx := context.Background()
+	c, baseURL := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, "")
+
+	code := adminCreateGame(t, baseURL, ctDefaultKey)
+
+	// Open maxConnsPerIP (5) connections and keep them alive by not closing
+	// them — wsHandler blocks until the connection is closed, so the
+	// wsConnLimitMiddleware counter stays at 5 while these are held open.
+	const maxConns = 5
+	conns := make([]*websocket.Conn, maxConns)
+	for i := range conns {
+		ws, _ := wsLogin(t, baseURL, fmt.Sprintf("ct-player-%d", i), code)
+		conns[i] = ws
+	}
+	defer func() {
+		for _, ws := range conns {
+			if ws != nil {
+				ws.Close()
+			}
+		}
+	}()
+
+	// 14.1a: A plain HTTP GET to /ws should receive 429 — the middleware fires
+	// before the WebSocket upgrade so any HTTP client can observe the rejection.
+	resp, err := http.Get(baseURL + "/ws")
+	if err != nil {
+		t.Fatalf("14.1a HTTP GET /ws: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("14.1a FAIL: expected 429, got %d", resp.StatusCode)
+	} else {
+		t.Log("✓ 14.1a: HTTP GET /ws returns 429 when at connection limit")
+	}
+
+	// 14.1b: A real WebSocket dial should also fail (upgrade rejected cleanly).
+	wsURL := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws"
+	_, dialErr := websocket.Dial(wsURL, "", "http://localhost")
+	if dialErr == nil {
+		t.Error("14.1b FAIL: 6th websocket.Dial should fail, but it succeeded")
+	} else {
+		t.Logf("✓ 14.1b: 6th websocket.Dial rejected: %v", dialErr)
+	}
+
+	// 14.1c: Prometheus metric must record the rejection(s).
+	metricsResp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("14.1c GET /metrics: %v", err)
+	}
+	metricsBody, _ := io.ReadAll(metricsResp.Body)
+	metricsResp.Body.Close()
+	if !strings.Contains(string(metricsBody), `bingo_rate_limited_total{endpoint="ws"}`) {
+		t.Errorf("14.1c FAIL: bingo_rate_limited_total{endpoint=\"ws\"} not found in /metrics output")
+	} else {
+		t.Log("✓ 14.1c: bingo_rate_limited_total{endpoint=\"ws\"} present in /metrics")
+	}
+
+	// 14.1d: Container log must contain a rate_limit_exceeded WARN event.
+	if !waitForLog(t, ctx, c, "rate_limit_exceeded", 3*time.Second) {
+		t.Errorf("14.1d FAIL: rate_limit_exceeded WARN event not found in container logs\n--- logs ---\n%s",
+			containerLogs(t, ctx, c))
+	} else {
+		t.Log("✓ 14.1d: rate_limit_exceeded WARN event found in container logs")
+	}
+}
+
+// TestRegressionCodeGuessRateLimit verifies that after 5 failed game-code
+// attempts from the same IP the server starts responding with a rate-limit
+// error message ("Too many failed attempts") instead of the normal "invalid
+// game code" message, and that the bingo_rate_limited_total Prometheus metric
+// records the rejection.
+//
+// Automates manual regression test 14.2 (brute-force code-guess guardrail).
+func TestRegressionCodeGuessRateLimit(t *testing.T) {
+	ctx := context.Background()
+	c, baseURL := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, "")
+
+	const badCode = "BINGO-ZZZZZ" // guaranteed to not exist
+
+	// Attempts 1–5: each should return a normal "invalid game code" error.
+	for i := 1; i <= 5; i++ {
+		msg := wsAttemptBadCode(t, baseURL, fmt.Sprintf("attacker-%d", i), badCode)
+		if msg == "" {
+			t.Fatalf("14.2 attempt %d: received empty message from server", i)
+		}
+		if strings.Contains(strings.ToLower(msg), "too many") {
+			t.Errorf("14.2 FAIL: attempt %d was rate-limited prematurely: %q", i, msg)
+		} else {
+			t.Logf("✓ 14.2 attempt %d: regular error returned: %q", i, msg)
+		}
+	}
+
+	// Attempt 6: bucket exhausted — must receive the rate-limit message.
+	msg := wsAttemptBadCode(t, baseURL, "attacker-6", badCode)
+	if !strings.Contains(strings.ToLower(msg), "too many") {
+		t.Errorf("14.2 FAIL: attempt 6 expected rate-limit message, got: %q", msg)
+	} else {
+		t.Logf("✓ 14.2: attempt 6 correctly rate-limited: %q", msg)
+	}
+
+	// 14.2b: Prometheus metric must record the rejection.
+	metricsResp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("14.2b GET /metrics: %v", err)
+	}
+	metricsBody, _ := io.ReadAll(metricsResp.Body)
+	metricsResp.Body.Close()
+	if !strings.Contains(string(metricsBody), `bingo_rate_limited_total{endpoint="code_guess"}`) {
+		t.Errorf("14.2b FAIL: bingo_rate_limited_total{endpoint=\"code_guess\"} not found in /metrics")
+	} else {
+		t.Log("✓ 14.2b: bingo_rate_limited_total{endpoint=\"code_guess\"} present in /metrics")
+	}
+
+	// 14.2c: Container log must contain a rate_limit_exceeded WARN event.
+	if !waitForLog(t, ctx, c, "rate_limit_exceeded", 3*time.Second) {
+		t.Errorf("14.2c FAIL: rate_limit_exceeded log event not found\n--- logs ---\n%s",
+			containerLogs(t, ctx, c))
+	} else {
+		t.Log("✓ 14.2c: rate_limit_exceeded WARN event found in container logs")
 	}
 }

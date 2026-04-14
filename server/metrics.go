@@ -19,6 +19,7 @@ type Metrics struct {
 	AdminAPIRequestsTotal prometheus.Counter
 	AdminAPILatency       prometheus.Histogram
 	ErrorsTotal           *prometheus.CounterVec // labeled by error_type: auth, game, db, ws, input
+	RateLimitedTotal     *prometheus.CounterVec // labeled by endpoint: ws, code_guess
 	Registry              prometheus.Registerer  // Store the registry for Prometheus scraping
 }
 
@@ -84,6 +85,10 @@ func NewMetrics() *Metrics {
 			Name: "bingo_errors_total",
 			Help: "Total number of errors by type (auth, game, db, ws, input)",
 		}, []string{"error_type"}),
+		RateLimitedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bingo_rate_limited_total",
+			Help: "Total number of requests rejected by rate limiting, by endpoint (ws, code_guess)",
+		}, []string{"endpoint"}),
 		Registry: prometheus.DefaultRegisterer,
 	}
 
@@ -101,6 +106,7 @@ func NewMetrics() *Metrics {
 		globalMetrics.AdminAPIRequestsTotal,
 		globalMetrics.AdminAPILatency,
 		globalMetrics.ErrorsTotal,
+		globalMetrics.RateLimitedTotal,
 	)
 
 	return globalMetrics
@@ -122,6 +128,7 @@ func ResetMetrics() {
 		prometheus.Unregister(globalMetrics.AdminAPIRequestsTotal)
 		prometheus.Unregister(globalMetrics.AdminAPILatency)
 		prometheus.Unregister(globalMetrics.ErrorsTotal)
+		prometheus.Unregister(globalMetrics.RateLimitedTotal)
 	}
 	globalMetrics = nil
 }
@@ -130,4 +137,10 @@ func ResetMetrics() {
 // Valid types: "auth", "game", "db", "ws", "input"
 func (m *Metrics) RecordError(errorType string) {
 	m.ErrorsTotal.WithLabelValues(errorType).Inc()
+}
+
+// RecordRateLimit increments the bingo_rate_limited_total counter for the given endpoint.
+// Valid endpoints: "ws", "code_guess"
+func (m *Metrics) RecordRateLimit(endpoint string) {
+	m.RateLimitedTotal.WithLabelValues(endpoint).Inc()
 }

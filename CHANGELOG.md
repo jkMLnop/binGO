@@ -4,6 +4,41 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Phase 8.10 - Security Hardening: Rate Limiting & DDoS Mitigation (2026-04-14)
+
+#### Added
+- **`server/ratelimit.go`** (new file) — all per-IP rate limiting logic extracted from `server.go`:
+  - `wsConnLimitMiddleware` — HTTP middleware that counts active WebSocket connections per client IP; rejects the `(maxConnsPerIP+1)`th concurrent attempt with HTTP 429, logs a structured `WARN`, and increments `bingo_rate_limited_total{endpoint="ws"}`; `defer decrementConnCount` frees the slot when the connection closes
+  - `getCodeLimiter(ip)` — returns (or creates) a per-IP `rate.Limiter` token bucket for game-code guesses; configured at `codeGuessPerWindow=5` burst / `codeGuessWindow=60s` refill (one token per 12 s)
+  - `decrementConnCount(ip)` — atomically decrements the WS connection counter for an IP; cleans up the map entry at zero
+  - `cleanupRateLimiters()` — evicts fully-replenished `CodeLimiters` entries and zero `ConnCounts` entries to prevent unbounded map growth
+- **`server/server.go`** — security hardening changes:
+  - `Server.ConnCounts map[string]int` + `ConnCountsMu sync.Mutex` fields — track live WS connections per IP
+  - `Server.CodeLimiters map[string]*rate.Limiter` + `CodeLimitersMu sync.Mutex` fields — per-IP code-guess token buckets
+  - `/ws` handler wrapped: `s.Mux.Handle("/ws", s.wsConnLimitMiddleware(websocket.Handler(s.wsHandler)))`
+  - `extractClientIP` rewritten to take the **leftmost** comma-separated value from `X-Forwarded-For` (previously took the whole string verbatim, allowing header spoofing); trims whitespace
+  - `handlePlayerConnect` — on invalid game code, consumes a limiter token; if exhausted, sends rate-limit error message to client, logs `RateLimitExceeded`, increments `bingo_rate_limited_total{endpoint="code_guess"}`, and returns early
+  - `startCleanupRoutine` — now calls `s.cleanupRateLimiters()` on each cleanup tick
+- **`server/metrics.go`** — added `RateLimitedTotal *prometheus.CounterVec` (labels: `endpoint` = `ws` | `code_guess`); registered in `NewMetrics()`, unregistered in `ResetMetrics()`; `RecordRateLimit(endpoint string)` convenience helper
+- **`server/logger.go`** — added `RateLimitExceeded(ip, endpoint string, attemptCount int)` — emits `WARN`-level structured JSON event with `event_type: "rate_limit_exceeded"`, `ip`, `endpoint`, and optional `attempt_count`
+
+#### Tests
+- **`server/ratelimit_test.go`** (new file) — 14 unit tests covering all rate-limit paths:
+  - `TestExtractClientIP_*` — multi-hop XFF, single IP, empty header, direct remote addr
+  - `TestWsConnLimitMiddleware_*` — allows up to `maxConnsPerIP`, blocks 6th, concurrent safety
+  - `TestGetCodeLimiter_*` — returns same limiter per IP, blocks after exhaustion, per-IP isolation
+  - `TestDecrementConnCount_*` — below zero guard, map cleanup at zero
+  - `TestCleanupRateLimiters_*` — removes full limiters, keeps partially-consumed ones
+  - `TestMetrics_RecordRateLimit` — correct label increments
+- **`tests/container_regression_test.go`** — two new Testcontainers regression tests:
+  - **14.1 `TestRegressionWSConnLimit`** — opens `maxConnsPerIP` real WebSocket connections, holds them open, asserts the 6th attempt gets HTTP 429, verifies `bingo_rate_limited_total{endpoint="ws"}` is present in `/metrics`, and confirms `rate_limit_exceeded` appears in container logs
+  - **14.2 `TestRegressionCodeGuessRateLimit`** — sends `codeGuessPerWindow` bad-code login attempts (each receives a normal error), asserts the `(codeGuessPerWindow+1)`th attempt receives the rate-limit message, verifies `bingo_rate_limited_total{endpoint="code_guess"}` in `/metrics`, and confirms `rate_limit_exceeded` in container logs
+
+#### Dependencies
+- `golang.org/x/time` upgraded to v0.15.0 (direct — `rate.Limiter` token bucket)
+
+---
+
 ### Phase 8.9 - Context Propagation, Error Wrapping & OpenTelemetry Tracing (2026-04-13)
 
 #### Changed
