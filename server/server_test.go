@@ -460,7 +460,7 @@ func TestHandlePlayerWinAlreadyEnded(t *testing.T) {
 	server.GamesMu.Unlock()
 
 	// First win announcement succeeds
-	err := server.handlePlayerWin(game, player)
+	err := server.handlePlayerWin(context.Background(), game, player)
 	if err != nil {
 		t.Fatalf("First win announcement should succeed: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestHandlePlayerWinAlreadyEnded(t *testing.T) {
 	// Second win announcement should fail
 	player2 := newPlayer("player-2")
 	game.AddPlayer(player2)
-	err = server.handlePlayerWin(game, player2)
+	err = server.handlePlayerWin(context.Background(), game, player2)
 	if err == nil {
 		t.Fatal("Expected error for win when game already ended")
 	}
@@ -500,7 +500,7 @@ func TestHandlePlayerWinArchivesGameToDB(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_archive.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestHandlePlayerWinArchivesGameToDB(t *testing.T) {
 	srv.GamesMu.Unlock()
 
 	// Announce win — this triggers archiveGame → ArchiveGameInDB under the hood
-	if err := srv.handlePlayerWin(game, player); err != nil {
+	if err := srv.handlePlayerWin(context.Background(), game, player); err != nil {
 		t.Fatalf("handlePlayerWin failed: %v", err)
 	}
 
@@ -648,7 +648,7 @@ func TestOrphanedGameMarkedOnLastDisconnect(t *testing.T) {
 		t.Fatal("expected 0 players after removal")
 	}
 
-	srv.markGameOrphaned(game)
+	srv.markGameOrphaned(context.Background(), game)
 
 	if game.IsActive {
 		t.Error("game should be marked inactive after orphan")
@@ -681,7 +681,7 @@ func TestOrphanedGameNotJoinable(t *testing.T) {
 
 	// Orphan the game
 	game.RemovePlayer(player.ID)
-	srv.markGameOrphaned(game)
+	srv.markGameOrphaned(context.Background(), game)
 
 	// A new player should not be able to join
 	_, err := srv.getOrCreateGame(game.Code)
@@ -769,7 +769,7 @@ func TestPartialDisconnectDoesNotOrphan(t *testing.T) {
 
 	// Replicate the condition from handlePlayerDisconnect
 	if playerCount == 0 && game.IsActive && game.Winner == "" {
-		srv.markGameOrphaned(game)
+		srv.markGameOrphaned(context.Background(), game)
 	}
 
 	if game.Orphaned {
@@ -801,7 +801,7 @@ func TestWinnerGameNotOrphaned(t *testing.T) {
 	srv.CodeToGame[game.Code] = game
 	srv.GamesMu.Unlock()
 
-	if err := srv.handlePlayerWin(game, player); err != nil {
+	if err := srv.handlePlayerWin(context.Background(), game, player); err != nil {
 		t.Fatalf("handlePlayerWin failed: %v", err)
 	}
 
@@ -838,7 +838,7 @@ func TestOrphanedGamePreservesHostID(t *testing.T) {
 
 	originalHostID := game.HostID
 	game.RemovePlayer(player.ID)
-	srv.markGameOrphaned(game)
+	srv.markGameOrphaned(context.Background(), game)
 
 	if game.HostID != originalHostID {
 		t.Errorf("HostID should be immutable after orphan: expected %s, got %s", originalHostID, game.HostID)
@@ -891,14 +891,14 @@ func TestErrorMetricAlreadyEndedGame(t *testing.T) {
 	srv.GamesMu.Unlock()
 
 	// First win ends the game
-	if err := srv.handlePlayerWin(game, alice); err != nil {
+	if err := srv.handlePlayerWin(context.Background(), game, alice); err != nil {
 		t.Fatalf("first win should succeed: %v", err)
 	}
 
 	before := testutil.ToFloat64(srv.Metrics.ErrorsTotal.WithLabelValues("game"))
 
 	// Second win should fail and increment the counter
-	if err := srv.handlePlayerWin(game, bob); err == nil {
+	if err := srv.handlePlayerWin(context.Background(), game, bob); err == nil {
 		t.Fatal("expected error for second win on ended game")
 	}
 
@@ -930,7 +930,7 @@ func TestErrorMetricNonHostRestart(t *testing.T) {
 	srv.GamesMu.Unlock()
 
 	// End the game so restart state is valid
-	if err := srv.handlePlayerWin(game, alice); err != nil {
+	if err := srv.handlePlayerWin(context.Background(), game, alice); err != nil {
 		t.Fatalf("win setup failed: %v", err)
 	}
 
@@ -942,7 +942,7 @@ func TestErrorMetricNonHostRestart(t *testing.T) {
 	game.IsActive = true
 	game.Winner = ""
 
-	if err := srv.handleGameRestart(game, bob); err == nil {
+	if err := srv.handleGameRestart(context.Background(), game, bob); err == nil {
 		t.Fatal("expected error for non-host restart")
 	}
 

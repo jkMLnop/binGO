@@ -4,6 +4,39 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Phase 8.9 - Context Propagation, Error Wrapping & OpenTelemetry Tracing (2026-04-13)
+
+#### Changed
+- **`db/sqlite.go`** — `NewSQLiteStore` signature changed to `NewSQLiteStore(ctx context.Context, dbPath string)`; `db.Ping()` replaced with `db.PingContext(ctx)`; 5 bare `fmt.Errorf("... not found")` branches (GetGameByCode, GetGameByID, GetPlayerByID, GetHost, GetHostByUsername) now wrap `sql.ErrNoRows` with `%w` so callers can use `errors.Is`
+- **`server/db.go`** — `DBConfig.Close()` signature changed to `Close(ctx context.Context)` and passes ctx to `store.Close`; `NewDBConfig` uses `context.WithTimeout(ctx, 30s)` for store init and ping
+- **`server/server.go`** — major context threading refactor: `ctx` flows from WebSocket session root (`wsHandler`) through `handlePlayerConnect` → `createPlayerInGame` → `processPlayerMessage` → `handlePlayerWin` → `archiveGame` and `markGameOrphaned` → `handlePlayerDisconnect`; all 5 DB call sites wrapped in `context.WithTimeout` (3s for game operations); stoppable cleanup goroutine (closes on `cleanupStop` channel signal from `Stop()`); `startHTTPServer` wraps `s.Mux` with `otelhttp.NewHandler` for automatic HTTP span extraction
+- **`server/admin.go`** — all 4 handlers now extract `r.Context()` and start OpenTelemetry child spans (`bingo.admin.createGame`, `bingo.admin.listGames`, `bingo.admin.getGame`, `bingo.admin.deleteGame`)
+- **`bin.go`** — shutdown ctx passed to `dbConfig.Close(ctx)`; `InitTracer` called between DB init and signal wait; `shutdownTracer(ctx)` called after DB close during graceful shutdown
+- **`docker-compose.yml`** — added `OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318` to `bingo-server` env; added `tempo` service (`grafana/tempo:latest`, OTLP HTTP port 4318, query port 3200); added `tempo-data` persistent volume
+- **`grafana-provisioning/datasources/datasources.yml`** — added `uid: bingo-prometheus` to existing Prometheus datasource; added Tempo datasource (uid: `bingo-tempo`, url: `http://tempo:3200`) with `tracesToMetrics` and `serviceMap` links back to Prometheus
+
+#### Added
+- **`server/tracing.go`** (new file) — `InitTracer(srv *Server) (func(context.Context), error)` bootstraps an OTLP/HTTP trace exporter; reads `OTEL_EXPORTER_OTLP_ENDPOINT` env var (default `http://localhost:4318`); strips scheme and applies `WithInsecure()` for `http://`; sets global TracerProvider with `AlwaysSample()`; calls `srv.SetTracer(tp.Tracer("bingo-server"))`; returns a shutdown flush func. Swapping to Jaeger/Grafana Cloud for Phase 10 is a one-env-var change.
+- **`Server.Tracer trace.Tracer`** field — defaults to a no-op tracer; set via `SetTracer`; used by all lifecycle functions and admin handlers
+- **`Server.cleanupStop chan struct{}`** field — closed by `Stop()` to signal the background cleanup goroutine to exit without waiting for the next ticker tick
+- **`server/logger.go`** — `SpanDetails(ctx context.Context) map[string]interface{}` extracts `trace_id` + `span_id` from the active span for structured log correlation; `mergeMaps` helper for composing log detail maps
+- **OpenTelemetry spans** on all major lifecycle events: `bingo.ws.session`, `bingo.game.create`, `bingo.player.create`, `bingo.game.win`, `bingo.game.archive`, `bingo.game.restart`, `bingo.admin.*`
+- **`tempo.yml`** (new file) — Grafana Tempo single-binary config: OTLP receivers on gRPC 4317 + HTTP 4318, local block storage at `/var/tempo/blocks`, 48h retention
+
+#### Dependencies
+- `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` promoted to direct dependency (v1.41.0)
+- `go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp` promoted to direct dependency
+- `github.com/cenkalti/backoff/v5` and updated gRPC/genproto/golang.org/x transitive deps added by otlptracehttp
+
+#### Tests
+- All existing unit tests pass (`go test ./...`)
+- All integration tests pass (`go test -tags=integration ./tests/...`)
+- `db/sqlite_test.go` — 4 `NewSQLiteStore` call sites updated to pass `context.Background()`
+- `server/server_test.go` — 11 call sites updated (`handlePlayerWin`, `handleGameRestart`, `markGameOrphaned`, `db.NewSQLiteStore`) to pass `context.Background()`
+- `tests/db_integration_test.go` — 9 `db.NewSQLiteStore` call sites updated to pass `context.Background()`
+
+---
+
 ### Post-v8.2.0 Updates (2026-04-12)
 
 #### Fixed

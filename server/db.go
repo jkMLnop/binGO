@@ -19,13 +19,15 @@ type DBConfig struct {
 
 // NewDBConfig creates a new database configuration
 func NewDBConfig(path string) (*DBConfig, error) {
-	store, err := db.NewSQLiteStore(path)
+	initCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	store, err := db.NewSQLiteStore(initCtx, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create database store: %w", err)
 	}
 
-	ctx := context.Background()
-	if err := store.Init(ctx); err != nil {
+	if err := store.Init(initCtx); err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
@@ -37,11 +39,11 @@ func NewDBConfig(path string) (*DBConfig, error) {
 }
 
 // Close closes the database connection
-func (cfg *DBConfig) Close() error {
+func (cfg *DBConfig) Close(ctx context.Context) error {
 	if cfg == nil || cfg.Store == nil {
 		return nil
 	}
-	return cfg.Store.Close(context.Background())
+	return cfg.Store.Close(ctx)
 }
 
 // SaveGameToDB persists a game session to the database

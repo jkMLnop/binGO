@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Logger provides structured JSON logging for the bingo server
@@ -143,4 +146,31 @@ func (l *Logger) Error(eventType, message string, err error, details map[string]
 		}
 	}
 	l.logEvent("ERROR", eventType, message, d)
+}
+
+// mergeMaps merges extra into base (extra keys take precedence) and returns base.
+// Both arguments may be nil.
+func mergeMaps(base, extra map[string]interface{}) map[string]interface{} {
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+	for k, v := range extra {
+		base[k] = v
+	}
+	return base
+}
+
+// SpanDetails extracts the active trace_id and span_id from ctx and returns them
+// as a map suitable for merging into a Logger details argument. Returns an empty
+// map when there is no active recording span (e.g. tests using the noop tracer).
+func SpanDetails(ctx context.Context) map[string]interface{} {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return map[string]interface{}{}
+	}
+	sc := span.SpanContext()
+	return map[string]interface{}{
+		"trace_id": sc.TraceID().String(),
+		"span_id":  sc.SpanID().String(),
+	}
 }

@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -92,6 +94,11 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, span := s.Tracer.Start(r.Context(), "bingo.admin.createGame",
+		trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
+	ctx := r.Context()
+
 	type CreateGameRequest struct {
 		Players []string `json:"players"`
 	}
@@ -122,10 +129,10 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request) {
 	s.Metrics.GameCount.Set(float64(len(s.Games)))
 	s.Metrics.GamesCreatedTotal.Inc()
 
-	s.Logger.GameCreated(gameID, newGame.Code, newGame.HostID, map[string]interface{}{
+	s.Logger.GameCreated(gameID, newGame.Code, newGame.HostID, mergeMaps(SpanDetails(ctx), map[string]interface{}{
 		"admin_created": true,
 		"players":       len(req.Players),
-	})
+	}))
 
 	gameInfo := GameInfo{
 		ID:          newGame.ID,
@@ -150,6 +157,10 @@ func (s *Server) handleListGames(w http.ResponseWriter, r *http.Request) {
 	if !s.adminKeyMiddleware(w, r) {
 		return
 	}
+
+	_, span := s.Tracer.Start(r.Context(), "bingo.admin.listGames",
+		trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
 
 	s.GamesMu.RLock()
 	games := make([]GameInfo, 0, len(s.Games))
@@ -188,6 +199,10 @@ func (s *Server) handleGetGameDetail(w http.ResponseWriter, r *http.Request) {
 	if !s.adminKeyMiddleware(w, r) {
 		return
 	}
+
+	_, span := s.Tracer.Start(r.Context(), "bingo.admin.getGame",
+		trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
 
 	// Extract game ID from path: /admin/api/games/GAME_ID
 	parts := r.URL.Path[len("/admin/api/games/"):]
@@ -242,6 +257,10 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request) {
 	if !s.adminKeyMiddleware(w, r) {
 		return
 	}
+
+	_, span := s.Tracer.Start(r.Context(), "bingo.admin.deleteGame",
+		trace.WithSpanKind(trace.SpanKindServer))
+	defer span.End()
 
 	// Extract game ID from path: /admin/api/games/GAME_ID
 	parts := r.URL.Path[len("/admin/api/games/"):]

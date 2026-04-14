@@ -248,3 +248,40 @@ docker-compose down && docker-compose up -d --build
 docker-compose down
 mv .env.bak .env  # or delete if you want a clean state
 ```
+
+---
+
+## 13. OpenTelemetry Tracing (Grafana Tempo Smoke Test)
+
+> **Automated coverage:** span instrumentation is exercised on every `go test ./...` run via the no-op tracer.
+> This section only needs to be run once after the docker-compose stack is (re)built, or after changes to `server/tracing.go`, `tempo.yml`, or the Grafana datasource provisioning.
+
+**Prerequisites:**
+- `docker-compose up -d --build` (brings up bingo-server, Prometheus, Grafana, and Tempo)
+- Grafana accessible at http://localhost:3000 (default user/password from `.env`)
+
+### Setup
+
+```bash
+docker-compose up -d --build
+# Verify Tempo is healthy
+curl -s http://localhost:3200/ready   # should return "ready"
+# Verify bingo-server is exporting spans to Tempo
+docker-compose logs bingo-server | grep -i "otel\|trace\|tempo"
+```
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 13.1 | Tempo service healthy | `curl -s http://localhost:3200/ready` | Returns `ready` | [ ] |
+| 13.2 | bingo-server exports spans | `docker-compose logs bingo-server` | No OTLP exporter errors (connection refused / export failed) | [ ] |
+| 13.3 | Tempo datasource provisioned in Grafana | Grafana → Connections → Data sources | A datasource named `Tempo` (uid `bingo-tempo`) is listed and shows "Data source connected" | [ ] |
+| 13.4 | WebSocket session span visible | Connect a client (`./binGO-CLI -mode client -server localhost:8080 -code <code>`), then in Grafana → Explore → Tempo, search by Service Name `bingo-server` | At least one trace appears; root span is `bingo.ws.session` | [ ] |
+| 13.5 | Full win trace chain visible | Play a game to a win, then search Tempo | Trace contains span chain: `bingo.ws.session` → `bingo.game.win` → `bingo.game.archive` | [ ] |
+| 13.6 | Admin span visible | `curl -X POST http://localhost:8080/admin/api/games -H "X-Admin-Key: dev-admin-key-local-only"`, then search Tempo | A trace with root span `bingo.admin.createGame` is present | [ ] |
+| 13.7 | trace_id in structured logs | `docker-compose logs bingo-server \| grep trace_id` | Log lines for win/archive events include a `trace_id` field matching the Tempo trace | [ ] |
+
+### Teardown
+
+```bash
+docker-compose down
+```

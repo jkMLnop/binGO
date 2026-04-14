@@ -1,0 +1,34 @@
+# Grafana Tempo — single-binary config for local dev
+# Receives traces via OTLP HTTP (port 4318) and gRPC (port 4317)
+# Grafana datasource reads from the HTTP API on port 3200
+# Retention: 48h (local only, no infra overhead)
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+compactor:
+  compaction:
+    block_retention: 48h
+
+metrics_generator:
+  # Disabled — Prometheus is already scraping bingo_* metrics directly
+  # Enable in Phase 10 for span-derived RED metrics (rate, error, duration)
+  enabled: false

@@ -70,17 +70,24 @@ func runServer(port string, dbPath string) {
 	// Create server (3x3 for speed bingo mode)
 	srv := server.NewServer(buzzwords, 3, 3, port)
 
-	// Initialize database if path provided (Phase 7.5)
+	// Initialize database if path provided
+	var dbConfig *server.DBConfig
 	if dbPath != "" {
-		dbConfig, err := server.NewDBConfig(dbPath)
-		if err != nil {
-			log.Fatalf("Failed to initialize database: %v", err)
+		var dbErr error
+		dbConfig, dbErr = server.NewDBConfig(dbPath)
+		if dbErr != nil {
+			log.Fatalf("Failed to initialize database: %v", dbErr)
 		}
 		srv.SetDB(dbConfig.Store)
-		defer dbConfig.Close()
 		log.Printf("Database enabled: %s", dbPath)
 	} else {
 		log.Println("Running without database (use -db flag to enable)")
+	}
+
+	// Bootstrap OpenTelemetry tracing → Grafana Tempo (or OTEL_EXPORTER_OTLP_ENDPOINT)
+	shutdownTracer, tracerErr := server.InitTracer(srv)
+	if tracerErr != nil {
+		log.Printf("Warning: failed to init tracer (traces disabled): %v", tracerErr)
 	}
 
 	// Handle graceful shutdown (SIGINT = Ctrl-C, SIGTERM = Docker/k8s stop)
@@ -106,6 +113,19 @@ func runServer(port string, dbPath string) {
 	if err := srv.Stop(ctx); err != nil {
 		log.Printf("Shutdown error: %v", err)
 	}
+
+	// Close DB with the same shutdown deadline
+	if dbConfig != nil {
+		if err := dbConfig.Close(ctx); err != nil {
+			log.Printf("DB close error: %v", err)
+		}
+	}
+
+	// Flush remaining spans before exit
+	if shutdownTracer != nil {
+		shutdownTracer(ctx)
+	}
+
 	log.Println("Server stopped")
 }
 

@@ -15,7 +15,7 @@ func TestSQLiteStoreBasics(t *testing.T) {
 	defer os.Remove(tmpFile)
 
 	// Create store
-	store, err := NewSQLiteStore(tmpFile)
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestGameExpiration(t *testing.T) {
 	tmpFile := "/tmp/test_expiration.db"
 	defer os.Remove(tmpFile)
 
-	store, err := NewSQLiteStore(tmpFile)
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestArchiveGame(t *testing.T) {
 	tmpFile := "/tmp/test_bingo_archive.db"
 	defer os.Remove(tmpFile)
 
-	store, err := NewSQLiteStore(tmpFile)
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestCleanupOldArchives(t *testing.T) {
 	tmpFile := "/tmp/test_bingo_cleanup.db"
 	defer os.Remove(tmpFile)
 
-	store, err := NewSQLiteStore(tmpFile)
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

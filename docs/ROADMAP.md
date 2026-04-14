@@ -42,13 +42,6 @@ Chosen approach per tier:
   - DDoS mitigation (connection limits per IP)
   - Logging/monitoring for abuse patterns
 
-- [ ] Context propagation & error wrapping audit
-  - Review all Go functions for missing `context.Context` parameters (DB calls, HTTP handlers, goroutines)
-  - Ensure all errors are wrapped with `fmt.Errorf("...: %w", err)` so stack context is preserved
-  - Replace bare `errors.New` / `fmt.Errorf` (without `%w`) at call boundaries that discard the original error
-  - Verify `ctx` is passed through to `sqlite.go` store methods and cancelled correctly on shutdown
-  - Add `context.WithTimeout` where long-running DB or network operations lack a deadline
-
 - [ ] Make load test target-configurable for remote environments
   - `full_system_load_test.go` is hardcoded to `127.0.0.1:8080` and `dev-admin-key-local-only`
   - Read `LOAD_TEST_URL` env var (default `http://127.0.0.1:8080`) for base URL
@@ -124,9 +117,8 @@ Chosen approach per tier:
   - Horizontal pod autoscaling
 
 - [ ] Distributed tracing (multi-pod debugging)
-  - **Context**: Phase 8 metrics + logs sufficient for single monolith. Multi-service architectures need request tracing.
-  - OpenTelemetry instrumentation (open standard for tracing)
-  - Jaeger integration for request tracing across pods
+  - **Context**: OTel SDK + spans already in place from Phase 8 (bingo.ws.session, bingo.game.*, bingo.admin.*). Grafana Tempo running locally. Phase 10 only needs exporter swap.
+  - Swap `OTEL_EXPORTER_OTLP_ENDPOINT` from Tempo → Jaeger or Grafana Cloud for prod
   - Trace game creation from client request → auth service → game service → DB write → response
   - Identify cross-pod bottlenecks and service latency breakdown
   - Debug session correlation (which pod handled which request)

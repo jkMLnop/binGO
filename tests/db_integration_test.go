@@ -27,7 +27,7 @@ func TestGameCreationPersistence(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Create DB store
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestPlayerJoinPersistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestWinRecording(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestLeaderboardAccuracy(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestAPIGameLookup(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestAPILeaderboardEndpoint(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestArchiveGameIntegration(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_archive_integration.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestOrphanedGameArchivesToDB(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_orphan_archive.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestGameExpirationCleanup(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := db.NewSQLiteStore(dbPath)
+	store, err := db.NewSQLiteStore(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("failed to create DB store: %v", err)
 	}

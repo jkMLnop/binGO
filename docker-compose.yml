@@ -13,6 +13,7 @@ services:
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ADMIN_API_KEY=${ADMIN_API_KEY:-dev-admin-key-local-only}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/status"]
@@ -55,12 +56,31 @@ services:
     networks:
       - bingo-network
 
+  # Grafana Tempo — trace backend for OTel spans emitted by bingo-server
+  # OTLP HTTP ingest: port 4318 (used by bingo-server both in-container and on host)
+  # Grafana reads traces via the Tempo HTTP API on port 3200
+  tempo:
+    image: grafana/tempo:latest
+    container_name: bingo-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "4318:4318"   # OTLP HTTP — receives spans from bingo-server on the host
+      - "3200:3200"   # Tempo HTTP API — read by Grafana Tempo datasource
+    restart: unless-stopped
+    networks:
+      - bingo-network
+
 volumes:
   bingo-data:
     driver: local
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  tempo-data:
     driver: local
 
 networks:

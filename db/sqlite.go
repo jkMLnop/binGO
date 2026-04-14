@@ -18,14 +18,14 @@ type SQLiteStore struct {
 }
 
 // NewSQLiteStore creates a new SQLite-backed GameStore
-func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
+func NewSQLiteStore(ctx context.Context, dbPath string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Test connection
-	if err := db.Ping(); err != nil {
+	// Test connection (context-aware so callers can apply a deadline)
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -149,7 +149,7 @@ func (s *SQLiteStore) GetGameByCode(ctx context.Context, code string) (*Game, er
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("game not found")
+			return nil, fmt.Errorf("game not found: %w", sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query game: %w", err)
 	}
@@ -173,7 +173,7 @@ func (s *SQLiteStore) GetGameByID(ctx context.Context, gameID string) (*Game, er
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("game not found")
+			return nil, fmt.Errorf("game not found: %w", sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query game: %w", err)
 	}
@@ -341,7 +341,7 @@ func (s *SQLiteStore) GetPlayerByID(ctx context.Context, playerID string) (*Play
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("player not found")
+			return nil, fmt.Errorf("player not found: %w", sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query player: %w", err)
 	}
@@ -431,7 +431,7 @@ func (s *SQLiteStore) GetHost(ctx context.Context, hostID string) (*Host, error)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("host not found")
+			return nil, fmt.Errorf("host not found: %w", sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query host: %w", err)
 	}
@@ -453,7 +453,7 @@ func (s *SQLiteStore) GetHostByUsername(ctx context.Context, username string) (*
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("host not found")
+			return nil, fmt.Errorf("host not found: %w", sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query host: %w", err)
 	}

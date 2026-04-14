@@ -2,8 +2,30 @@ apiVersion: 1
 
 datasources:
   - name: Prometheus
+    uid: bingo-prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
     editable: true
+
+  - name: Tempo
+    uid: bingo-tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: false
+    editable: true
+    jsonData:
+      # Link spans to Prometheus metrics by service name tag
+      tracesToMetrics:
+        datasourceUid: bingo-prometheus
+        tags:
+          - key: service.name
+            value: service
+      # Show service dependency graph using Prometheus metrics
+      serviceMap:
+        datasourceUid: bingo-prometheus
+      # Search traces by service name in the Explore view
+      search:
+        hide: false
