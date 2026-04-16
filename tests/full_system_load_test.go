@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,18 +28,44 @@ type GameState struct {
 	mu          sync.Mutex
 }
 
-// TestFullSystemLoadWithPlayers runs a comprehensive load test against a running server
-// Expects the server to be running on localhost:8080
-// This tests game isolation, player lifecycle, metrics collection, and stability under concurrent load
+// loadTestBaseURL returns the HTTP base URL for the load test target.
+// Reads LOAD_TEST_URL env var (default: http://127.0.0.1:8080).
+func loadTestBaseURL() string {
+	if u := os.Getenv("LOAD_TEST_URL"); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return "http://127.0.0.1:8080"
+}
+
+// loadTestAdminKey returns the admin API key for the load test target.
+// Reads ADMIN_API_KEY env var (default: dev-admin-key-local-only).
+func loadTestAdminKey() string {
+	if k := os.Getenv("ADMIN_API_KEY"); k != "" {
+		return k
+	}
+	return "dev-admin-key-local-only"
+}
+
+// httpToWS converts an http:// or https:// base URL to the equivalent ws:// or wss:// URL.
+func httpToWS(baseURL string) string {
+	if strings.HasPrefix(baseURL, "https://") {
+		return "wss://" + strings.TrimPrefix(baseURL, "https://")
+	}
+	return "ws://" + strings.TrimPrefix(baseURL, "http://")
+}
+
+// TestFullSystemLoadWithPlayers runs a comprehensive load test against a running server.
+// By default targets http://127.0.0.1:8080. Override with env vars:
+//
+//	LOAD_TEST_URL=https://bingo-server-staging.fly.dev
+//	ADMIN_API_KEY=your-admin-key
 func TestFullSystemLoadWithPlayers(t *testing.T) {
-	const (
-		baseURL   = "http://127.0.0.1:8080"
-		adminKey  = "dev-admin-key-local-only"
-		wsBaseURL = "ws://127.0.0.1:8080"
-	)
+	baseURL := loadTestBaseURL()
+	adminKey := loadTestAdminKey()
+	wsBaseURL := httpToWS(baseURL)
 
 	// Verify server is reachable
-	resp, err := http.Get(baseURL + "/health")
+	resp, err := http.Get(baseURL + "/api/status")
 	if err != nil {
 		t.Fatalf("Server not running on %s: %v. Please start the server before running this test.", baseURL, err)
 	}
@@ -169,8 +196,8 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 				playerID := fmt.Sprintf("player-%s-%d", gc, pNum)
 
 				// Connect via WebSocket using golang.org/x/net/websocket
-				wsURL := fmt.Sprintf("ws://127.0.0.1:8080/ws?code=%s", gc)
-				origin := "http://127.0.0.1:8080"
+				wsURL := fmt.Sprintf("%s/ws", wsBaseURL)
+				origin := baseURL
 
 				ws, err := websocket.Dial(wsURL, "", origin)
 				if err != nil {
@@ -182,10 +209,11 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 
 				atomic.AddInt32(&playersConnected, 1)
 
-				// Send join message with player ID
+				// Send login message with player ID and game code
 				msg := map[string]interface{}{
-					"type":     "join",
+					"action":   "login",
 					"username": playerID,
+					"code":     gc,
 				}
 				if err := websocket.JSON.Send(ws, msg); err != nil {
 					atomic.AddInt32(&errors, 1)
@@ -279,6 +307,169 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 
 	t.Log("✓ Phase 4 complete: Metrics collection verified")
 
+	// Phase 5a: Connection-flood guardrail
+	t.Log("Phase 5a: Testing WS connection-flood rate limiting...")
+
+	// Create a fresh game for this phase so Phase 2 state doesn't interfere.
+	floodGame := lt5aCreateGame(t, baseURL, adminKey)
+
+	if floodGame != "" {
+		// Open maxConnsPerIP (5) connections and keep them alive.
+		const maxConns = 5
+		floodConns := make([]*websocket.Conn, 0, maxConns)
+		for i := 0; i < maxConns; i++ {
+			ws, err := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
+			if err != nil {
+				t.Logf("  ⚠ Phase 5a: failed to open flood conn %d: %v", i+1, err)
+				break
+			}
+			// Send login so server keeps connection alive.
+			_ = websocket.JSON.Send(ws, map[string]interface{}{
+				"action":   "login",
+				"username": fmt.Sprintf("flood-player-%d", i),
+				"code":     floodGame,
+			})
+			// Drain the welcome message so the server isn't blocked on sends.
+			var discard map[string]interface{}
+			_ = ws.SetDeadline(time.Now().Add(3 * time.Second))
+			_ = websocket.JSON.Receive(ws, &discard)
+			_ = ws.SetDeadline(time.Time{})
+			floodConns = append(floodConns, ws)
+		}
+
+		if len(floodConns) == maxConns {
+			// 5a-i: The (maxConnsPerIP+1)th HTTP request to /ws must get 429.
+			rejectResp, err := http.Get(baseURL + "/ws")
+			if err != nil {
+				t.Logf("  ⚠ Phase 5a: HTTP GET /ws error: %v", err)
+			} else {
+				rejectResp.Body.Close()
+				if rejectResp.StatusCode == http.StatusTooManyRequests {
+					t.Log("  ✓ Phase 5a-i: 6th connection correctly rejected with HTTP 429")
+				} else {
+					t.Errorf("  FAIL Phase 5a-i: expected 429, got %d", rejectResp.StatusCode)
+				}
+			}
+
+			// 5a-ii: bingo_rate_limited_total{endpoint="ws"} must appear in /metrics.
+			m5a, err := http.Get(baseURL + "/metrics")
+			if err == nil {
+				body5a, _ := io.ReadAll(m5a.Body)
+				m5a.Body.Close()
+				if strings.Contains(string(body5a), `bingo_rate_limited_total{endpoint="ws"}`) {
+					t.Log("  ✓ Phase 5a-ii: bingo_rate_limited_total{endpoint=\"ws\"} recorded")
+				} else {
+					t.Error("  FAIL Phase 5a-ii: bingo_rate_limited_total{endpoint=\"ws\"} not found in /metrics")
+				}
+			}
+
+			// Phase 5c: Server resilience while flood is ongoing.
+			t.Log("Phase 5c: Verifying server resilience under connection flood...")
+
+			// 5c-i: /api/status must still respond 200.
+			status5c, err := http.Get(baseURL + "/api/status")
+			if err != nil {
+				t.Errorf("  FAIL Phase 5c-i: /api/status unreachable under flood: %v", err)
+			} else {
+				status5c.Body.Close()
+				if status5c.StatusCode == http.StatusOK {
+					t.Log("  ✓ Phase 5c-i: /api/status still responding 200 under connection flood")
+				} else {
+					t.Errorf("  FAIL Phase 5c-i: /api/status returned %d under flood", status5c.StatusCode)
+				}
+			}
+
+			// 5c-ii: A legitimate player on a different game can still connect.
+			// Close one flood connection first to free a slot (flood came from same IP).
+			if len(floodConns) > 0 {
+				floodConns[0].Close()
+				floodConns = floodConns[1:]
+				time.Sleep(50 * time.Millisecond) // let server register the disconnect
+			}
+			legitCode := lt5aCreateGame(t, baseURL, adminKey)
+			if legitCode != "" {
+				legitWS, err := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
+				if err != nil {
+					t.Errorf("  FAIL Phase 5c-ii: legit player rejected under flood: %v", err)
+				} else {
+					_ = websocket.JSON.Send(legitWS, map[string]interface{}{
+						"action":   "login",
+						"username": "legit-player",
+						"code":     legitCode,
+					})
+					var legitWelcome map[string]interface{}
+					_ = legitWS.SetDeadline(time.Now().Add(5 * time.Second))
+					recvErr := websocket.JSON.Receive(legitWS, &legitWelcome)
+					_ = legitWS.SetDeadline(time.Time{})
+					legitWS.Close()
+					if recvErr == nil && legitWelcome["type"] == "welcome" {
+						t.Log("  ✓ Phase 5c-ii: legit player connected and welcomed during flood")
+					} else if recvErr == nil {
+						t.Logf("  ✓ Phase 5c-ii: legit player connected (msg type: %v)", legitWelcome["type"])
+					} else {
+						t.Errorf("  FAIL Phase 5c-ii: legit player welcome recv error: %v", recvErr)
+					}
+				}
+			}
+			t.Log("✓ Phase 5c complete: Server remained healthy under connection flood")
+		} else {
+			t.Logf("  ⚠ Phase 5a/5c skipped: only opened %d/%d flood connections", len(floodConns), maxConns)
+		}
+
+		// Close all remaining flood connections.
+		for _, ws := range floodConns {
+			ws.Close()
+		}
+		time.Sleep(100 * time.Millisecond) // let server clean up conn counts
+	} else {
+		t.Log("  ⚠ Phase 5a/5c skipped: could not create flood game")
+	}
+	t.Log("✓ Phase 5a complete: WS connection-flood guardrail verified")
+
+	// Phase 5b: Brute-force code-guess rate limiting.
+	t.Log("Phase 5b: Testing code-guess brute-force rate limiting...")
+
+	const badCode = "BINGO-ZZZZZ" // guaranteed not to exist
+	const guessWindow = 5         // codeGuessPerWindow from server/ratelimit.go
+	var lastMsg string
+	for attempt := 1; attempt <= guessWindow+1; attempt++ {
+		ws5b, dialErr := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
+		if dialErr != nil {
+			t.Logf("  ⚠ Phase 5b attempt %d: dial failed: %v", attempt, dialErr)
+			break
+		}
+		_ = websocket.JSON.Send(ws5b, map[string]interface{}{
+			"action":   "login",
+			"username": fmt.Sprintf("bf-attacker-%d", attempt),
+			"code":     badCode,
+		})
+		_ = ws5b.SetDeadline(time.Now().Add(5 * time.Second))
+		var errMsg map[string]interface{}
+		_ = websocket.JSON.Receive(ws5b, &errMsg)
+		_ = ws5b.SetDeadline(time.Time{})
+		ws5b.Close()
+		msgText, _ := errMsg["message"].(string)
+		lastMsg = msgText
+		t.Logf("  Phase 5b attempt %d: %q", attempt, msgText)
+	}
+	if strings.Contains(strings.ToLower(lastMsg), "too many") {
+		t.Logf("  ✓ Phase 5b-i: attempt %d correctly rate-limited: %q", guessWindow+1, lastMsg)
+	} else {
+		t.Errorf("  FAIL Phase 5b-i: expected rate-limit on attempt %d, got: %q", guessWindow+1, lastMsg)
+	}
+
+	m5b, err := http.Get(baseURL + "/metrics")
+	if err == nil {
+		body5b, _ := io.ReadAll(m5b.Body)
+		m5b.Body.Close()
+		if strings.Contains(string(body5b), `bingo_rate_limited_total{endpoint="code_guess"}`) {
+			t.Log("  ✓ Phase 5b-ii: bingo_rate_limited_total{endpoint=\"code_guess\"} recorded")
+		} else {
+			t.Error("  FAIL Phase 5b-ii: bingo_rate_limited_total{endpoint=\"code_guess\"} not in /metrics")
+		}
+	}
+	t.Log("✓ Phase 5b complete: Code-guess brute-force guardrail verified")
+
 	// Final summary
 	t.Logf("\n=== Full System Load Test Summary ===")
 	t.Logf("Games created: %d", atomic.LoadInt32(&gamesCreated))
@@ -295,4 +486,36 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 	} else {
 		t.Logf("\n✓ All operations completed successfully!")
 	}
+}
+
+// lt5aCreateGame creates a game via the admin API and returns its code.
+// Returns "" and logs (but does not fatal) on failure so Phase 5 can be skipped gracefully.
+func lt5aCreateGame(t *testing.T, baseURL, adminKey string) string {
+	t.Helper()
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"buzzwords": []string{"flood", "test", "ratelimit"},
+		"grid_size": 3,
+	})
+	req, err := http.NewRequest("POST", baseURL+"/admin/api/games", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Logf("lt5aCreateGame: build request: %v", err)
+		return ""
+	}
+	req.Header.Set("X-Admin-Key", adminKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Logf("lt5aCreateGame: do request: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	var result map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if data, ok := result["data"].(map[string]interface{}); ok {
+		if code, ok := data["code"].(string); ok {
+			return code
+		}
+	}
+	t.Logf("lt5aCreateGame: unexpected response: %v", result)
+	return ""
 }

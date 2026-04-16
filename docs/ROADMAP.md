@@ -37,25 +37,6 @@ Chosen approach per tier:
 - **Phase 10 (K8s):** Self-hosted Prometheus on cluster with Thanos or federation for multi-replica aggregation and long-term retention. Mirrors the `GameStore` interface pattern — swap the observability implementation when scale demands it.
 
 **Tasks:**
-- [x] Security hardening
-  - Rate limiting (prevent code brute-force) — per-IP token bucket, 5 failures/60s, `getCodeLimiter` in `server/ratelimit.go`
-  - DDoS mitigation (connection limits per IP) — `wsConnLimitMiddleware` blocks 6th concurrent WS connection per IP (HTTP 429)
-  - Logging/monitoring for abuse patterns — `Logger.RateLimitExceeded` (structured WARN JSON), `bingo_rate_limited_total` Prometheus CounterVec (labels: `ws`, `code_guess`)
-
-- [ ] Make load test target-configurable for remote environments
-  - `full_system_load_test.go` is hardcoded to `127.0.0.1:8080` and `dev-admin-key-local-only`
-  - Read `LOAD_TEST_URL` env var (default `http://127.0.0.1:8080`) for base URL
-  - Read `ADMIN_API_KEY` env var (default `dev-admin-key-local-only`) for admin auth
-  - Auto-derive WebSocket scheme from base URL: `https://` → `wss://`, `http://` → `ws://`
-  - Usage: `LOAD_TEST_URL=https://bingo-server-staging.fly.dev ADMIN_API_KEY=test-regression-key-12a go test -tags=e2e ./tests -v`
-  - No other app changes needed — admin API, WebSocket protocol, and `/metrics` endpoint are identical on all environments
-  - Fill in `load-test-with-monitoring.sh` wrapper script with env var support and Grafana dashboard URL output
-  - Add DDoS / rate-limit simulation phase to `full_system_load_test.go`:
-    - Phase 5a — **Connection flood**: open `maxConnsPerIP+N` concurrent WS connections from the same process (same source IP); assert the `(maxConnsPerIP+1)`th attempt receives HTTP 429 and `bingo_rate_limited_total{endpoint="ws"}` increments
-    - Phase 5b — **Brute-force code-guess flood**: send `codeGuessPerWindow+1` rapid sequential login attempts with a non-existent game code; assert the last attempt receives the rate-limit message and `bingo_rate_limited_total{endpoint="code_guess"}` increments
-    - Phase 5c — **Server health under attack**: verify `/api/status` still responds 200 and legitimate players can still connect/play while the flood is ongoing (resilience, not just guardrail correctness)
-    - Note: the two narrow wiring checks (connection limit + brute-force) already live in `container_regression_test.go` (tests 14.1 and 14.2); the e2e/load tier adds the sustained-load resilience angle that container tests can’t cover
-
 - [ ] Grafana Cloud monitoring for staging & production
   - **Why:** Local `docker-compose` Prometheus+Grafana only runs when laptop is on — no persistent metrics, no alerting, not shareable. Grafana Cloud free tier solves all three with zero infra.
   - **Free tier limits:** 10,000 active series, 14-day retention, 3 users — more than sufficient for single-instance Fly.io deployments.

@@ -55,6 +55,42 @@ jobs:
           VERSION=$(git rev-parse --short HEAD)
           go run . all --env staging --version "$VERSION" --registry-user jkmlnop
 
+  # Load test staging after every deploy to main — validates the live server
+  # under concurrent load and rate-limit conditions before any prod release.
+  # Skipped on PRs and tag pushes (those never deploy to staging).
+  load-test-staging:
+    name: Load Test Staging
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
+
+      - name: Wait for staging to be healthy
+        run: |
+          echo "Waiting for staging server to be healthy..."
+          for i in $(seq 1 12); do
+            if curl -sf https://bingo-server-staging.fly.dev/api/status > /dev/null; then
+              echo "✓ Staging is healthy"
+              exit 0
+            fi
+            echo "  attempt $i/12 — retrying in 10s"
+            sleep 10
+          done
+          echo "✗ Staging did not become healthy in 2 minutes"
+          exit 1
+
+      - name: Run load test against staging
+        env:
+          LOAD_TEST_URL: https://bingo-server-staging.fly.dev
+          ADMIN_API_KEY: ${{ secrets.STAGING_ADMIN_API_KEY }}
+        run: go test -tags=e2e -timeout=10m -v ./tests -run TestFullSystemLoadWithPlayers
+
   # Deploy to production + create GitHub Release on version tags
   deploy-production:
     name: Deploy to Production

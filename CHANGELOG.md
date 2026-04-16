@@ -4,6 +4,28 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+### Phase 8.11 - Configurable Load Test + Rate-Limit Simulation + CI Staging Gate (2026-04-16)
+
+#### Changed
+- **`tests/full_system_load_test.go`** — replaced hardcoded `127.0.0.1:8080` / `dev-admin-key-local-only` constants with env-var helpers:
+  - `loadTestBaseURL()` reads `LOAD_TEST_URL` (default `http://127.0.0.1:8080`)
+  - `loadTestAdminKey()` reads `ADMIN_API_KEY` (default `dev-admin-key-local-only`)
+  - `httpToWS()` auto-derives `ws://` / `wss://` from the base URL
+  - Fixed health check from `/health` → `/api/status`
+  - Fixed Phase 2 WebSocket login to use correct protocol (`action: "login"` + `code` field)
+  - Added **Phase 5a** — WS connection-flood: opens `maxConnsPerIP` (5) connections, asserts the 6th HTTP GET `/ws` gets HTTP 429, verifies `bingo_rate_limited_total{endpoint="ws"}` in `/metrics`
+  - Added **Phase 5b** — brute-force code-guess flood: sends `codeGuessPerWindow+1` (6) sequential bad-code login attempts, asserts the 6th receives a rate-limit message, verifies `bingo_rate_limited_total{endpoint="code_guess"}` in `/metrics`
+  - Added **Phase 5c** — resilience under flood: while Phase 5a connections are held open, asserts `/api/status` still returns 200 and a legitimate player on a fresh game code is welcomed successfully
+  - Added `lt5aCreateGame()` helper (non-fatal on failure — Phase 5 degrades gracefully if game creation fails)
+- **`load-test-with-monitoring.sh`** — implemented: reads `LOAD_TEST_URL`, `ADMIN_API_KEY`, `GRAFANA_URL` env vars (all with defaults); pre-flight `/api/status` check before test compilation; runs `go test -tags=e2e` with env vars forwarded; prints Grafana dashboard URL and useful PromQL queries on completion
+- **`.github/workflows/ci.yml`** — added `load-test-staging` job: runs after `deploy-staging` on every push to `main`; polls `/api/status` for up to 2 minutes before running the full e2e load test against live staging; uses `STAGING_ADMIN_API_KEY` secret
+
+#### Notes
+- Load test against production is intentionally omitted — Phase 5 (flood/brute-force) is destructive and would briefly impact real users. Production gets a health check only (`/api/status`); staging is the load test environment.
+- `STAGING_ADMIN_API_KEY` must be added as a GitHub Actions secret before the CI job is effective.
+
+---
+
 ### Phase 8.10 - Security Hardening: Rate Limiting & DDoS Mitigation (2026-04-14)
 
 #### Added
