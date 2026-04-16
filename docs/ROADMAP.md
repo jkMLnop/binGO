@@ -40,16 +40,23 @@ Chosen approach per tier:
 - [ ] Grafana Cloud monitoring for staging & production
   - **Why:** Local `docker-compose` Prometheus+Grafana only runs when laptop is on — no persistent metrics, no alerting, not shareable. Grafana Cloud free tier solves all three with zero infra.
   - **Free tier limits:** 10,000 active series, 14-day retention, 3 users — more than sufficient for single-instance Fly.io deployments.
+  - **Do this alongside the first manual staging load test run** — the load test generates a real traffic spike (10 games, 50 players, rate-limit events) which is the ideal smoke signal to confirm Grafana Cloud scraping is wired end-to-end. Setup Grafana Cloud first, then run the load test, then verify the spike appears in dashboards.
+  - **Prerequisites before starting:**
+    - Add `STAGING_ADMIN_API_KEY` secret to GitHub Actions (repo Settings → Secrets → Actions) — required for the `load-test-staging` CI job added in Phase 8.11
+    - Staging server must be deployed and healthy (`https://bingo-server-staging.fly.dev/api/status`)
   - Setup steps:
     1. Create free account at https://grafana.com/products/cloud/
-    2. In Grafana Cloud → Connections → Add new connection → Hosted Prometheus, note the remote-write URL and API key
-    3. Configure Grafana Alloy (lightweight agent) or use Prometheus `remote_write` to push `bingo_*` metrics from each Fly.io app
-       - Option A (simpler): Add a Grafana Alloy sidecar process to the Fly.io app that scrapes `localhost:8080/metrics` and remote-writes to Grafana Cloud
-       - Option B: Run a tiny `prometheus` instance per Fly.io app with `remote_write` config pointing to Grafana Cloud
-    4. Create dashboards in Grafana Cloud mirroring the local `bingo-dashboard.json` panels
-    5. Add `instance` or `env` label (`staging` / `production`) to differentiate tiers in shared dashboards
-    6. Set up alerting rules: `bingo_errors_total` rate spike, game count drop to 0, scrape target down
-  - Update `load-test-with-monitoring.sh` to print Grafana Cloud dashboard URL instead of `localhost:3000`
+    2. In Grafana Cloud → Connections → Add new connection → Prometheus → note the remote-write URL and API key
+    3. Grafana Cloud can scrape `https://bingo-server-staging.fly.dev/metrics` directly (no agent needed — `/metrics` is public)
+       - In Grafana Cloud → Connections → Add new connection → Scrape Jobs → add target `bingo-server-staging.fly.dev` with path `/metrics`, port 443
+       - Repeat for production: `bingo-server.fly.dev`
+       - Add label `env=staging` / `env=production` on each scrape job to differentiate in dashboards
+    4. Import `grafana-dashboards/bingo-dashboard.json` into Grafana Cloud (Dashboards → Import → Upload JSON)
+    5. Set up alerting rules: `bingo_errors_total` rate spike, `bingo_game_count` drops to 0, scrape target down
+  - **Validate with load test:**
+    - `LOAD_TEST_URL=https://bingo-server-staging.fly.dev ADMIN_API_KEY=<key> GRAFANA_URL=<cloud-url> ./load-test-with-monitoring.sh`
+    - After the run, open Grafana Cloud and confirm spikes in `bingo_games_created_total`, `bingo_players_connected_total`, `bingo_rate_limited_total`
+    - If all three appear, both the load test and Grafana Cloud are verified simultaneously
   - **Do NOT add remote scrape targets to local `prometheus.yml`** — local stack stays local-only
 
 #### Phase 9: Client Features & Improved UX
