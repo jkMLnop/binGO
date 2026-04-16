@@ -153,8 +153,8 @@ func (l *Logger) Error(eventType, message string, err error, details map[string]
 // blocked (informational; pass 0 when not applicable).
 func (l *Logger) RateLimitExceeded(ip, endpoint string, attemptCount int) {
 	d := map[string]interface{}{
-		"ip":            ip,
-		"endpoint":      endpoint,
+		"ip":       ip,
+		"endpoint": endpoint,
 	}
 	if attemptCount > 0 {
 		d["attempt_count"] = attemptCount

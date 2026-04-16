@@ -19,7 +19,7 @@ type Metrics struct {
 	AdminAPIRequestsTotal prometheus.Counter
 	AdminAPILatency       prometheus.Histogram
 	ErrorsTotal           *prometheus.CounterVec // labeled by error_type: auth, game, db, ws, input
-	RateLimitedTotal     *prometheus.CounterVec // labeled by endpoint: ws, code_guess
+	RateLimitedTotal      *prometheus.CounterVec // labeled by endpoint: ws, code_guess
 	Registry              prometheus.Registerer  // Store the registry for Prometheus scraping
 }
 
