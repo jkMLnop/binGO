@@ -33,15 +33,15 @@ type Server struct {
 	TokenManager *TokenManager             // JWT token manager
 	Sessions     map[string]*ClientSession // IP -> ClientSession for tracking usernames
 	SessionsMu   sync.RWMutex
-	DB          db.GameStore // Database store (Phase 7.5)
-	Metrics     *Metrics     // Prometheus metrics (Phase 8)
-	Logger      *Logger      // Structured JSON logger (Phase 8)
-	Tracer      trace.Tracer // OTel tracer (Phase 8)
-	cleanupStop    chan struct{}             // signals startCleanupRoutine to exit
+	DB           db.GameStore  // Database store (Phase 7.5)
+	Metrics      *Metrics      // Prometheus metrics (Phase 8)
+	Logger       *Logger       // Structured JSON logger (Phase 8)
+	Tracer       trace.Tracer  // OTel tracer (Phase 8)
+	cleanupStop  chan struct{} // signals startCleanupRoutine to exit
 	// Rate-limiting state (Phase 8.8)
 	ConnCounts     map[string]int           // active WS connections per IP
 	ConnCountsMu   sync.Mutex               // protects ConnCounts
-	CodeLimiters   map[string]*rate.Limiter  // per-IP token-bucket for code guesses
+	CodeLimiters   map[string]*rate.Limiter // per-IP token-bucket for code guesses
 	CodeLimitersMu sync.Mutex               // protects CodeLimiters
 }
 
@@ -63,15 +63,15 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 		Cols:         cols,
 		Port:         port,
 		Mux:          mux,
-		TokenManager:   NewTokenManager(""), // Will generate random secret
-		Sessions:       make(map[string]*ClientSession),
-		ConnCounts:     make(map[string]int),
-		CodeLimiters:   make(map[string]*rate.Limiter),
-		DB:             nil,
-		Metrics:     NewMetrics(),
-		Logger:      NewLogger(),
-		Tracer:      trace.NewNoopTracerProvider().Tracer("bingo-server"),
-		cleanupStop: make(chan struct{}),
+		TokenManager: NewTokenManager(""), // Will generate random secret
+		Sessions:     make(map[string]*ClientSession),
+		ConnCounts:   make(map[string]int),
+		CodeLimiters: make(map[string]*rate.Limiter),
+		DB:           nil,
+		Metrics:      NewMetrics(),
+		Logger:       NewLogger(),
+		Tracer:       trace.NewNoopTracerProvider().Tracer("bingo-server"),
+		cleanupStop:  make(chan struct{}),
 	}
 	return srv
 }
@@ -110,7 +110,9 @@ func (s *Server) registerHandlers() {
 	s.Mux.HandleFunc("/admin/api/games/", s.handleAdminGames)
 
 	// Metrics endpoint (Phase 8)
-	s.Mux.Handle("/metrics", promhttp.Handler())
+	// If METRICS_AUTH_TOKEN is set, require "Authorization: Bearer <token>".
+	// If unset (local dev / docker-compose), the endpoint is open.
+	s.Mux.Handle("/metrics", metricsAuthMiddleware(promhttp.Handler()))
 }
 
 // startHTTPServer creates and starts the HTTP server
