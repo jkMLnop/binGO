@@ -54,6 +54,19 @@ func httpToWS(baseURL string) string {
 	return "ws://" + strings.TrimPrefix(baseURL, "http://")
 }
 
+// fetchMetrics fetches /metrics with optional bearer token authentication.
+// Reads METRICS_AUTH_TOKEN env var; if set, includes it as "Authorization: Bearer <token>".
+func fetchMetrics(baseURL string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", baseURL+"/metrics", nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := os.Getenv("METRICS_AUTH_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return http.DefaultClient.Do(req)
+}
+
 // TestFullSystemLoadWithPlayers runs a comprehensive load test against a running server.
 // By default targets http://127.0.0.1:8080. Override with env vars:
 //
@@ -278,7 +291,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 	// Phase 4: Verify metrics are being collected
 	t.Log("Phase 4: Verifying metrics collection...")
 
-	metricsResp, err := http.Get(baseURL + "/metrics")
+	metricsResp, err := fetchMetrics(baseURL)
 	if err != nil {
 		t.Logf("WARNING: Failed to get metrics: %v", err)
 	} else if metricsResp.StatusCode != http.StatusOK {
@@ -352,7 +365,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 			}
 
 			// 5a-ii: bingo_rate_limited_total{endpoint="ws"} must appear in /metrics.
-			m5a, err := http.Get(baseURL + "/metrics")
+			m5a, err := fetchMetrics(baseURL)
 			if err == nil {
 				body5a, _ := io.ReadAll(m5a.Body)
 				m5a.Body.Close()
@@ -458,7 +471,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 		t.Errorf("  FAIL Phase 5b-i: expected rate-limit on attempt %d, got: %q", guessWindow+1, lastMsg)
 	}
 
-	m5b, err := http.Get(baseURL + "/metrics")
+	m5b, err := fetchMetrics(baseURL)
 	if err == nil {
 		body5b, _ := io.ReadAll(m5b.Body)
 		m5b.Body.Close()

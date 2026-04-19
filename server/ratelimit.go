@@ -2,23 +2,43 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
-const (
+var (
 	// maxConnsPerIP is the maximum number of simultaneous WebSocket connections
 	// allowed from a single IP address.
-	maxConnsPerIP = 5
+	// Configurable via MAX_CONNS_PER_IP env var (default: 5).
+	maxConnsPerIP int
 
 	// codeGuessPerWindow is the number of failed game-code attempts an IP is
 	// allowed before being rate-limited.
-	codeGuessPerWindow = 5
+	// Configurable via CODE_GUESS_PER_WINDOW env var (default: 5).
+	codeGuessPerWindow int
 
 	// codeGuessWindow is the sliding window over which the token bucket refills.
 	codeGuessWindow = 60 * time.Second
 )
+
+func init() {
+	// Initialize rate limit variables from environment or defaults
+	maxConnsPerIP = getEnvInt("MAX_CONNS_PER_IP", 5)
+	codeGuessPerWindow = getEnvInt("CODE_GUESS_PER_WINDOW", 5)
+}
+
+// getEnvInt reads an integer environment variable with a default fallback.
+func getEnvInt(key string, defaultVal int) int {
+	if val := os.Getenv(key); val != "" {
+		if intVal, err := strconv.Atoi(val); err == nil {
+			return intVal
+		}
+	}
+	return defaultVal
+}
 
 // getCodeLimiter returns the per-IP rate.Limiter for game-code guesses,
 // creating a new one if none exists yet for this IP.
@@ -28,7 +48,7 @@ func (s *Server) getCodeLimiter(ip string) *rate.Limiter {
 	if l, ok := s.CodeLimiters[ip]; ok {
 		return l
 	}
-	l := rate.NewLimiter(rate.Every(codeGuessWindow/codeGuessPerWindow), codeGuessPerWindow)
+	l := rate.NewLimiter(rate.Every(codeGuessWindow/time.Duration(codeGuessPerWindow)), codeGuessPerWindow)
 	s.CodeLimiters[ip] = l
 	return l
 }
