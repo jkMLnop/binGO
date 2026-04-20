@@ -90,6 +90,7 @@ jobs:
           LOAD_TEST_URL: https://bingo-server-staging.fly.dev
           ADMIN_API_KEY: ${{ secrets.STAGING_ADMIN_API_KEY }}
           METRICS_AUTH_TOKEN: ${{ secrets.STAGING_METRICS_AUTH_TOKEN }}
+          MAX_CONNS_PER_IP: '100'
         run: go test -tags=e2e -timeout=10m -v ./tests -run TestFullSystemLoadWithPlayers
 
   # Deploy to production + create GitHub Release on version tags
