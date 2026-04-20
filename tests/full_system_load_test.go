@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,17 @@ func loadTestAdminKey() string {
 		return k
 	}
 	return "dev-admin-key-local-only"
+}
+
+// getMaxConnsPerIP returns the per-IP WebSocket connection limit being enforced.
+// Reads MAX_CONNS_PER_IP env var (default: 5). Used by Phase 5a to verify rate limiting.
+func getMaxConnsPerIP() int {
+	if val := os.Getenv("MAX_CONNS_PER_IP"); val != "" {
+		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
+			return limit
+		}
+	}
+	return 5
 }
 
 // httpToWS converts an http:// or https:// base URL to the equivalent ws:// or wss:// URL.
@@ -327,8 +339,10 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 	floodGame := lt5aCreateGame(t, baseURL, adminKey)
 
 	if floodGame != "" {
-		// Open maxConnsPerIP (5) connections and keep them alive.
-		const maxConns = 5
+		// Get the configured per-IP connection limit (may be increased for load testing).
+		maxConns := getMaxConnsPerIP()
+		t.Logf("  (Will test rate limiting at limit=%d)", maxConns)
+
 		floodConns := make([]*websocket.Conn, 0, maxConns)
 		for i := 0; i < maxConns; i++ {
 			ws, err := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
@@ -358,7 +372,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 			} else {
 				rejectResp.Body.Close()
 				if rejectResp.StatusCode == http.StatusTooManyRequests {
-					t.Log("  ✓ Phase 5a-i: 6th connection correctly rejected with HTTP 429")
+					t.Logf("  ✓ Phase 5a-i: connection %d correctly rejected with HTTP 429", maxConns+1)
 				} else {
 					t.Errorf("  FAIL Phase 5a-i: expected 429, got %d", rejectResp.StatusCode)
 				}
