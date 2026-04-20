@@ -344,6 +344,11 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 		t.Logf("  (Will test rate limiting at limit=%d)", maxConns)
 
 		// Open connections in parallel to avoid long sequential delays.
+		// We do NOT drain the welcome message — a deadline error on receive
+		// can terminate the underlying TLS connection and cause the server to
+		// decrement its counter, which would let the (n+1)th request through.
+		// Instead we fire-and-forget the login and sleep briefly so the server
+		// has time to process each login before we probe the limit.
 		floodConns := make([]*websocket.Conn, maxConns)
 		floodConnsMu := sync.Mutex{}
 		successCount := 0
@@ -358,17 +363,12 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 					t.Logf("  ⚠ Phase 5a: failed to open flood conn %d: %v", idx+1, err)
 					return
 				}
-				// Send login so server keeps connection alive.
+				// Send login so server keeps the connection alive (fire-and-forget).
 				_ = websocket.JSON.Send(ws, map[string]interface{}{
 					"action":   "login",
 					"username": fmt.Sprintf("flood-player-%d", idx),
 					"code":     floodGame,
 				})
-				// Drain the welcome message so the server isn't blocked on sends.
-				var discard map[string]interface{}
-				_ = ws.SetDeadline(time.Now().Add(3 * time.Second))
-				_ = websocket.JSON.Receive(ws, &discard)
-				_ = ws.SetDeadline(time.Time{})
 				floodConnsMu.Lock()
 				floodConns[idx] = ws
 				successCount++
@@ -377,6 +377,8 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 		}
 
 		wg.Wait()
+		// Give the server a moment to process all logins before we probe.
+		time.Sleep(500 * time.Millisecond)
 
 		if successCount == maxConns {
 			// 5a-i: The (maxConnsPerIP+1)th HTTP request to /ws must get 429.
