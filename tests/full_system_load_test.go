@@ -381,17 +381,33 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		if successCount == maxConns {
-			// 5a-i: The (maxConnsPerIP+1)th HTTP request to /ws must get 429.
-			rejectResp, err := http.Get(baseURL + "/ws")
-			if err != nil {
-				t.Logf("  ⚠ Phase 5a: HTTP GET /ws error: %v", err)
-			} else {
-				rejectResp.Body.Close()
-				if rejectResp.StatusCode == http.StatusTooManyRequests {
-					t.Logf("  ✓ Phase 5a-i: connection %d correctly rejected with HTTP 429", maxConns+1)
+			// 5a-i: The (maxConnsPerIP+1)th WS upgrade attempt must be rejected with 429.
+			// Use websocket.Dial so the probe follows the exact same Fly.io routing path
+			// as the flood connections (plain http.Get may arrive via a different edge node
+			// and therefore a different rate-limit bucket).
+			probeWS, probeErr := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
+			if probeWS != nil {
+				probeWS.Close()
+			}
+			if probeErr != nil && strings.Contains(probeErr.Error(), "429") {
+				t.Logf("  ✓ Phase 5a-i: connection %d correctly rejected with HTTP 429", maxConns+1)
+			} else if probeErr != nil && strings.Contains(probeErr.Error(), "bad status") {
+				// Dial returns "bad status" for any non-101; read the actual status via HTTP.
+				rejectResp, httpErr := http.Get(baseURL + "/ws")
+				if httpErr == nil {
+					rejectResp.Body.Close()
+					if rejectResp.StatusCode == http.StatusTooManyRequests {
+						t.Logf("  ✓ Phase 5a-i: connection %d correctly rejected with HTTP 429", maxConns+1)
+					} else {
+						t.Errorf("  FAIL Phase 5a-i: expected 429, got %d (probe via same WS route failed: %v)", rejectResp.StatusCode, probeErr)
+					}
 				} else {
-					t.Errorf("  FAIL Phase 5a-i: expected 429, got %d", rejectResp.StatusCode)
+					t.Logf("  ⚠ Phase 5a-i: could not verify status code: %v", httpErr)
 				}
+			} else if probeErr == nil {
+				t.Errorf("  FAIL Phase 5a-i: expected rejection but connection %d succeeded", maxConns+1)
+			} else {
+				t.Logf("  ⚠ Phase 5a: probe error: %v", probeErr)
 			}
 
 			// 5a-ii: bingo_rate_limited_total{endpoint="ws"} must appear in /metrics.
