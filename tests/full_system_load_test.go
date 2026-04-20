@@ -343,28 +343,42 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 		maxConns := getMaxConnsPerIP()
 		t.Logf("  (Will test rate limiting at limit=%d)", maxConns)
 
-		floodConns := make([]*websocket.Conn, 0, maxConns)
+		// Open connections in parallel to avoid long sequential delays.
+		floodConns := make([]*websocket.Conn, maxConns)
+		floodConnsMu := sync.Mutex{}
+		successCount := 0
+		var wg sync.WaitGroup
+
 		for i := 0; i < maxConns; i++ {
-			ws, err := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
-			if err != nil {
-				t.Logf("  ⚠ Phase 5a: failed to open flood conn %d: %v", i+1, err)
-				break
-			}
-			// Send login so server keeps connection alive.
-			_ = websocket.JSON.Send(ws, map[string]interface{}{
-				"action":   "login",
-				"username": fmt.Sprintf("flood-player-%d", i),
-				"code":     floodGame,
-			})
-			// Drain the welcome message so the server isn't blocked on sends.
-			var discard map[string]interface{}
-			_ = ws.SetDeadline(time.Now().Add(3 * time.Second))
-			_ = websocket.JSON.Receive(ws, &discard)
-			_ = ws.SetDeadline(time.Time{})
-			floodConns = append(floodConns, ws)
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				ws, err := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
+				if err != nil {
+					t.Logf("  ⚠ Phase 5a: failed to open flood conn %d: %v", idx+1, err)
+					return
+				}
+				// Send login so server keeps connection alive.
+				_ = websocket.JSON.Send(ws, map[string]interface{}{
+					"action":   "login",
+					"username": fmt.Sprintf("flood-player-%d", idx),
+					"code":     floodGame,
+				})
+				// Drain the welcome message so the server isn't blocked on sends.
+				var discard map[string]interface{}
+				_ = ws.SetDeadline(time.Now().Add(3 * time.Second))
+				_ = websocket.JSON.Receive(ws, &discard)
+				_ = ws.SetDeadline(time.Time{})
+				floodConnsMu.Lock()
+				floodConns[idx] = ws
+				successCount++
+				floodConnsMu.Unlock()
+			}(i)
 		}
 
-		if len(floodConns) == maxConns {
+		wg.Wait()
+
+		if successCount == maxConns {
 			// 5a-i: The (maxConnsPerIP+1)th HTTP request to /ws must get 429.
 			rejectResp, err := http.Get(baseURL + "/ws")
 			if err != nil {
@@ -408,10 +422,13 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 
 			// 5c-ii: A legitimate player on a different game can still connect.
 			// Close one flood connection first to free a slot (flood came from same IP).
-			if len(floodConns) > 0 {
-				floodConns[0].Close()
-				floodConns = floodConns[1:]
-				time.Sleep(50 * time.Millisecond) // let server register the disconnect
+			for i := 0; i < maxConns; i++ {
+				if floodConns[i] != nil {
+					floodConns[i].Close()
+					floodConns[i] = nil
+					time.Sleep(50 * time.Millisecond) // let server register the disconnect
+					break
+				}
 			}
 			legitCode := lt5aCreateGame(t, baseURL, adminKey)
 			if legitCode != "" {
@@ -440,12 +457,14 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 			}
 			t.Log("✓ Phase 5c complete: Server remained healthy under connection flood")
 		} else {
-			t.Logf("  ⚠ Phase 5a/5c skipped: only opened %d/%d flood connections", len(floodConns), maxConns)
+			t.Logf("  ⚠ Phase 5a/5c skipped: only opened %d/%d flood connections", successCount, maxConns)
 		}
 
 		// Close all remaining flood connections.
 		for _, ws := range floodConns {
-			ws.Close()
+			if ws != nil {
+				ws.Close()
+			}
 		}
 		time.Sleep(100 * time.Millisecond) // let server clean up conn counts
 	} else {
