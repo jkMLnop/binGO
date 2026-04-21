@@ -369,6 +369,16 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 					"username": fmt.Sprintf("flood-player-%d", idx),
 					"code":     floodGame,
 				})
+				// Drain server messages in the background so the write buffer never
+				// fills up and the connection is not closed by the server before the probe.
+				go func() {
+					var discard interface{}
+					for {
+						if err := websocket.JSON.Receive(ws, &discard); err != nil {
+							return
+						}
+					}
+				}()
 				floodConnsMu.Lock()
 				floodConns[idx] = ws
 				successCount++
