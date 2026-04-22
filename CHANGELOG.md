@@ -4,6 +4,32 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+## [v8.2.0] - 2026-04-22
+
+### Phase 8 Complete: Production Hardening & Scaling
+
+**Summary:** Phase 8 hardened the server for production load and automated staging validation. Rate limiting (per-IP WebSocket connection flood + code-guess brute-force) now protects against casual DoS. Metrics collection (Prometheus counters, histograms, gauges) instruments all key operations. Full system load test (10 games, 50 concurrent players, rate-limit simulation) validates both guardrails work under realistic conditions. GitHub Actions CI now gates all commits to `main` with a mandatory staging load-test job, ensuring regression detection before production deploys.
+
+**What works:**
+- ✅ Per-IP WebSocket connection limiting (5/IP default, configurable via `MAX_CONNS_PER_IP`)
+- ✅ Code-guess brute-force rate limiting (5 attempts / 60s, configurable via `CODE_GUESS_PER_WINDOW`)
+- ✅ Prometheus metrics fully instrumented (games, players, errors, rate limits, latency)
+- ✅ Metrics authentication via bearer token (`METRICS_AUTH_TOKEN`)
+- ✅ Full system load test passes against local server and Fly.io staging
+- ✅ CI pipeline: all tests → build → deploy staging → run load test (auto-gated)
+- ✅ Structured logging for all security events (rate limits, auth failures)
+
+**Deferred to Phase 10 (K8s + Cloud Observability):**
+- Grafana Cloud scrape job configuration (load test proves `/metrics` endpoint works; integration with cloud platform remains)
+- OTel tracing exporter swap (currently hardcoded to localhost; needs cloud endpoint configuration)
+
+**Commits in Phase 8:**
+- Phase 8.10: Security hardening (rate limiting, extraction to `ratelimit.go`, connection tracking)
+- Phase 8.11: Load test + CI integration (configurable env vars, Phase 5a/5b/5c rate-limit simulation, staging gate)
+- Phase 8.12: Multi-game flood spread (spread 20 flood connections across 4 games to prevent broadcast storm)
+
+---
+
 ### Phase 8.11 - Configurable Load Test + Rate-Limit Simulation + CI Staging Gate (2026-04-16)
 
 #### Changed

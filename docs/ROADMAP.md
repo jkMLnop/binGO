@@ -25,39 +25,7 @@ The evolution of binGO-CLI organized by development phases.
   - Change references from bingo-server.fly.dev to bingoserver.live
   - Update shareable link examples
 
-#### Phase 8: Production Hardening & Scaling
-**Goal:** Make cloud server reliable under load; automate deployments
 
-**Observability architecture decision (Apr 2026):**
-Local `docker-compose` Prometheus+Grafana stack is for local dev only — it does not scrape staging/prod. Scraping remote Fly.io servers from a dev laptop is fragile (metrics lost when laptop is offline, no alerting, not shareable).
-
-Chosen approach per tier:
-- **Local dev:** `docker-compose up` → Prometheus scrapes `bingo-server:8080`, Grafana at `localhost:3000`
-- **Staging / Production (Phase 8):** Grafana Cloud free tier (hosted Prometheus + Grafana). Scrapes `https://bingo-server-staging.fly.dev/metrics` and `https://bingo-server.fly.dev/metrics` directly. Persistent dashboards, no infra to maintain, 10k series / 14-day retention free.
-- **Phase 10 (K8s):** Self-hosted Prometheus on cluster with Thanos or federation for multi-replica aggregation and long-term retention. Mirrors the `GameStore` interface pattern — swap the observability implementation when scale demands it.
-
-**Tasks:**
-- [ ] Grafana Cloud monitoring for staging & production
-  - **Why:** Local `docker-compose` Prometheus+Grafana only runs when laptop is on — no persistent metrics, no alerting, not shareable. Grafana Cloud free tier solves all three with zero infra.
-  - **Free tier limits:** 10,000 active series, 14-day retention, 3 users — more than sufficient for single-instance Fly.io deployments.
-  - **Do this alongside the first manual staging load test run** — the load test generates a real traffic spike (10 games, 50 players, rate-limit events) which is the ideal smoke signal to confirm Grafana Cloud scraping is wired end-to-end. Setup Grafana Cloud first, then run the load test, then verify the spike appears in dashboards.
-  - **Prerequisites before starting:**
-    - Add `STAGING_ADMIN_API_KEY` secret to GitHub Actions (repo Settings → Secrets → Actions) — required for the `load-test-staging` CI job added in Phase 8.11
-    - Staging server must be deployed and healthy (`https://bingo-server-staging.fly.dev/api/status`)
-  - Setup steps:
-    1. Create free account at https://grafana.com/products/cloud/
-    2. In Grafana Cloud → Connections → Add new connection → Prometheus → note the remote-write URL and API key
-    3. Grafana Cloud can scrape `https://bingo-server-staging.fly.dev/metrics` directly (no agent needed — `/metrics` is public)
-       - In Grafana Cloud → Connections → Add new connection → Scrape Jobs → add target `bingo-server-staging.fly.dev` with path `/metrics`, port 443
-       - Repeat for production: `bingo-server.fly.dev`
-       - Add label `env=staging` / `env=production` on each scrape job to differentiate in dashboards
-    4. Import `grafana-dashboards/bingo-dashboard.json` into Grafana Cloud (Dashboards → Import → Upload JSON)
-    5. Set up alerting rules: `bingo_errors_total` rate spike, `bingo_game_count` drops to 0, scrape target down
-  - **Validate with load test:**
-    - `LOAD_TEST_URL=https://bingo-server-staging.fly.dev ADMIN_API_KEY=<key> GRAFANA_URL=<cloud-url> ./load-test-with-monitoring.sh`
-    - After the run, open Grafana Cloud and confirm spikes in `bingo_games_created_total`, `bingo_players_connected_total`, `bingo_rate_limited_total`
-    - If all three appear, both the load test and Grafana Cloud are verified simultaneously
-  - **Do NOT add remote scrape targets to local `prometheus.yml`** — local stack stays local-only
 
 #### Phase 9: Client Features & Improved UX
 **Goal:** Support hosting games on cloud server; add leaderboards; support custom buzzword lists
@@ -97,7 +65,23 @@ Chosen approach per tier:
 #### Phase 10: Kubernetes & Scaling (Future)
 **Goal:** Run multiple server instances with shared database
 
+**Cloud observability (Grafana Cloud) — Phase 10 prerequisite:**
+Before scaling to K8s, establish a persistent observability layer:
+- **Local dev:** `docker-compose up` → Prometheus scrapes `bingo-server:8080`, Grafana at `localhost:3000` (local only)
+- **Staging / Production (Phase 10):** Grafana Cloud free tier (hosted Prometheus + Grafana). Scrapes `https://bingo-server-staging.fly.dev/metrics` and `https://bingo-server.fly.dev/metrics` directly. Free tier: 10k series, 14-day retention. **Status:** Load test passes, but Grafana Cloud scrape job not yet wired (no data appearing in dashboards). OTel tracing exporter misconfigured (localhost refs don't work in cloud).
+
 **Tasks:**
+- [ ] Grafana Cloud setup for staging & production (deferred from Phase 8)
+  - Create free account at https://grafana.com/products/cloud/
+  - Configure scrape job for `bingo-server-staging.fly.dev` and `bingo-server.fly.dev` with labels `env=staging` / `env=production`
+  - Import `grafana-dashboards/bingo-dashboard.json` and set up alerting rules
+  - Validate by running load test and confirming metric spikes appear in dashboards
+
+- [ ] OTel tracing exporter swap for cloud (deferred from Phase 8)
+  - Current: exporter tries `http://localhost:4318` (Tempo) — doesn't work in cloud
+  - Fix: make `OTEL_EXPORTER_OTLP_ENDPOINT` configurable; use Grafana Cloud Tempo or Jaeger endpoint for staging/prod
+  - Verify trace IDs flow end-to-end (game creation → DB write)
+
 - [ ] PostgreSQL migration
   - Replace SQLite with PostgreSQL (same schema)
   - Use prepared statements for connection pooling
