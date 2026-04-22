@@ -335,20 +335,24 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 	// Phase 5a: Connection-flood guardrail
 	t.Log("Phase 5a: Testing WS connection-flood rate limiting...")
 
-	// Create a fresh game for this phase so Phase 2 state doesn't interfere.
-	floodGame := lt5aCreateGame(t, baseURL, adminKey)
+	// Get the configured per-IP connection limit (may be increased for load testing).
+	maxConns := getMaxConnsPerIP()
+	t.Logf("  (Will test rate limiting at limit=%d)", maxConns)
 
-	if floodGame != "" {
-		// Get the configured per-IP connection limit (may be increased for load testing).
-		maxConns := getMaxConnsPerIP()
-		t.Logf("  (Will test rate limiting at limit=%d)", maxConns)
+	// Create enough games to spread flood connections across — at most 5 per game
+	// to avoid broadcast storms when they all disconnect at the end.
+	const floodConnsPerGame = 5
+	numFloodGames := (maxConns + floodConnsPerGame - 1) / floodConnsPerGame
+	floodGames := make([]string, 0, numFloodGames)
+	for i := 0; i < numFloodGames; i++ {
+		if code := lt5aCreateGame(t, baseURL, adminKey); code != "" {
+			floodGames = append(floodGames, code)
+		}
+	}
 
-		// Open connections in parallel to avoid long sequential delays.
-		// We do NOT drain the welcome message — a deadline error on receive
-		// can terminate the underlying TLS connection and cause the server to
-		// decrement its counter, which would let the (n+1)th request through.
-		// Instead we fire-and-forget the login and sleep briefly so the server
-		// has time to process each login before we probe the limit.
+	if len(floodGames) > 0 {
+		// Open connections in parallel, round-robining across games so no single
+		// game accumulates all flood players (which would cause O(n²) broadcasts).
 		floodConns := make([]*websocket.Conn, maxConns)
 		floodConnsMu := sync.Mutex{}
 		successCount := 0
@@ -358,6 +362,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
+				gameCode := floodGames[idx%len(floodGames)]
 				ws, err := websocket.Dial(wsBaseURL+"/ws", "", baseURL)
 				if err != nil {
 					t.Logf("  ⚠ Phase 5a: failed to open flood conn %d: %v", idx+1, err)
@@ -367,7 +372,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 				_ = websocket.JSON.Send(ws, map[string]interface{}{
 					"action":   "login",
 					"username": fmt.Sprintf("flood-player-%d", idx),
-					"code":     floodGame,
+					"code":     gameCode,
 				})
 				// Drain server messages in the background so the write buffer never
 				// fills up and the connection is not closed by the server before the probe.
@@ -496,7 +501,7 @@ func TestFullSystemLoadWithPlayers(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond) // let server clean up conn counts
 	} else {
-		t.Log("  ⚠ Phase 5a/5c skipped: could not create flood game")
+		t.Log("  ⚠ Phase 5a/5c skipped: could not create flood games")
 	}
 	t.Log("✓ Phase 5a complete: WS connection-flood guardrail verified")
 
