@@ -4,6 +4,47 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+## [v9.0.0] - 2026-05-03
+
+### Phase 9 + 9.5 Complete: Client Menu, Buzzword Suggestions, Leaderboard, Player Stats & Betting
+
+**Summary:** Phase 9 adds the full client-side UX for multiplayer games: a pre-connection host/join menu, custom CSV buzzword upload, in-game buzzword suggestions with host approve/reject, leaderboard and personal stats queries, and a revamped help system. Phase 9.5 adds a social betting meta-game where players can wager on outcomes using a structured chat command, with live broadcast and automatic evaluation on win.
+
+**What works:**
+- ✅ Pre-connection menu: `1) Host a new game` / `2) Join existing game` — shown when no `-code` flag provided
+- ✅ Host flow: optional CSV buzzword file upload on game creation; game code printed after connect
+- ✅ Host profile: `approve <phrase>` appends to host's DB profile; inherited as extra buzzwords on next hosted game
+- ✅ In-game buzzword suggestions: `add_new_phrase <phrase>` → broadcast to all; host `approve`/`reject`
+- ✅ Leaderboard: `leaderboard` command queries `GET /api/leaderboard?sort=wins|win_rate|games_played`
+- ✅ Player stats: `stats` command queries `GET /api/player/{username}/stats`
+- ✅ Betting: `bet: <player> wins|loses [AND <player> wins|loses]` — one active bet per player per round
+- ✅ Bets broadcast live with ⏳/✓/✗ status icons; evaluated automatically when a player wins
+- ✅ Bet results summary panel shown to all players immediately after game-end announcement
+- ✅ Bets and suggestions cleared on game restart
+- ✅ Help text updated with all new commands
+
+**Key files changed:**
+- `client/menu.go` (new) — `ShowMainMenu`, `promptForBuzzwords` (CSV)
+- `client/player.go` — `IsHostMode`, `PendingBuzzwords`, `SendMessage`, `HandleMark` simplified
+- `client/display.go` — `DisplaySuggestions`, `DisplayActiveBets`, `DisplayBetResults`
+- `client/types.go` — `Suggestion`, `Bet`, `BetCondition` types mirrored from server
+- `server/server.go` — `createGameForHost`, `handlePlayerSuggest`, `handleHostApprove`, `handleHostReject`, `handlePlayerBet`, `parseBetConditions`, `evaluateBets`
+- `server/game.go` — `Buzzwords`, `Suggestions`, `Bets` fields on `Game`
+- `server/types.go` — `Suggestion`, `Bet`, `BetCondition` types; `ActiveBets` on `ServerMessage`
+- `server/api.go` — `handleGetPlayerStats`, leaderboard `?sort=` param
+- `db/store.go` — `PlayerStats` struct, `GetPlayerStats` interface method
+- `db/sqlite.go` — `GetPlayerStats` implementation
+- `bin.go` — full menu wiring, all new input commands, full redraw on mark (fixes bets disappearing)
+
+**Bug fixes in this release:**
+- Active bets panel not shown after cell mark — `HandleMark` no longer redraws; `bin.go` mark case does full redraw including bets/suggestions
+- Bet box right-border misaligned — ⏳ double-width emoji now accounted for in padding math
+- Custom buzzword prompt expected JSON — switched to `shared.LoadBuzzwords` (CSV)
+- Binary name references in docs/scripts updated from `binGO` to `binGO-CLI`
+- `bingo.db` added to `.gitignore` and untracked
+
+---
+
 ## [v8.2.0] - 2026-04-22
 
 ### Phase 8 Complete: Production Hardening & Scaling

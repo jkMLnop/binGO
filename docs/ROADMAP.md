@@ -27,60 +27,22 @@ The evolution of binGO-CLI organized by development phases.
 
 
 
-#### Phase 9: Client Features & Improved UX
-**Goal:** Support hosting games on cloud server; add leaderboards; support custom buzzword lists
+#### Phase 9.6: In-Game Chat
+**Goal:** Let players send free-form text messages to everyone in the game during play
 
 **Tasks:**
-- [ ] Client menu system (Host vs Join)
-  ```
-  Connect to bingoserver.live?
-  1) Host a new game
-  2) Join existing game (with code)
-  ```
-  - Option 1: Host workflow
-    - Prompt: "Enter path to JSON buzzword file (or 'skip' for defaults)"
-    - If path provided: Validate JSON format, upload to server
-    - If skip: Use default buzzwords.csv
-    - Server creates game, assigns code, display to user
-  - Option 2: Join workflow
-    - Prompt for code, validate, join
-  - Display game code in CLI (e.g., "Game code: ABC123")
-
-- [ ] Buzzword suggestion system (in-game)
-  - Players suggest via chat: `add_new_phrase <phrase>`
-  - Suggestions ephemeral (in-memory only, no DB storage)
-  - Host approves: `approve <phrase>` → adds to both current game AND host profile, saves to DB
-  - Host rejects: `reject <phrase>` → discarded immediately (not stored)
-  - When host creates new game: Inherits approved buzzwords from their profile
-  - Host can also upload custom JSON on game creation (overrides their profile list)
-  - Chat UI displays suggestion broadcasts and outcomes
-
-- [ ] Leaderboard queries
-  - Query wins_history table (created in Phase 8) to display top players
-  - Display personal stats (wins, games played, win rate)
-  - Sort by various metrics (wins, win rate, games played)
-
-- [ ] Updated help text with new commands
-
-#### Phase 9.5: Player Betting System
-**Goal:** In-game social meta-game where players bet on outcomes using chat commands
-
-**Tasks:**
-- [ ] Betting commands: `bet: <player> wins|loses [AND <player> wins|loses]`
-  - In-memory only (no DB persistence in MVP)
-  - All bets public and broadcast to all players in game
-  - AND-only compound grammar for MVP (OR/parens deferred)
-  - One active bet per player per game round
-- [ ] Active bets broadcast to all clients on each new bet placed
-  - Displayed below game board, above user input prompt
-  - Status icons: ⏳ active / ✓ won / ✗ lost
-- [ ] Bet evaluation on every win event
-  - `wins` condition: true if named player is the winner
-  - `loses` condition: true if named player is NOT the winner
-  - All conditions in a bet must be true for the bet to win
-  - Results broadcast to all players immediately after win announced
-- [ ] Bets cleared on game restart (fresh round = fresh bets)
-- [ ] Help text updated with betting commands
+- [ ] Client command: `say <message>` (or a `/` prefix shorthand like `/hello everyone`)
+  - Sends a `chat` action WebSocket message to the server
+  - Server broadcasts `chat_message` event to all players in the game
+- [ ] Server handler: `handlePlayerChat(game, player, text)`
+  - Validate message is non-empty and within a reasonable length limit (e.g. 200 chars)
+  - Broadcast `ServerMessage{Type:"chat_message", PlayerID: player.ID, Message: text}`
+- [ ] Client display: chat messages printed inline below the board between redraws
+  - Format: `💬 <username>: <message>`
+  - On next full redraw (cell mark, player_update, etc.) the line scrolls away naturally
+  - No persistent chat history panel — keeps the UI simple
+- [ ] Help text updated with `say` command
+- [ ] Rate-limit chat (e.g. 5 messages / 10 s per player) using existing rate-limit infrastructure
 
 #### Phase 10: Kubernetes & Scaling (Future)
 **Goal:** Run multiple server instances with shared database

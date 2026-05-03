@@ -98,3 +98,38 @@ func (p *Player) DisplayActiveBets(bets []Bet) {
 	}
 	fmt.Printf("└%s┘\n", border)
 }
+
+// DisplayBetResults prints a bet results summary after a game ends (Phase 9.5).
+// Prints nothing when there are no bets.
+func (p *Player) DisplayBetResults(bets []Bet) {
+	if len(bets) == 0 {
+		return
+	}
+	const innerWidth = 54
+	border := strings.Repeat("─", innerWidth)
+	fmt.Printf("\n┌%s┐\n", border)
+	fmt.Printf("│ 🏅 Bet Results%-39s│\n", "")
+	fmt.Printf("├%s┤\n", border)
+	for _, b := range bets {
+		var icon, label string
+		switch b.Status {
+		case "won":
+			icon = "✓"
+			label = "WON "
+		case "lost":
+			icon = "✗"
+			label = "LOST"
+		default:
+			icon = "?"
+			label = "????"
+		}
+		// "│ ✓ WON  betterUsername  rawText ... │"
+		body := fmt.Sprintf("%s  %-16s  %s", label, b.BetterUsername, b.RawText)
+		bodyWidth := innerWidth - 4 // "│ " + icon + " " + body + "│"
+		if len(body) > bodyWidth {
+			body = body[:bodyWidth-3] + "..."
+		}
+		fmt.Printf("│ %s %-*s│\n", icon, bodyWidth, body)
+	}
+	fmt.Printf("└%s┘\n", border)
+}
