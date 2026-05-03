@@ -179,3 +179,60 @@ func TestAPIMethodNotAllowed(t *testing.T) {
 
 	t.Log("✓ API method validation passed")
 }
+
+// ---------------------------------------------------------------------------
+// Phase 9: /api/player/{username}/stats endpoint tests
+// ---------------------------------------------------------------------------
+
+func TestAPIPlayerStatsWithoutDB(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	srv.registerHandlers()
+
+	req := httptest.NewRequest("GET", "/api/player/alice/stats", nil)
+	w := httptest.NewRecorder()
+	srv.Mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 without DB, got %d", w.Code)
+	}
+	t.Log("✓ /api/player/stats returns 503 without DB")
+}
+
+func TestAPIPlayerStatsMissingUsername(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	srv.registerHandlers()
+
+	// The path /api/player//stats will match the prefix handler but have empty segment
+	req := httptest.NewRequest("GET", "/api/player//stats", nil)
+	w := httptest.NewRecorder()
+	srv.Mux.ServeHTTP(w, req)
+
+	if w.Code == http.StatusOK {
+		t.Errorf("expected non-200 for missing username, got %d", w.Code)
+	}
+	t.Log("✓ /api/player//stats returns error for missing username")
+}
+
+func TestAPILeaderboardSortParameter(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	srv.registerHandlers()
+
+	// Without DB it should return 503 for all sort values
+	sortValues := []string{"wins", "win_rate", "games_played", ""}
+	for _, s := range sortValues {
+		url := "/api/leaderboard"
+		if s != "" {
+			url += "?sort=" + s
+		}
+		req := httptest.NewRequest("GET", url, nil)
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("sort=%q: expected 503 without DB, got %d", s, w.Code)
+		}
+	}
+	t.Log("✓ /api/leaderboard?sort= returns 503 without DB for all sort values")
+}

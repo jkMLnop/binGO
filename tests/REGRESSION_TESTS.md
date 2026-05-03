@@ -285,3 +285,173 @@ docker-compose logs bingo-server | grep -i "otel\|trace\|tempo"
 ```bash
 docker-compose down
 ```
+
+---
+
+## 14. Phase 9 — Client Menu, Host Flow & Custom Buzzwords
+
+### Setup
+
+```bash
+go build -o binGO-CLI .
+./binGO-CLI -mode server -port 8080 -db ./bingo.db
+```
+
+### 14A — Main Menu
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 14.1 | Menu appears when no -code flag | `./binGO-CLI -mode client -server localhost:8080` | Prints `1) Host a new game` / `2) Join existing game` prompt | [ ] |
+| 14.2 | No menu when -code flag provided | `./binGO-CLI -mode client -server localhost:8080 -code BINGO-XXXXX` | Skips menu, goes straight to username prompt | [ ] |
+| 14.3 | Invalid menu selection rejected | At prompt enter `3` then Enter | Error `invalid selection "3" — enter 1 or 2`, process exits | [ ] |
+
+### 14B — Host Flow
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 14.4 | Host creates game (no custom buzzwords) | Select `1`, press Enter to skip buzzword file | Prompted for username; connects; server prints ✓ Game created! Code: BINGO-XXXXX | [ ] |
+| 14.5 | Game code shown after host creates game | Complete 14.4 | CLI prints `Share this code with players to join.` alongside the code | [ ] |
+| 14.6 | Second client joins with printed code | Copy code from 14.4, run `./binGO-CLI -mode client -server localhost:8080 -code <code>` | Second client joins; host's player list updates | [ ] |
+| 14.7 | Host flow with valid buzzword JSON | Create file `bw.json` with `[["foo"],["bar"],["baz"],["qux"],["quux"],["corge"],["grault"],["garply"],["waldo"]]`, select `1`, enter `bw.json` path | Prints `✓ Loaded 9 buzzword rows`; board cells contain words from that file | [ ] |
+| 14.8 | Invalid JSON buzzword file rejected | Point to a non-JSON file; select `1` | Error `invalid buzzword JSON in ...`; process exits | [ ] |
+| 14.9 | Empty buzzword JSON file rejected | Point to `[]`; select `1` | Error `buzzword file ... is empty`; process exits | [ ] |
+| 14.10 | Missing buzzword file rejected | Point to nonexistent path; select `1` | Error `failed to read buzzword file ...`; process exits | [ ] |
+
+### 14C — Join Flow
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 14.11 | Join prompts for code | Select `2` | Prints `Enter game code:` | [ ] |
+| 14.12 | Empty code rejected | Select `2`, press Enter with no code | Error `game code cannot be empty`; process exits | [ ] |
+| 14.13 | Invalid code rejected by server | Select `2`, enter `BINGO-ZZZZZ` (nonexistent game) | Server rejects; client shows connection error | [ ] |
+
+---
+
+## 15. Phase 9 — Buzzword Suggestion System
+
+### Setup
+
+Open three terminals:
+```bash
+# Terminal A — server
+./binGO-CLI -mode server -port 8080 -db ./bingo.db
+
+# Terminal B — host client
+./binGO-CLI -mode client -server localhost:8080
+# (select 1 to host, skip buzzwords, enter username "Host")
+# note the printed game code
+
+# Terminal C — second player
+./binGO-CLI -mode client -server localhost:8080 -code <code>
+# (enter username "Alice")
+```
+
+### 15A — Suggesting Phrases
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 15.1 | Player suggests a phrase | In Terminal C type `add_new_phrase synergy overload` | Both clients show suggestion panel `📝 Pending Buzzword Suggestions` containing `Alice  suggested: "synergy overload"` | [ ] |
+| 15.2 | Empty suggestion rejected | Type `add_new_phrase ` (no phrase) | Error `suggestion phrase cannot be empty` displayed on Alice's terminal | [ ] |
+| 15.3 | Duplicate suggestion rejected | Type `add_new_phrase synergy overload` again | Error `phrase "synergy overload" is already pending suggestion` | [ ] |
+| 15.4 | Multiple suggestions accumulate | Alice: `add_new_phrase circle back`; then `add_new_phrase deep dive` | Suggestion panel lists all three pending phrases | [ ] |
+| 15.5 | Phrase too long rejected | Type `add_new_phrase ` followed by 101 characters | Error `suggestion phrase too long (max 100 characters)` | [ ] |
+
+### 15B — Host Approve / Reject
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 15.6 | Host approves suggestion | In Terminal B (host) type `approve synergy overload` | Suggestion removed from panel; both clients see `✅ Host approved buzzword: "synergy overload"` notification | [ ] |
+| 15.7 | Host rejects suggestion | In Terminal B type `reject circle back` | Suggestion removed from panel; both clients see `❌ Host rejected suggestion: "circle back"` notification | [ ] |
+| 15.8 | Non-host cannot approve | In Terminal C (Alice) type `approve deep dive` | Error `only the host can approve suggestions` on Alice's terminal | [ ] |
+| 15.9 | Non-host cannot reject | In Terminal C type `reject deep dive` | Error `only the host can reject suggestions` on Alice's terminal | [ ] |
+| 15.10 | Approve nonexistent phrase | Host: `approve totally made up` | Error `no pending suggestion matches "totally made up"` | [ ] |
+| 15.11 | Approve is case-insensitive | After suggestion "Leverage" exists, host: `approve leverage` | Suggestion removed successfully | [ ] |
+| 15.12 | Approved phrase persisted to DB | Approve a phrase, stop server, restart with same -db file, host creates new game with same username | Server logs show approved buzzword loaded into game from host profile (check server logs for "Loading host profile from DB") | [ ] |
+| 15.13 | Approved phrases accumulate across approvals | Approve two separate phrases in sequence, check DB | Both phrases present in host profile (not overwritten by second approval) | [ ] |
+| 15.14 | Suggestions cleared on restart | Alice suggests "pivot"; Host approves then restarts game | Suggestion panel is empty after restart; ⏳ no leftover suggestions from previous round | [ ] |
+
+---
+
+## 16. Phase 9 — Leaderboard & Player Stats
+
+### Setup
+
+```bash
+./binGO-CLI -mode server -port 8080 -db ./bingo.db
+# Play 2-3 complete games to populate wins_history
+```
+
+### 16A — In-game commands
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 16.1 | `leaderboard` command works | During active game type `leaderboard` | Prints `🏆 Leaderboard:` with ranked list `#1 <username>  N wins` | [ ] |
+| 16.2 | `stats` command works | During active game type `stats` | Prints `📊 Stats for <username>:` with Wins, Games Played, Win Rate % | [ ] |
+| 16.3 | Win rate calculated correctly | Play 2 wins out of 4 games, type `stats` | Win Rate shows 50.0% | [ ] |
+| 16.4 | Commands work before and after win | Type `leaderboard` before win; then again after win | Works both times; post-win counts are updated | [ ] |
+
+### 16B — HTTP endpoints
+
+| Test # | Scenario | Command | Expected Result | Status |
+|--------|----------|---------|-----------------|--------|
+| 16.5 | Default leaderboard (sort by wins) | `curl "localhost:8080/api/leaderboard"` | Returns JSON array sorted descending by `wins`, includes `rank` | [ ] |
+| 16.6 | Leaderboard sort by win_rate | `curl "localhost:8080/api/leaderboard?sort=win_rate"` | Returns array sorted descending by `win_rate` field | [ ] |
+| 16.7 | Leaderboard sort by games_played | `curl "localhost:8080/api/leaderboard?sort=games_played"` | Returns array sorted descending by `games_played` field | [ ] |
+| 16.8 | Player stats endpoint | `curl "localhost:8080/api/player/alice/stats"` | Returns `{"success":true,"data":{"username":"alice","wins":N,"games_played":M,"win_rate":X.XX}}` | [ ] |
+| 16.9 | Stats for unknown player returns zeros | `curl "localhost:8080/api/player/nobody/stats"` | Returns success with all zero fields | [ ] |
+| 16.10 | Stats/leaderboard without DB return 503 | Start server without `-db` flag, then curl both endpoints | Both return `{"success":false,"error":"... not available - database not enabled"}` with HTTP 503 | [ ] |
+
+---
+
+## 17. Phase 9.5 — Player Betting System
+
+### Setup
+
+Three terminals, same as Section 15 setup. Add a third player:
+
+```bash
+# Terminal D — third player
+./binGO-CLI -mode client -server localhost:8080 -code <code>
+# (enter username "Bob")
+```
+
+### 17A — Placing Bets
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 17.1 | Simple win bet | Alice: `bet: bob wins` | Both clients show `🎲 Active Bets` panel with `⏳ Alice  bob wins` entry | [ ] |
+| 17.2 | Simple loses bet | Bob: `bet: alice loses` | Panel shows Bob's bet added below Alice's | [ ] |
+| 17.3 | AND compound bet | Host: `bet: alice wins AND bob loses` | Panel shows Host's compound bet; both conditions visible | [ ] |
+| 17.4 | Case-insensitive player names | Alice: `bet: BOB wins` | Accepted (Bob exists); bet appears in panel | [ ] |
+| 17.5 | Unknown player rejected | Alice: `bet: charlie wins` | Error `player "charlie" not found in this game` | [ ] |
+| 17.6 | Invalid outcome rejected | Alice: `bet: bob draws` | Error `invalid outcome "draws" — must be "wins" or "loses"` | [ ] |
+| 17.7 | Malformed bet rejected | Alice: `bet: bob` | Error about invalid condition format | [ ] |
+| 17.8 | Empty bet rejected | Alice: `bet: ` (empty) | Error `bet text cannot be empty` | [ ] |
+| 17.9 | Duplicate active bet blocked | Alice places a bet, then immediately tries another | Error `you already have an active bet — wait for results before placing another` | [ ] |
+| 17.10 | Bet after game ended rejected | After a win, Alice: `bet: bob wins` | Error `bets are closed — game has already ended` | [ ] |
+
+### 17B — Bet Evaluation
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 17.11 | Winning bet resolves ✓ | Alice bets `bob wins`; Bob marks a winning row and announces win | Alice's bet shows `✓` status in bets panel; all clients see updated panel | [ ] |
+| 17.12 | Losing bet resolves ✗ | Alice bets `bob wins`; Alice (not Bob) wins | Alice's bet shows `✗` status | [ ] |
+| 17.13 | AND bet wins when all conditions met | Host bets `alice wins AND bob loses`; Alice wins | Host bet shows `✓` (both conditions true) | [ ] |
+| 17.14 | AND bet loses when one condition fails | Host bets `alice wins AND bob loses`; Bob wins | Host bet shows `✗` (first condition false) | [ ] |
+| 17.15 | All bets resolved on win | Multiple players have active bets; one player wins | All bets in panel update to ✓ or ✗ simultaneously in a single broadcast | [ ] |
+| 17.16 | Bets panel broadcast to all players | Alice places bet, Bob is in game | Bob's terminal updates to show Alice's bet without any action from Bob | [ ] |
+
+### 17C — Bets Cleared on Restart
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 17.17 | Bets cleared after restart | Place bets; game ends (win); host restarts | After restart, bets panel is empty on all clients | [ ] |
+| 17.18 | New bets accepted after restart | After 17.17, place a new bet | Accepted without "duplicate bet" error; panel shows new bet | [ ] |
+
+### 17D — Help Text
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 17.19 | Help shows betting command | Type `help` | Output includes `bet: <player> wins\|loses` with AND description | [ ] |
+| 17.20 | Help shows suggestion commands | Type `help` | Output includes `add_new_phrase`, `approve`, `reject` commands | [ ] |
+| 17.21 | Help shows leaderboard/stats | Type `help` | Output includes `leaderboard` and `stats` commands | [ ] |

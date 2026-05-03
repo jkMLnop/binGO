@@ -551,6 +551,36 @@ func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*Leaderb
 	return entries, nil
 }
 
+// GetPlayerStats retrieves aggregated win/game statistics for a player
+func (s *SQLiteStore) GetPlayerStats(ctx context.Context, username string) (*PlayerStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var wins, gamesPlayed int
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT
+			COALESCE((SELECT COUNT(*) FROM wins_history WHERE player_username = ?), 0),
+			COALESCE((SELECT COUNT(DISTINCT game_id) FROM players WHERE username = ?), 0)`,
+		username, username,
+	).Scan(&wins, &gamesPlayed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query player stats: %w", err)
+	}
+
+	var winRate float64
+	if gamesPlayed > 0 {
+		winRate = float64(wins) / float64(gamesPlayed)
+	}
+
+	return &PlayerStats{
+		Username:    username,
+		Wins:        wins,
+		GamesPlayed: gamesPlayed,
+		WinRate:     winRate,
+	}, nil
+}
+
 // ArchiveGame persists a completed game session to the game_archives table
 func (s *SQLiteStore) ArchiveGame(ctx context.Context, gameID, code, hostID, winnerID string, playerCount int, createdAt, endedAt time.Time) error {
 	s.mu.Lock()

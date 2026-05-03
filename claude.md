@@ -21,18 +21,18 @@ go test -tags=container -timeout=10m ./tests -v
 docker-compose up -d && go test -tags=e2e ./tests -v
 
 # Build binary (version defaults to "dev")
-go build -o binGO .
+go build -o binGO-CLI .
 
 # Build binary with version injection
-go build -ldflags "-X main.version=v8.2.0" -o binGO .
+go build -ldflags "-X main.version=v8.2.0" -o binGO-CLI .
 
 # Print version
-./binGO -version
+./binGO-CLI -version
 
 # Run modes
-./binGO -mode standalone                         # local single-player
-./binGO -mode server -port 8080 -db ./bingo.db   # multiplayer server
-./binGO -mode client -server localhost:8080 -code BINGO-XXXXX
+./binGO-CLI -mode standalone                         # local single-player
+./binGO-CLI -mode server -port 8080 -db ./bingo.db   # multiplayer server
+./binGO-CLI -mode client -server localhost:8080 -code BINGO-XXXXX
 
 # Docker stack (server + Prometheus + Grafana)
 cp .env.example .env   # first time only

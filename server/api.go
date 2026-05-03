@@ -95,7 +95,7 @@ func (s *Server) handleGetGameByCode(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetLeaderboard retrieves top players
-// GET /api/leaderboard?limit=10
+// GET /api/leaderboard?limit=10&sort=wins|win_rate|games_played
 func (s *Server) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -110,6 +110,8 @@ func (s *Server) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sort := r.URL.Query().Get("sort") // "wins" (default), "win_rate", "games_played"
+
 	// Only available with database
 	if s.DB == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "leaderboard not available - database not enabled")
@@ -117,6 +119,65 @@ func (s *Server) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// For win_rate and games_played sorts we fetch stats per top player
+	if sort == "win_rate" || sort == "games_played" {
+		entries, err := s.DB.GetLeaderboard(ctx, 100) // fetch more to sort
+		if err != nil {
+			log.Printf("Error retrieving leaderboard: %v", err)
+			writeAPIError(w, http.StatusInternalServerError, "failed to retrieve leaderboard")
+			return
+		}
+
+		type enriched struct {
+			Username    string  `json:"username"`
+			Wins        int     `json:"wins"`
+			GamesPlayed int     `json:"games_played"`
+			WinRate     float64 `json:"win_rate"`
+			Rank        int     `json:"rank"`
+		}
+		enriched_entries := make([]enriched, 0, len(entries))
+		for _, e := range entries {
+			stats, err := s.DB.GetPlayerStats(ctx, e.Username)
+			if err != nil || stats == nil {
+				enriched_entries = append(enriched_entries, enriched{Username: e.Username, Wins: e.Wins})
+				continue
+			}
+			enriched_entries = append(enriched_entries, enriched{
+				Username:    stats.Username,
+				Wins:        stats.Wins,
+				GamesPlayed: stats.GamesPlayed,
+				WinRate:     stats.WinRate,
+			})
+		}
+
+		// Sort by requested metric
+		for i := 1; i < len(enriched_entries); i++ {
+			for j := i; j > 0; j-- {
+				swap := false
+				if sort == "win_rate" && enriched_entries[j].WinRate > enriched_entries[j-1].WinRate {
+					swap = true
+				} else if sort == "games_played" && enriched_entries[j].GamesPlayed > enriched_entries[j-1].GamesPlayed {
+					swap = true
+				}
+				if swap {
+					enriched_entries[j], enriched_entries[j-1] = enriched_entries[j-1], enriched_entries[j]
+				} else {
+					break
+				}
+			}
+		}
+		if len(enriched_entries) > limit {
+			enriched_entries = enriched_entries[:limit]
+		}
+		for i := range enriched_entries {
+			enriched_entries[i].Rank = i + 1
+		}
+		writeAPISuccess(w, enriched_entries)
+		return
+	}
+
+	// Default: sort by wins
 	entries, err := s.DB.GetLeaderboard(ctx, limit)
 	if err != nil {
 		log.Printf("Error retrieving leaderboard: %v", err)
@@ -135,6 +196,38 @@ func (s *Server) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAPISuccess(w, response)
+}
+
+// handleGetPlayerStats retrieves aggregated stats for a single player
+// GET /api/player/{username}/stats
+func (s *Server) handleGetPlayerStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Extract username from path: /api/player/USERNAME/stats
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/player/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing username")
+		return
+	}
+	username := parts[0]
+
+	if s.DB == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "player stats not available - database not enabled")
+		return
+	}
+
+	ctx := r.Context()
+	stats, err := s.DB.GetPlayerStats(ctx, username)
+	if err != nil {
+		log.Printf("Error retrieving player stats for %s: %v", username, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to retrieve player stats")
+		return
+	}
+
+	writeAPISuccess(w, stats)
 }
 
 // handleAPIStatus provides status endpoint for monitoring

@@ -698,6 +698,212 @@ func TestOrphanedGameNotJoinable(t *testing.T) {
 	t.Logf("✓ orphaned game correctly rejected new join with: %v", err)
 }
 
+// ---------------------------------------------------------------------------
+// Phase 9: Buzzword Suggestion Tests
+// ---------------------------------------------------------------------------
+
+func TestHandlePlayerSuggest(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g1", testBuzzwords(), 3, 3)
+	host := newPlayer("host-user")
+	game.HostID = host.ID
+	player := newPlayer("player-user")
+	game.AddPlayer(host)
+	game.AddPlayer(player)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	// A normal player suggests a phrase
+	if err := srv.handlePlayerSuggest(game, player, "low-hanging fruit"); err != nil {
+		t.Fatalf("unexpected error suggesting phrase: %v", err)
+	}
+
+	game.SuggestionsMu.Lock()
+	if len(game.Suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(game.Suggestions))
+	}
+	if game.Suggestions[0].Phrase != "low-hanging fruit" {
+		t.Errorf("unexpected suggestion phrase: %s", game.Suggestions[0].Phrase)
+	}
+	game.SuggestionsMu.Unlock()
+}
+
+func TestHandlePlayerSuggestDuplicate(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g2", testBuzzwords(), 3, 3)
+	p := newPlayer("player-user")
+	game.HostID = p.ID
+	game.AddPlayer(p)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	if err := srv.handlePlayerSuggest(game, p, "bandwidth"); err != nil {
+		t.Fatalf("first suggestion failed: %v", err)
+	}
+	if err := srv.handlePlayerSuggest(game, p, "Bandwidth"); err == nil {
+		t.Fatal("expected error on duplicate (case-insensitive), got nil")
+	}
+}
+
+func TestHandleHostRejectEnforcement(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g3", testBuzzwords(), 3, 3)
+	host := newPlayer("host")
+	nonhost := newPlayer("nonhost")
+	game.HostID = host.ID
+	game.AddPlayer(host)
+	game.AddPlayer(nonhost)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	if err := srv.handlePlayerSuggest(game, nonhost, "pivot"); err != nil {
+		t.Fatalf("suggest failed: %v", err)
+	}
+
+	// Non-host reject should fail
+	if err := srv.handleHostReject(game, nonhost, "pivot"); err == nil {
+		t.Fatal("expected error when non-host rejects, got nil")
+	}
+
+	// Host reject should succeed
+	if err := srv.handleHostReject(game, host, "pivot"); err != nil {
+		t.Fatalf("host reject failed: %v", err)
+	}
+
+	game.SuggestionsMu.Lock()
+	if len(game.Suggestions) != 0 {
+		t.Errorf("expected 0 suggestions after reject, got %d", len(game.Suggestions))
+	}
+	game.SuggestionsMu.Unlock()
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9.5: Betting Tests
+// ---------------------------------------------------------------------------
+
+func TestParseBetConditionsValid(t *testing.T) {
+	game := NewGame("g4", testBuzzwords(), 3, 3)
+	alice := newPlayer("alice")
+	bob := newPlayer("bob")
+	game.AddPlayer(alice)
+	game.AddPlayer(bob)
+
+	conds, err := parseBetConditions("alice wins", game)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(conds) != 1 || conds[0].PlayerUsername != "alice" || conds[0].Outcome != "wins" {
+		t.Errorf("unexpected conditions: %+v", conds)
+	}
+}
+
+func TestParseBetConditionsAndChain(t *testing.T) {
+	game := NewGame("g5", testBuzzwords(), 3, 3)
+	alice := newPlayer("alice")
+	bob := newPlayer("bob")
+	game.AddPlayer(alice)
+	game.AddPlayer(bob)
+
+	conds, err := parseBetConditions("alice wins AND bob loses", game)
+	if err != nil {
+		t.Fatalf("unexpected error on AND chain: %v", err)
+	}
+	if len(conds) != 2 {
+		t.Fatalf("expected 2 conditions, got %d", len(conds))
+	}
+	if conds[1].Outcome != "loses" {
+		t.Errorf("expected second condition outcome 'loses', got %q", conds[1].Outcome)
+	}
+}
+
+func TestParseBetConditionsUnknownPlayer(t *testing.T) {
+	game := NewGame("g6", testBuzzwords(), 3, 3)
+	alice := newPlayer("alice")
+	game.AddPlayer(alice)
+
+	_, err := parseBetConditions("charlie wins", game)
+	if err == nil {
+		t.Fatal("expected error for unknown player, got nil")
+	}
+	if !strings.Contains(err.Error(), "charlie") {
+		t.Errorf("expected player name in error, got: %v", err)
+	}
+}
+
+func TestParseBetConditionsMalformed(t *testing.T) {
+	game := NewGame("g7", testBuzzwords(), 3, 3)
+	alice := newPlayer("alice")
+	game.AddPlayer(alice)
+
+	// Missing outcome
+	if _, err := parseBetConditions("alice", game); err == nil {
+		t.Fatal("expected error for malformed bet, got nil")
+	}
+
+	// Invalid outcome
+	if _, err := parseBetConditions("alice draws", game); err == nil {
+		t.Fatal("expected error for invalid outcome, got nil")
+	}
+}
+
+func TestEvaluateBetsWin(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g8", testBuzzwords(), 3, 3)
+	alice := newPlayer("alice")
+	bob := newPlayer("bob")
+	game.AddPlayer(alice)
+	game.AddPlayer(bob)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	// Place two bets: one that should win, one that should lose
+	game.BetsMu.Lock()
+	game.Bets = []Bet{
+		{ID: "b1", BetterID: "charlie", Conditions: []BetCondition{{PlayerUsername: "alice", Outcome: "wins"}}, Status: "active"},
+		{ID: "b2", BetterID: "dave", Conditions: []BetCondition{{PlayerUsername: "bob", Outcome: "wins"}}, Status: "active"},
+	}
+	game.BetsMu.Unlock()
+
+	srv.evaluateBets(game, "alice")
+
+	game.BetsMu.Lock()
+	defer game.BetsMu.Unlock()
+	if game.Bets[0].Status != "won" {
+		t.Errorf("bet b1 should be won, got %q", game.Bets[0].Status)
+	}
+	if game.Bets[1].Status != "lost" {
+		t.Errorf("bet b2 should be lost, got %q", game.Bets[1].Status)
+	}
+}
+
+func TestHandlePlayerBetDuplicate(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g9", testBuzzwords(), 3, 3)
+	alice := newPlayer("alice")
+	charlie := newPlayer("charlie")
+	game.AddPlayer(alice)
+	game.AddPlayer(charlie)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	if err := srv.handlePlayerBet(game, charlie, "alice wins"); err != nil {
+		t.Fatalf("first bet failed: %v", err)
+	}
+	if err := srv.handlePlayerBet(game, charlie, "alice loses"); err == nil {
+		t.Fatal("expected error placing second active bet, got nil")
+	}
+}
+
 // TestNotifyShutdownDoesNotPanicWithNilWS verifies that NotifyShutdown handles players
 // that have no active WebSocket (e.g., set up in unit tests without real connections).
 func TestNotifyShutdownDoesNotPanicWithNilWS(t *testing.T) {

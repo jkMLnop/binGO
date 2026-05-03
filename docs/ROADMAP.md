@@ -62,6 +62,26 @@ The evolution of binGO-CLI organized by development phases.
 
 - [ ] Updated help text with new commands
 
+#### Phase 9.5: Player Betting System
+**Goal:** In-game social meta-game where players bet on outcomes using chat commands
+
+**Tasks:**
+- [ ] Betting commands: `bet: <player> wins|loses [AND <player> wins|loses]`
+  - In-memory only (no DB persistence in MVP)
+  - All bets public and broadcast to all players in game
+  - AND-only compound grammar for MVP (OR/parens deferred)
+  - One active bet per player per game round
+- [ ] Active bets broadcast to all clients on each new bet placed
+  - Displayed below game board, above user input prompt
+  - Status icons: ⏳ active / ✓ won / ✗ lost
+- [ ] Bet evaluation on every win event
+  - `wins` condition: true if named player is the winner
+  - `loses` condition: true if named player is NOT the winner
+  - All conditions in a bet must be true for the bet to win
+  - Results broadcast to all players immediately after win announced
+- [ ] Bets cleared on game restart (fresh round = fresh bets)
+- [ ] Help text updated with betting commands
+
 #### Phase 10: Kubernetes & Scaling (Future)
 **Goal:** Run multiple server instances with shared database
 

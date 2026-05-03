@@ -50,16 +50,21 @@ func (p *Player) sendMessage(msg interface{}) error {
 
 // Game represents a bingo game session
 type Game struct {
-	ID        string
-	Code      string             // Join code for this game
-	HostID    string             // ID of the host player (immutable once set on first player connect)
-	Players   map[string]*Player // playerID -> Player
-	IsActive  bool               // Game is in progress
-	Orphaned  bool               // True when all players disconnected without a winner
-	Winner    string             // Player ID of winner (empty if no winner yet)
-	CreatedAt time.Time          // When this game session started
-	EndedAt   time.Time          // When this game session ended (zero if still active)
-	PlayersMu sync.RWMutex       // Protect Players map
+	ID            string
+	Code          string             // Join code for this game
+	HostID        string             // ID of the host player (immutable once set on first player connect)
+	Players       map[string]*Player // playerID -> Player
+	IsActive      bool               // Game is in progress
+	Orphaned      bool               // True when all players disconnected without a winner
+	Winner        string             // Player ID of winner (empty if no winner yet)
+	CreatedAt     time.Time          // When this game session started
+	EndedAt       time.Time          // When this game session ended (zero if still active)
+	Buzzwords     [][]string         // Buzzword pool for this game (may differ from server defaults)
+	Suggestions   []Suggestion       // Phase 9: pending buzzword suggestions (in-memory only)
+	SuggestionsMu sync.Mutex         // Protect Suggestions slice
+	Bets          []Bet              // Phase 9.5: active player bets (in-memory only)
+	BetsMu        sync.Mutex         // Protect Bets slice
+	PlayersMu     sync.RWMutex       // Protect Players map
 }
 
 // NewGame creates a new game session
@@ -70,6 +75,7 @@ func NewGame(id string, buzzwords [][]string, rows, cols int) *Game {
 		Players:   make(map[string]*Player),
 		IsActive:  true,
 		CreatedAt: time.Now(),
+		Buzzwords: buzzwords,
 	}
 }
 
@@ -129,9 +135,20 @@ func (g *Game) ResetBoard(buzzwords [][]string, rows, cols int) {
 	defer g.PlayersMu.Unlock()
 
 	// Reset game state but keep current players (they will clear their own marks)
-	// Just reset the game metadata for the new session
 	g.IsActive = true
 	g.Winner = ""
 	g.CreatedAt = time.Now() // Fresh session start
 	g.EndedAt = time.Time{}  // Clear end time
+	if len(buzzwords) > 0 {
+		g.Buzzwords = buzzwords
+	}
+
+	// Clear ephemeral in-game state for the new round
+	g.SuggestionsMu.Lock()
+	g.Suggestions = nil
+	g.SuggestionsMu.Unlock()
+
+	g.BetsMu.Lock()
+	g.Bets = nil
+	g.BetsMu.Unlock()
 }

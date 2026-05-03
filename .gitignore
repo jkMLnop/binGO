@@ -12,6 +12,9 @@ buzzwords_full.csv
 # Ignore test output files
 coverage.out
 
+# SQLite database files (local dev artefacts)
+*.db
+
 # Compiled programs (only in root directory)
 /binGO
 /binGO-*

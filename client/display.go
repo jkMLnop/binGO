@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jkMLnop/binGO-CLI/shared"
 )
@@ -36,4 +37,64 @@ func (p *Player) DisplayGameEnd(msg ServerMessage) {
 		// Show win animation for the winner
 		shared.DisplayWinScreen()
 	}
+}
+
+// DisplaySuggestions prints the pending buzzword suggestions panel (Phase 9).
+// Prints nothing when the list is empty.
+func (p *Player) DisplaySuggestions(suggestions []Suggestion) {
+	if len(suggestions) == 0 {
+		return
+	}
+	border := strings.Repeat("─", 48)
+	fmt.Printf("\n┌%s┐\n", border)
+	fmt.Printf("│ 📝 Pending Buzzword Suggestions%-16s│\n", "")
+	fmt.Printf("├%s┤\n", border)
+	for _, s := range suggestions {
+		line := fmt.Sprintf("  %-20s  suggested: \"%s\"", s.PlayerID, s.Phrase)
+		if len(line) > 48 {
+			line = line[:45] + "..."
+		}
+		fmt.Printf("│ %-48s│\n", line)
+	}
+	isHost := p.WelcomeMsg.HostID == p.PlayerID
+	if isHost {
+		fmt.Printf("├%s┤\n", border)
+		fmt.Printf("│ approve <phrase>  /  reject <phrase>%-12s│\n", "")
+	}
+	fmt.Printf("└%s┘\n", border)
+}
+
+// DisplayActiveBets prints the active bets panel below the board (Phase 9.5).
+// Prints nothing when the list is empty.
+func (p *Player) DisplayActiveBets(bets []Bet) {
+	if len(bets) == 0 {
+		return
+	}
+	const innerWidth = 54
+	border := strings.Repeat("─", innerWidth)
+	fmt.Printf("\n┌%s┐\n", border)
+	fmt.Printf("│ 🎲 Active Bets%-39s│\n", "") // 🎲 is literal in format string; %-39s adds exact spaces
+	fmt.Printf("├%s┤\n", border)
+	for _, b := range bets {
+		icon := "⏳"
+		iconDisplayW := 2 // ⏳ renders as 2 terminal columns (double-width)
+		switch b.Status {
+		case "won":
+			icon = "✓"
+			iconDisplayW = 1
+		case "lost":
+			icon = "✗"
+			iconDisplayW = 1
+		}
+		// Layout: "│ " + icon + " " + body + padding + "│"
+		// Inner display cols: 1(space) + iconDisplayW + 1(space) + bodyWidth = innerWidth
+		bodyWidth := innerWidth - 2 - iconDisplayW
+		body := fmt.Sprintf("%-16s  %s", b.BetterUsername, b.RawText)
+		if len(body) > bodyWidth {
+			body = body[:bodyWidth-3] + "..."
+		}
+		// %-*s pads body (ASCII) to bodyWidth runes = bodyWidth display cols
+		fmt.Printf("│ %s %-*s│\n", icon, bodyWidth, body)
+	}
+	fmt.Printf("└%s┘\n", border)
 }

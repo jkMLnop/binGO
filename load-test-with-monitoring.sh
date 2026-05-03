@@ -45,7 +45,7 @@ echo ""
 # Verify the server is reachable before spending time on test compilation.
 if ! curl -sf "${LOAD_TEST_URL}/api/status" > /dev/null 2>&1; then
   warn "Server not reachable at ${LOAD_TEST_URL}/api/status"
-  warn "Start the server first:  docker-compose up -d  OR  ./binGO -mode server"
+  warn "Start the server first:  docker-compose up -d  OR  ./binGO-CLI -mode server"
   exit 1
 fi
 success "Server is reachable at ${LOAD_TEST_URL}"

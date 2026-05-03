@@ -40,6 +40,7 @@ type GameStore interface {
 	RecordWin(ctx context.Context, playerUsername string, gameCode string) error
 	GetPlayerWins(ctx context.Context, playerUsername string) (int, error)
 	GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error)
+	GetPlayerStats(ctx context.Context, username string) (*PlayerStats, error)
 
 	// Game archive operations
 	ArchiveGame(ctx context.Context, gameID, code, hostID, winnerID string, playerCount int, createdAt, endedAt time.Time) error
@@ -83,6 +84,14 @@ type Host struct {
 type LeaderboardEntry struct {
 	Username string
 	Wins     int
+}
+
+// PlayerStats holds aggregated statistics for a single player
+type PlayerStats struct {
+	Username    string  `json:"username"`
+	Wins        int     `json:"wins"`
+	GamesPlayed int     `json:"games_played"`
+	WinRate     float64 `json:"win_rate"`
 }
 
 // GameArchive represents a completed game session persisted for history

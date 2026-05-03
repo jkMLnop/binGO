@@ -3,9 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -135,12 +138,30 @@ func runClient(serverAddr string, code string) {
 	// Pass raw server address; player.Connect() will add ws:// or wss:// protocol and /ws path
 	player := client.NewPlayer(serverAddr)
 
+	// Show menu when no code was provided on the command line
+	if code == "" {
+		choice, menuCode, buzzwords, menuErr := client.ShowMainMenu(serverAddr)
+		if menuErr != nil {
+			log.Fatalf("Menu error: %v", menuErr)
+		}
+		code = menuCode
+		if choice == "host" {
+			player.IsHostMode = true
+			player.PendingBuzzwords = buzzwords
+		}
+	}
+
 	// Use the full auth flow with token/username prompts and local storage
 	welcomeMsg, err := player.ConnectWithAuth(code)
 	if err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}
 	defer player.Close()
+
+	// Announce game code after host creates a game
+	if player.IsHostMode && welcomeMsg.Code != "" {
+		fmt.Printf("\n✓ Game created! Code: %s\n   Share this code with players to join.\n", welcomeMsg.Code)
+	}
 
 	// Initialize game session from welcome message
 	player.GameSession = shared.NewGameSession(welcomeMsg.Buzzwords, welcomeMsg.Rows, welcomeMsg.Cols)
@@ -159,11 +180,15 @@ func runClient(serverAddr string, code string) {
 
 	// Calculate max cell number for the board dimensions
 	maxCellNum := welcomeMsg.Rows * welcomeMsg.Cols
-	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell or 'q' to quit:"
+	promptMsg := "\nEnter a number (1-" + strconv.Itoa(maxCellNum) + ") to mark a cell, 'help' for all commands, or 'q' to quit:"
 	gameEndedPrompt := "\nGame has ended. Type 'q' to quit."
 
 	// Track game state
 	gameEnded := false
+
+	// Phase 9/9.5: local display state
+	var activeSuggestions []client.Suggestion
+	var activeBets []client.Bet
 
 	// === Setup Server Listener ===
 	// Spawn goroutine to listen for server messages
@@ -191,13 +216,30 @@ func runClient(serverAddr string, code string) {
 			}
 
 			// Check for text commands first
-			switch input {
-			case "q", "quit":
+			lc := strings.ToLower(input)
+			switch {
+			case lc == "q" || lc == "quit":
 				inputChan <- "quit"
-			case "restart":
+			case lc == "restart":
 				inputChan <- "restart"
-			case "help":
+			case lc == "help":
 				inputChan <- "help"
+			case lc == "leaderboard":
+				inputChan <- "leaderboard"
+			case lc == "stats":
+				inputChan <- "stats"
+			case strings.HasPrefix(lc, "add_new_phrase "):
+				phrase := strings.TrimSpace(input[len("add_new_phrase "):])
+				inputChan <- "suggest:" + phrase
+			case strings.HasPrefix(lc, "approve "):
+				phrase := strings.TrimSpace(input[len("approve "):])
+				inputChan <- "approve:" + phrase
+			case strings.HasPrefix(lc, "reject "):
+				phrase := strings.TrimSpace(input[len("reject "):])
+				inputChan <- "reject:" + phrase
+			case strings.HasPrefix(lc, "bet:"):
+				betText := strings.TrimSpace(input[len("bet:"):])
+				inputChan <- "bet:" + betText
 			default:
 				// Try to parse as numeric cell ID
 				cellNum, err := strconv.Atoi(input)
@@ -243,6 +285,8 @@ func runClient(serverAddr string, code string) {
 				shared.DisplayBannerWithWidth(player.DisplayWidth)
 				shared.PrintBoard(player.GameSession)
 				player.DisplayWelcome(player.WelcomeMsg)
+				player.DisplaySuggestions(activeSuggestions)
+				player.DisplayActiveBets(activeBets)
 				printPrompt(promptMsg)
 			case "player_update":
 				// Update welcome message with new player list and redraw
@@ -251,6 +295,29 @@ func runClient(serverAddr string, code string) {
 				shared.DisplayBannerWithWidth(player.DisplayWidth)
 				shared.PrintBoard(player.GameSession)
 				player.DisplayWelcome(player.WelcomeMsg)
+				player.DisplaySuggestions(activeSuggestions)
+				player.DisplayActiveBets(activeBets)
+				printPrompt(promptMsg)
+			case "suggestion_broadcast":
+				activeSuggestions = msg.Suggestions
+				if msg.Message != "" {
+					fmt.Println(msg.Message)
+				}
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession)
+				player.DisplayWelcome(player.WelcomeMsg)
+				player.DisplaySuggestions(activeSuggestions)
+				player.DisplayActiveBets(activeBets)
+				printPrompt(promptMsg)
+			case "bets_update":
+				activeBets = msg.ActiveBets
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession)
+				player.DisplayWelcome(player.WelcomeMsg)
+				player.DisplaySuggestions(activeSuggestions)
+				player.DisplayActiveBets(activeBets)
 				printPrompt(promptMsg)
 			case "game_ended":
 				gameEnded = true
@@ -279,12 +346,16 @@ func runClient(serverAddr string, code string) {
 				player.WelcomeMsg = msg
 				warningMessage = ""
 				gameEnded = false
+				activeSuggestions = nil
+				activeBets = nil
 				// Redisplay board (same as player_update to maintain consistency)
 				log.Println("DEBUG: Clearing screen and displaying board")
 				fmt.Print("\033[H\033[2J")
 				shared.DisplayBannerWithWidth(player.DisplayWidth)
 				shared.PrintBoard(player.GameSession)
 				player.DisplayWelcome(player.WelcomeMsg)
+				player.DisplaySuggestions(activeSuggestions)
+				player.DisplayActiveBets(activeBets)
 				fmt.Println("\n🔄 New round started! " + promptMsg)
 				fmt.Print("> ")
 			}
@@ -307,6 +378,40 @@ func runClient(serverAddr string, code string) {
 			case "q", "quit":
 				fmt.Println("Goodbye!")
 				os.Exit(0)
+
+			case "leaderboard":
+				printLeaderboard(serverAddr)
+				printPrompt(promptMsg)
+				continue
+
+			case "stats":
+				printPlayerStats(serverAddr, player.PlayerID)
+				printPrompt(promptMsg)
+				continue
+
+			case "suggest":
+				if err := player.SendMessage(client.ClientMessage{Action: "suggest", Phrase: cellID}); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+				}
+				continue
+
+			case "approve":
+				if err := player.SendMessage(client.ClientMessage{Action: "approve", Phrase: cellID}); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+				}
+				continue
+
+			case "reject":
+				if err := player.SendMessage(client.ClientMessage{Action: "reject", Phrase: cellID}); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+				}
+				continue
+
+			case "bet":
+				if err := player.SendMessage(client.ClientMessage{Action: "bet", Phrase: cellID}); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+				}
+				continue
 
 			case "restart":
 				if err := player.AnnounceRestart(); err != nil {
@@ -352,8 +457,17 @@ func runClient(serverAddr string, code string) {
 					continue
 				}
 
+				// Full redraw including suggestions and bets
+				fmt.Print("\033[H\033[2J")
+				shared.DisplayBannerWithWidth(player.DisplayWidth)
+				shared.PrintBoard(player.GameSession)
+				player.DisplayWelcome(player.WelcomeMsg)
+				player.DisplaySuggestions(activeSuggestions)
+				player.DisplayActiveBets(activeBets)
+
 				// Check if player won
 				if won {
+					fmt.Println("\n🎉 YOU WIN! 🎉")
 					// Announce win to server immediately (broadcasts game_ended to all players)
 					if err := player.AnnounceWin(); err != nil {
 						fmt.Printf("Error announcing win: %v\n", err)
@@ -367,8 +481,6 @@ func runClient(serverAddr string, code string) {
 
 					fmt.Println("🎉 Announcing win to server...")
 					// Server will broadcast game_ended to all players
-					// Non-hosts will see the message and can quit
-					// Host can send restart
 					continue
 				}
 
@@ -386,8 +498,82 @@ func runClient(serverAddr string, code string) {
 
 func printClientHelp() {
 	fmt.Println("\n📝 Commands:")
-	fmt.Println("  1-9              - Mark a cell")
-	fmt.Println("  'restart'        - Restart game (host only)")
-	fmt.Println("  'help'           - Show this help")
-	fmt.Println("  'quit' or 'q'    - Exit game")
+	fmt.Println("  1-9                         - Mark a cell by number")
+	fmt.Println("  restart                     - Restart game (host only)")
+	fmt.Println("  add_new_phrase <phrase>     - Suggest a buzzword (Phase 9)")
+	fmt.Println("  approve <phrase>            - Approve suggestion (host only)")
+	fmt.Println("  reject <phrase>             - Reject suggestion (host only)")
+	fmt.Println("  bet: <player> wins|loses    - Place a bet (AND to chain)")
+	fmt.Println("  leaderboard                 - Show top players")
+	fmt.Println("  stats                       - Show your stats")
+	fmt.Println("  help                        - Show this help")
+	fmt.Println("  quit / q                    - Exit game")
+}
+
+// getHTTPBaseURL converts a server address into an HTTP base URL.
+func getHTTPBaseURL(serverAddr string) string {
+	addr := strings.TrimPrefix(serverAddr, "ws://")
+	addr = strings.TrimPrefix(addr, "wss://")
+	addr = strings.TrimSuffix(addr, "/ws")
+	if strings.Contains(addr, "fly.dev") || strings.Contains(addr, "ngrok") {
+		return "https://" + addr
+	}
+	return "http://" + addr
+}
+
+// printLeaderboard fetches and displays the top-10 leaderboard.
+func printLeaderboard(serverAddr string) {
+	baseURL := getHTTPBaseURL(serverAddr)
+	resp, err := http.Get(baseURL + "/api/leaderboard?limit=10") //nolint:noctx
+	if err != nil {
+		fmt.Printf("❌ Failed to fetch leaderboard: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		fmt.Println("❌ Invalid leaderboard response")
+		return
+	}
+	fmt.Println("\n🏆 Leaderboard:")
+	if data, ok := result["data"]; ok {
+		if entries, ok := data.([]interface{}); ok {
+			for _, e := range entries {
+				if entry, ok := e.(map[string]interface{}); ok {
+					rank := entry["rank"]
+					uname := entry["username"]
+					wins := entry["wins"]
+					fmt.Printf("  #%.0f %-20s %v wins\n", rank, uname, wins)
+				}
+			}
+		}
+	}
+}
+
+// printPlayerStats fetches and displays stats for a given username.
+func printPlayerStats(serverAddr, username string) {
+	baseURL := getHTTPBaseURL(serverAddr)
+	resp, err := http.Get(baseURL + "/api/player/" + username + "/stats") //nolint:noctx
+	if err != nil {
+		fmt.Printf("❌ Failed to fetch stats: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		fmt.Println("❌ Invalid stats response")
+		return
+	}
+	if data, ok := result["data"]; ok {
+		if stats, ok := data.(map[string]interface{}); ok {
+			fmt.Printf("\n📊 Stats for %s:\n", username)
+			fmt.Printf("   Wins:         %v\n", stats["wins"])
+			fmt.Printf("   Games Played: %v\n", stats["games_played"])
+			if wr, ok := stats["win_rate"].(float64); ok {
+				fmt.Printf("   Win Rate:     %.1f%%\n", wr*100)
+			}
+		}
+	}
 }

@@ -240,3 +240,93 @@ func TestCleanupOldArchives(t *testing.T) {
 
 	t.Log("✓ CleanupOldArchives correctly removed old record and kept recent one")
 }
+
+// ---------------------------------------------------------------------------
+// Phase 9: GetPlayerStats tests
+// ---------------------------------------------------------------------------
+
+func TestGetPlayerStatsNoGames(t *testing.T) {
+	tmpFile := "/tmp/test_bingo_stats_empty.db"
+	defer os.Remove(tmpFile)
+
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init: %v", err)
+	}
+
+	stats, err := store.GetPlayerStats(ctx, "unknown-player")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stats.Wins != 0 {
+		t.Errorf("expected 0 wins, got %d", stats.Wins)
+	}
+	if stats.GamesPlayed != 0 {
+		t.Errorf("expected 0 games played, got %d", stats.GamesPlayed)
+	}
+	if stats.WinRate != 0 {
+		t.Errorf("expected 0.0 win rate, got %f", stats.WinRate)
+	}
+	t.Log("✓ GetPlayerStats returns zero stats for unknown player")
+}
+
+func TestGetPlayerStatsWithWins(t *testing.T) {
+	tmpFile := "/tmp/test_bingo_stats_wins.db"
+	defer os.Remove(tmpFile)
+
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init: %v", err)
+	}
+
+	// Add alice to 3 games (required for GamesPlayed count)
+	gameCodes := []struct{ id, code string }{
+		{"game-001", "BINGO-00001"},
+		{"game-002", "BINGO-00002"},
+		{"game-003", "BINGO-00003"},
+	}
+	for _, g := range gameCodes {
+		if _, err := store.AddPlayer(ctx, g.id, "alice", "", false); err != nil {
+			t.Fatalf("AddPlayer failed for %s: %v", g.id, err)
+		}
+	}
+
+	// Record 2 wins for alice
+	if err := store.RecordWin(ctx, "alice", gameCodes[0].code); err != nil {
+		t.Fatalf("RecordWin failed: %v", err)
+	}
+	if err := store.RecordWin(ctx, "alice", gameCodes[1].code); err != nil {
+		t.Fatalf("RecordWin failed: %v", err)
+	}
+
+	stats, err := store.GetPlayerStats(ctx, "alice")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stats.Username != "alice" {
+		t.Errorf("expected username 'alice', got %q", stats.Username)
+	}
+	if stats.Wins != 2 {
+		t.Errorf("expected 2 wins, got %d", stats.Wins)
+	}
+	if stats.GamesPlayed != 3 {
+		t.Errorf("expected 3 games played, got %d", stats.GamesPlayed)
+	}
+	expectedRate := 2.0 / 3.0
+	if stats.WinRate < expectedRate-0.001 || stats.WinRate > expectedRate+0.001 {
+		t.Errorf("expected win rate ~%.3f, got %.3f", expectedRate, stats.WinRate)
+	}
+	t.Logf("✓ GetPlayerStats: wins=%d games=%d rate=%.3f", stats.Wins, stats.GamesPlayed, stats.WinRate)
+}

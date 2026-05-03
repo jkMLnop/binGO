@@ -101,10 +101,10 @@ Start a game to generate metrics:
 
 ```bash
 # In one terminal, run the server if not in Docker
-./binGO -mode server -port 8080
+./binGO-CLI -mode server -port 8080
 
 # In another terminal, connect a client
-./binGO -mode client -server localhost:8080
+./binGO-CLI -mode client -server localhost:8080
 
 # Or use the prebuilt binary
 ./binGO-CLI-intel-mac -mode server -port 8080

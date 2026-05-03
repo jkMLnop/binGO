@@ -12,16 +12,18 @@ import (
 
 // Player represents a bingo player client
 type Player struct {
-	ServerURL    string
-	ClientIP     string // Client's local IP (for session tracking)
-	WS           *websocket.Conn
-	GameID       string
-	PlayerID     string
-	Username     string
-	Token        string        // JWT token for re-authentication
-	GameSession  *shared.Board // Bingo board with game state
-	DisplayWidth int           // Cached display width for consistent rendering
-	WelcomeMsg   ServerMessage // Store welcome message for later display
+	ServerURL        string
+	ClientIP         string // Client's local IP (for session tracking)
+	WS               *websocket.Conn
+	GameID           string
+	PlayerID         string
+	Username         string
+	Token            string        // JWT token for re-authentication
+	GameSession      *shared.Board // Bingo board with game state
+	DisplayWidth     int           // Cached display width for consistent rendering
+	WelcomeMsg       ServerMessage // Store welcome message for later display
+	PendingBuzzwords [][]string    // Phase 9: custom buzzwords to send on host game creation
+	IsHostMode       bool          // Phase 9: true when player is creating a new game as host
 }
 
 // NewPlayer creates a new player client
@@ -85,11 +87,17 @@ func (p *Player) Connect(username string, token string, code string) (ServerMess
 	log.Printf("Connected to server at %s", wsURL)
 
 	// Send login message with username or token and optional code (Phase 7.3)
+	// Include custom buzzwords for host game creation (Phase 9)
+	action := "login"
+	if p.IsHostMode && code == "" {
+		action = "host"
+	}
 	loginMsg := ClientMessage{
-		Action:   "login",
-		Username: username,
-		Token:    token,
-		Code:     code,
+		Action:    action,
+		Username:  username,
+		Token:     token,
+		Code:      code,
+		Buzzwords: p.PendingBuzzwords,
 	}
 	if err := websocket.JSON.Send(ws, loginMsg); err != nil {
 		ws.Close()
@@ -201,6 +209,14 @@ func (p *Player) AnnounceRestart() error {
 	return websocket.JSON.Send(p.WS, restartMsg)
 }
 
+// SendMessage sends an arbitrary ClientMessage to the server (Phase 9/9.5)
+func (p *Player) SendMessage(msg ClientMessage) error {
+	if p.WS == nil {
+		return fmt.Errorf("not connected")
+	}
+	return websocket.JSON.Send(p.WS, msg)
+}
+
 // ReceiveMessage receives a single message from the server
 func (p *Player) ReceiveMessage() (ServerMessage, error) {
 	var msg ServerMessage
@@ -215,30 +231,14 @@ func (p *Player) hasWon() bool {
 	return p.GameSession.CheckWin()
 }
 
-// HandleMark processes a mark command: validate, mark cell, check win
-// Returns true if player won, false otherwise
+// HandleMark processes a mark command: validate the cell ID and mark it.
+// Returns true if player won, false otherwise.
+// Callers are responsible for redrawing the screen after this returns.
 func (p *Player) HandleMark(cellID string, maxCellNum int) (bool, error) {
-	// Mark the cell
 	if err := p.GameSession.MarkCell(cellID); err != nil {
 		return false, err
 	}
-
-	// Clear screen and redraw banner + board
-	fmt.Print("\033[H\033[2J")
-	shared.DisplayBannerWithWidth(p.DisplayWidth)
-	shared.PrintBoard(p.GameSession)
-
-	// Display game info below board
-	p.DisplayWelcome(p.WelcomeMsg)
-
-	// Check for win
-	if p.GameSession.CheckWin() {
-		fmt.Println("\n🎉 YOU WIN! 🎉")
-		return true, nil
-	}
-
-	// Don't print prompt here - let the event loop handle it via printPrompt()
-	return false, nil
+	return p.GameSession.CheckWin(), nil
 }
 
 // HandleBoard redisplays the current board with game info

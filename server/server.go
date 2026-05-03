@@ -104,6 +104,7 @@ func (s *Server) registerHandlers() {
 	s.Mux.HandleFunc("/api/status", s.handleAPIStatus)
 	s.Mux.HandleFunc("/api/game/", s.handleGetGameByCode)
 	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
+	s.Mux.HandleFunc("/api/player/", s.handleGetPlayerStats) // Phase 9: player stats
 
 	// Admin API handlers (Phase 8) - register both with and without trailing path
 	s.Mux.HandleFunc("/admin/api/games", s.handleAdminGames)
@@ -171,6 +172,57 @@ func (s *Server) createNewGame() {
 	}
 }
 
+// createGameForHost creates a new on-demand game for a host player (Phase 9).
+// Custom buzzwords may be provided; if nil the host's DB profile is checked, then server defaults.
+func (s *Server) createGameForHost(ctx context.Context, hostUsername string, customBuzzwords [][]string) (*Game, error) {
+	buzzwords := s.Buzzwords
+
+	if len(customBuzzwords) > 0 {
+		// Caller provided an explicit buzzword list — use it
+		buzzwords = customBuzzwords
+	} else if s.DB != nil {
+		// Try to load the host's approved buzzword list from their profile
+		dbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		host, err := s.DB.GetHostByUsername(dbCtx, hostUsername)
+		if err == nil && host != nil && len(host.ApprovedBuzzwords) > 0 {
+			var profileWords []string
+			if jsonErr := json.Unmarshal(host.ApprovedBuzzwords, &profileWords); jsonErr == nil && len(profileWords) > 0 {
+				// Wrap flat list into rows-of-one for the board generator
+				rows := make([][]string, len(profileWords))
+				for i, w := range profileWords {
+					rows[i] = []string{w}
+				}
+				buzzwords = append(s.Buzzwords, rows...)
+			}
+		}
+	}
+
+	s.GamesMu.Lock()
+	defer s.GamesMu.Unlock()
+
+	gameID := fmt.Sprintf("game-%d-%d", len(s.Games)+1, time.Now().UnixNano())
+	newGame := NewGame(gameID, buzzwords, s.Rows, s.Cols)
+	s.Games[gameID] = newGame
+	s.CodeToGame[newGame.Code] = newGame
+
+	log.Printf("Host %s created game: %s with code: %s", hostUsername, gameID, newGame.Code)
+
+	s.Metrics.GameCount.Set(float64(len(s.Games)))
+	s.Metrics.GamesCreatedTotal.Inc()
+
+	dbCtx, dbCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer dbCancel()
+	spanCtx, span := s.Tracer.Start(dbCtx, "bingo.game.create")
+	defer span.End()
+	if err := SaveGameToDB(spanCtx, s.DB, newGame, buzzwords); err != nil {
+		log.Printf("Warning: failed to save host game to DB: %v", err)
+		s.Metrics.RecordError("db")
+	}
+
+	return newGame, nil
+}
+
 // wsHandler handles incoming WebSocket connections - orchestrates the connection lifecycle
 func (s *Server) wsHandler(ws *websocket.Conn) {
 	ctx := ws.Request().Context()
@@ -236,29 +288,41 @@ func (s *Server) handlePlayerConnect(ctx context.Context, ws *websocket.Conn) (*
 		code = loginMsg.Code
 	}
 
-	if code == "" {
+	var game *Game
+	if code == "" && loginMsg.Action == "host" {
+		// Host flow: create a fresh game for this player (Phase 9)
+		var createErr error
+		game, createErr = s.createGameForHost(ctx, username, loginMsg.Buzzwords)
+		if createErr != nil {
+			errMsg := ServerMessage{Type: "error", Message: createErr.Error()}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return nil, nil, createErr
+		}
+	} else if code == "" {
 		errMsg := ServerMessage{Type: "error", Message: "Game code required for all remote connections"}
 		websocket.JSON.Send(ws, errMsg)
 		ws.Close()
 		s.Metrics.RecordError("input")
 		return nil, nil, fmt.Errorf("game code required")
-	}
-
-	game, err := s.getOrCreateGame(code)
-	if err != nil {
-		// Consume a token from the per-IP limiter; reject immediately when exhausted.
-		if !s.getCodeLimiter(clientIP).Allow() {
-			s.Logger.RateLimitExceeded(clientIP, "code_guess", 0)
-			s.Metrics.RecordRateLimit("code_guess")
-			errMsg := ServerMessage{Type: "error", Message: "Too many failed attempts. Please wait before trying again."}
+	} else {
+		var gameErr error
+		game, gameErr = s.getOrCreateGame(code)
+		if gameErr != nil {
+			// Consume a token from the per-IP limiter; reject immediately when exhausted.
+			if !s.getCodeLimiter(clientIP).Allow() {
+				s.Logger.RateLimitExceeded(clientIP, "code_guess", 0)
+				s.Metrics.RecordRateLimit("code_guess")
+				errMsg := ServerMessage{Type: "error", Message: "Too many failed attempts. Please wait before trying again."}
+				websocket.JSON.Send(ws, errMsg)
+				ws.Close()
+				return nil, nil, fmt.Errorf("rate limited: too many invalid code attempts from %s", clientIP)
+			}
+			errMsg := ServerMessage{Type: "error", Message: gameErr.Error()}
 			websocket.JSON.Send(ws, errMsg)
 			ws.Close()
-			return nil, nil, fmt.Errorf("rate limited: too many invalid code attempts from %s", clientIP)
+			return nil, nil, gameErr
 		}
-		errMsg := ServerMessage{Type: "error", Message: err.Error()}
-		websocket.JSON.Send(ws, errMsg)
-		ws.Close()
-		return nil, nil, err
 	}
 
 	// Check if player is reconnecting (already in game)
@@ -274,12 +338,13 @@ func (s *Server) handlePlayerConnect(ctx context.Context, ws *websocket.Conn) (*
 		return nil, nil, fmt.Errorf("username %s already in game", username)
 	} else {
 		// New player - create and add to game
-		player, err = s.createPlayerInGame(ctx, game, username)
-		if err != nil {
-			errMsg := ServerMessage{Type: "error", Message: err.Error()}
+		var playerErr error
+		player, playerErr = s.createPlayerInGame(ctx, game, username)
+		if playerErr != nil {
+			errMsg := ServerMessage{Type: "error", Message: playerErr.Error()}
 			websocket.JSON.Send(ws, errMsg)
 			ws.Close()
-			return nil, nil, err
+			return nil, nil, playerErr
 		}
 		log.Printf("Player %s JOINED game %s from IP %s via WebSocket", username, game.ID, clientIP)
 	}
@@ -437,6 +502,11 @@ func (s *Server) createPlayerInGame(ctx context.Context, game *Game, playerID st
 
 // sendWelcomeMessage sends the welcome message to a newly connected player with JWT token
 func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player, token string) error {
+	// Use game-specific buzzwords if set (e.g. custom host upload), else server defaults
+	buzzwords := game.Buzzwords
+	if len(buzzwords) == 0 {
+		buzzwords = s.Buzzwords
+	}
 	welcomeMsg := ServerMessage{
 		Type:      "welcome",
 		GameID:    game.ID,
@@ -445,7 +515,7 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 		PlayerID:  player.ID,
 		Username:  player.ID, // username is the player ID
 		Token:     token,     // Include JWT token
-		Buzzwords: s.Buzzwords,
+		Buzzwords: buzzwords,
 		Rows:      s.Rows,
 		Cols:      s.Cols,
 		Players:   game.GetPlayerList(),
@@ -493,28 +563,43 @@ func (s *Server) receivePlayerMessage(ws *websocket.Conn) (*ClientMessage, error
 
 // processPlayerMessage handles a message from a player and logs any errors internally
 func (s *Server) processPlayerMessage(ctx context.Context, game *Game, player *Player, msg *ClientMessage) {
+	sendErr := func(err error) {
+		errMsg := ServerMessage{Type: "error", Message: fmt.Sprintf("❌ %v", err)}
+		if sendE := player.sendMessage(errMsg); sendE != nil {
+			log.Printf("Failed to send error to player: %v", sendE)
+		}
+	}
+
 	switch msg.Action {
 	case "win":
 		if err := s.handlePlayerWin(ctx, game, player); err != nil {
 			log.Printf("Error processing player message: %v", err)
-			errMsg := ServerMessage{
-				Type:    "error",
-				Message: fmt.Sprintf("❌ %v", err),
-			}
-			if err := player.sendMessage(errMsg); err != nil {
-				log.Printf("Failed to send error to player: %v", err)
-			}
+			sendErr(err)
 		}
 	case "restart":
 		if err := s.handleGameRestart(ctx, game, player); err != nil {
 			log.Printf("Error restarting game: %v", err)
-			errMsg := ServerMessage{
-				Type:    "error",
-				Message: fmt.Sprintf("❌ %v", err),
-			}
-			if err := player.sendMessage(errMsg); err != nil {
-				log.Printf("Failed to send error to player: %v", err)
-			}
+			sendErr(err)
+		}
+	case "suggest":
+		if err := s.handlePlayerSuggest(game, player, msg.Phrase); err != nil {
+			log.Printf("Error handling suggest: %v", err)
+			sendErr(err)
+		}
+	case "approve":
+		if err := s.handleHostApprove(ctx, game, player, msg.Phrase); err != nil {
+			log.Printf("Error handling approve: %v", err)
+			sendErr(err)
+		}
+	case "reject":
+		if err := s.handleHostReject(game, player, msg.Phrase); err != nil {
+			log.Printf("Error handling reject: %v", err)
+			sendErr(err)
+		}
+	case "bet":
+		if err := s.handlePlayerBet(game, player, msg.Phrase); err != nil {
+			log.Printf("Error handling bet: %v", err)
+			sendErr(err)
 		}
 	}
 }
@@ -554,6 +639,9 @@ func (s *Server) handlePlayerWin(ctx context.Context, game *Game, player *Player
 
 	// Archive the completed game
 	s.archiveGame(ctx, game)
+
+	// Evaluate any active bets now that we know the winner (Phase 9.5)
+	s.evaluateBets(game, player.ID)
 
 	// Create and broadcast win message
 	winMsg := ServerMessage{
@@ -607,9 +695,15 @@ func (s *Server) handleGameRestart(ctx context.Context, game *Game, player *Play
 	// Restarting is a new session of the same game, don't archive again.
 
 	// Reset the game for a fresh session
-	game.ResetBoard(s.Buzzwords, s.Rows, s.Cols)
+	game.ResetBoard(game.Buzzwords, s.Rows, s.Cols)
 
 	log.Printf("🔄 Host %s restarted game %s with code: %s", player.ID, game.ID, game.Code)
+
+	// Use game-specific buzzwords if set, else server defaults
+	restartBuzzwords := game.Buzzwords
+	if len(restartBuzzwords) == 0 {
+		restartBuzzwords = s.Buzzwords
+	}
 
 	// Broadcast restart message to all players
 	restartMsg := ServerMessage{
@@ -618,7 +712,7 @@ func (s *Server) handleGameRestart(ctx context.Context, game *Game, player *Play
 		Code:      game.Code,
 		HostID:    game.HostID,
 		Players:   game.GetPlayerList(),
-		Buzzwords: s.Buzzwords,
+		Buzzwords: restartBuzzwords,
 		Rows:      s.Rows,
 		Cols:      s.Cols,
 		Message:   "Game restarted! New round begins.",
@@ -626,6 +720,259 @@ func (s *Server) handleGameRestart(ctx context.Context, game *Game, player *Play
 	s.broadcastToGame(game.ID, restartMsg)
 
 	return nil
+}
+
+// handlePlayerSuggest adds a buzzword suggestion to the game's pending queue and broadcasts it (Phase 9)
+func (s *Server) handlePlayerSuggest(game *Game, player *Player, phrase string) error {
+	phrase = strings.TrimSpace(phrase)
+	if phrase == "" {
+		return fmt.Errorf("suggestion phrase cannot be empty")
+	}
+	if len(phrase) > 100 {
+		return fmt.Errorf("suggestion phrase too long (max 100 characters)")
+	}
+
+	game.SuggestionsMu.Lock()
+	// Check for duplicate
+	for _, sug := range game.Suggestions {
+		if strings.EqualFold(sug.Phrase, phrase) {
+			game.SuggestionsMu.Unlock()
+			return fmt.Errorf("phrase %q is already pending suggestion", phrase)
+		}
+	}
+	game.Suggestions = append(game.Suggestions, Suggestion{
+		PlayerID: player.ID,
+		Phrase:   phrase,
+	})
+	snapshot := make([]Suggestion, len(game.Suggestions))
+	copy(snapshot, game.Suggestions)
+	game.SuggestionsMu.Unlock()
+
+	s.broadcastSuggestionsUpdate(game, snapshot)
+	return nil
+}
+
+// handleHostApprove approves a suggestion, appends it to host's DB profile, and broadcasts (Phase 9)
+func (s *Server) handleHostApprove(ctx context.Context, game *Game, player *Player, phrase string) error {
+	phrase = strings.TrimSpace(phrase)
+	if player.ID != game.HostID {
+		return fmt.Errorf("only the host can approve suggestions")
+	}
+
+	game.SuggestionsMu.Lock()
+	found := false
+	remaining := game.Suggestions[:0]
+	for _, sug := range game.Suggestions {
+		if strings.EqualFold(sug.Phrase, phrase) {
+			found = true
+		} else {
+			remaining = append(remaining, sug)
+		}
+	}
+	if !found {
+		game.SuggestionsMu.Unlock()
+		return fmt.Errorf("no pending suggestion matches %q", phrase)
+	}
+	game.Suggestions = remaining
+	snapshot := make([]Suggestion, len(remaining))
+	copy(snapshot, remaining)
+	game.SuggestionsMu.Unlock()
+
+	// Persist approved phrase to host profile in DB (nil-safe, append semantics)
+	dbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if s.DB != nil {
+		existingHost, loadErr := HostProfileFromDB(dbCtx, s.DB, game.HostID)
+		var existingWords []string
+		if loadErr == nil && existingHost != nil && len(existingHost.ApprovedBuzzwords) > 0 {
+			// Unmarshal existing list to append to it
+			_ = json.Unmarshal(existingHost.ApprovedBuzzwords, &existingWords)
+		}
+		updatedWords := append(existingWords, phrase)
+		if saveErr := SaveHostProfileToDB(dbCtx, s.DB, game.HostID, game.HostID, updatedWords); saveErr != nil {
+			log.Printf("Warning: failed to save approved buzzword to host profile: %v", saveErr)
+		}
+	}
+
+	s.broadcastSuggestionsUpdate(game, snapshot)
+	approvedMsg := ServerMessage{
+		Type:    "suggestion_broadcast",
+		GameID:  game.ID,
+		Message: fmt.Sprintf("✅ Host approved buzzword: \"%s\"", phrase),
+	}
+	_ = s.broadcastToGame(game.ID, approvedMsg)
+	return nil
+}
+
+// handleHostReject removes a suggestion without saving it (Phase 9)
+func (s *Server) handleHostReject(game *Game, player *Player, phrase string) error {
+	phrase = strings.TrimSpace(phrase)
+	if player.ID != game.HostID {
+		return fmt.Errorf("only the host can reject suggestions")
+	}
+
+	game.SuggestionsMu.Lock()
+	found := false
+	remaining := game.Suggestions[:0]
+	for _, sug := range game.Suggestions {
+		if strings.EqualFold(sug.Phrase, phrase) {
+			found = true
+		} else {
+			remaining = append(remaining, sug)
+		}
+	}
+	if !found {
+		game.SuggestionsMu.Unlock()
+		return fmt.Errorf("no pending suggestion matches %q", phrase)
+	}
+	game.Suggestions = remaining
+	snapshot := make([]Suggestion, len(remaining))
+	copy(snapshot, remaining)
+	game.SuggestionsMu.Unlock()
+
+	s.broadcastSuggestionsUpdate(game, snapshot)
+	rejectedMsg := ServerMessage{
+		Type:    "suggestion_broadcast",
+		GameID:  game.ID,
+		Message: fmt.Sprintf("❌ Host rejected suggestion: \"%s\"", phrase),
+	}
+	_ = s.broadcastToGame(game.ID, rejectedMsg)
+	return nil
+}
+
+// broadcastSuggestionsUpdate sends the current suggestions list to all players (Phase 9)
+func (s *Server) broadcastSuggestionsUpdate(game *Game, suggestions []Suggestion) {
+	msg := ServerMessage{
+		Type:        "suggestion_broadcast",
+		GameID:      game.ID,
+		Suggestions: suggestions,
+	}
+	_ = s.broadcastToGame(game.ID, msg)
+}
+
+// handlePlayerBet parses and registers a bet for the round (Phase 9.5)
+func (s *Server) handlePlayerBet(game *Game, player *Player, rawText string) error {
+	rawText = strings.TrimSpace(rawText)
+	if rawText == "" {
+		return fmt.Errorf("bet text cannot be empty — usage: bet: <player> wins|loses [AND ...]")
+	}
+	if game.Winner != "" {
+		return fmt.Errorf("bets are closed — game has already ended")
+	}
+
+	conditions, err := parseBetConditions(rawText, game)
+	if err != nil {
+		return err
+	}
+
+	game.BetsMu.Lock()
+	// One active bet per player per round
+	for _, b := range game.Bets {
+		if b.BetterID == player.ID && b.Status == "active" {
+			game.BetsMu.Unlock()
+			return fmt.Errorf("you already have an active bet — wait for results before placing another")
+		}
+	}
+	betID := fmt.Sprintf("bet-%s-%d", player.ID, time.Now().UnixNano())
+	game.Bets = append(game.Bets, Bet{
+		ID:             betID,
+		BetterID:       player.ID,
+		BetterUsername: player.ID,
+		RawText:        rawText,
+		Conditions:     conditions,
+		Status:         "active",
+	})
+	snapshot := make([]Bet, len(game.Bets))
+	copy(snapshot, game.Bets)
+	game.BetsMu.Unlock()
+
+	s.broadcastBetsUpdate(game, snapshot)
+	return nil
+}
+
+// parseBetConditions parses an AND-joined bet string into BetCondition slice (Phase 9.5)
+// Format: "<player> wins|loses [AND <player> wins|loses]"
+func parseBetConditions(rawText string, game *Game) ([]BetCondition, error) {
+	parts := strings.Split(strings.ToLower(rawText), " and ")
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("invalid bet format — usage: <player> wins|loses [AND ...]")
+	}
+
+	// Snapshot player names for validation (IDs are usernames)
+	game.PlayersMu.RLock()
+	playerNames := make(map[string]bool, len(game.Players))
+	for id := range game.Players {
+		playerNames[strings.ToLower(id)] = true
+	}
+	game.PlayersMu.RUnlock()
+
+	conditions := make([]BetCondition, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		tokens := strings.Fields(part)
+		if len(tokens) != 2 {
+			return nil, fmt.Errorf("invalid condition %q — expected \"<player> wins\" or \"<player> loses\"", part)
+		}
+		playerName := tokens[0]
+		outcome := tokens[1]
+		if outcome != "wins" && outcome != "loses" {
+			return nil, fmt.Errorf("invalid outcome %q — must be \"wins\" or \"loses\"", outcome)
+		}
+		if !playerNames[playerName] {
+			return nil, fmt.Errorf("player %q not found in this game", playerName)
+		}
+		conditions = append(conditions, BetCondition{
+			PlayerUsername: playerName,
+			Outcome:        outcome,
+		})
+	}
+	return conditions, nil
+}
+
+// evaluateBets resolves all active bets against the winner and broadcasts results (Phase 9.5)
+func (s *Server) evaluateBets(game *Game, winnerID string) {
+	winnerLower := strings.ToLower(winnerID)
+
+	game.BetsMu.Lock()
+	for i := range game.Bets {
+		if game.Bets[i].Status != "active" {
+			continue
+		}
+		allMet := true
+		for _, cond := range game.Bets[i].Conditions {
+			condMet := false
+			switch cond.Outcome {
+			case "wins":
+				condMet = strings.ToLower(cond.PlayerUsername) == winnerLower
+			case "loses":
+				condMet = strings.ToLower(cond.PlayerUsername) != winnerLower
+			}
+			if !condMet {
+				allMet = false
+				break
+			}
+		}
+		if allMet {
+			game.Bets[i].Status = "won"
+		} else {
+			game.Bets[i].Status = "lost"
+		}
+	}
+	snapshot := make([]Bet, len(game.Bets))
+	copy(snapshot, game.Bets)
+	game.BetsMu.Unlock()
+
+	s.broadcastBetsUpdate(game, snapshot)
+}
+
+// broadcastBetsUpdate sends the current bets list to all players (Phase 9.5)
+func (s *Server) broadcastBetsUpdate(game *Game, bets []Bet) {
+	msg := ServerMessage{
+		Type:       "bets_update",
+		GameID:     game.ID,
+		ActiveBets: bets,
+	}
+	_ = s.broadcastToGame(game.ID, msg)
 }
 
 // archiveGame persists a completed game session to the database

@@ -16,7 +16,7 @@ echo ""
 # Start 3 clients in background
 for i in {1..3}; do
     echo "Starting client $i..."
-    ./binGO -mode client -server localhost:8080 -code "$GAME_CODE" << EOF
+    ./binGO-CLI -mode client -server localhost:8080 -code "$GAME_CODE" << EOF
 n
 
 q
