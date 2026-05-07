@@ -12,21 +12,23 @@ type ClientMessage struct {
 
 // ServerMessage represents messages sent from server to client
 type ServerMessage struct {
-	Type        string       `json:"type"` // "welcome", "game_ended", "error", "suggestion_broadcast", "bets_update"
-	GameID      string       `json:"game_id"`
-	Code        string       `json:"code,omitempty"`    // Phase 7.3: Game code for joining
-	HostID      string       `json:"host_id,omitempty"` // Host player ID (immutable)
-	PlayerID    string       `json:"player_id"`
-	Username    string       `json:"username,omitempty"` // authenticated username
-	Token       string       `json:"token,omitempty"`    // JWT token issued on login
-	Rows        int          `json:"rows"`               // board dimensions
-	Cols        int          `json:"cols"`
-	Buzzwords   [][]string   `json:"buzzwords"`             // buzzword list for client board generation
-	Players     []string     `json:"players"`               // list of connected player IDs
-	Winner      string       `json:"winner"`                // player ID who won (in game_ended)
-	Message     string       `json:"message"`               // error or info messages
-	Suggestions []Suggestion `json:"suggestions,omitempty"` // Phase 9: pending buzzword suggestions
-	ActiveBets  []Bet        `json:"active_bets,omitempty"` // Phase 9.5: active player bets
+	Type                string       `json:"type"` // "welcome", "game_ended", "error", "suggestion_broadcast", "bets_update"
+	GameID              string       `json:"game_id"`
+	Code                string       `json:"code,omitempty"`    // Phase 7.3: Game code for joining
+	HostID              string       `json:"host_id,omitempty"` // Host player ID (immutable)
+	PlayerID            string       `json:"player_id"`
+	Username            string       `json:"username,omitempty"` // authenticated username
+	Token               string       `json:"token,omitempty"`    // JWT token issued on login
+	Rows                int          `json:"rows"`               // board dimensions
+	Cols                int          `json:"cols"`
+	Buzzwords           [][]string   `json:"buzzwords"`                      // buzzword list for client board generation
+	Players             []string     `json:"players"`                        // list of connected player IDs
+	Winner              string       `json:"winner"`                         // player ID who won (in game_ended)
+	Message             string       `json:"message"`                        // error or info messages
+	Suggestions         []Suggestion `json:"suggestions,omitempty"`          // Phase 9: pending buzzword suggestions
+	ActiveBets          []Bet        `json:"active_bets,omitempty"`          // Phase 9.5: active player bets
+	FlatBuzzwords       []string     `json:"flat_buzzwords,omitempty"`       // Phase 9.6: flat buzzword pool for list_buzzwords
+	RejectedSuggestions []string     `json:"rejected_suggestions,omitempty"` // Phase 9.6: host-rejected phrases this round
 }
 
 // Suggestion represents a pending buzzword suggestion from a player

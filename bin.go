@@ -228,6 +228,8 @@ func runClient(serverAddr string, code string) {
 				inputChan <- "leaderboard"
 			case lc == "stats":
 				inputChan <- "stats"
+			case lc == "list_buzzwords":
+				inputChan <- "list_buzzwords"
 			case strings.HasPrefix(lc, "add_new_phrase "):
 				phrase := strings.TrimSpace(input[len("add_new_phrase "):])
 				inputChan <- "suggest:" + phrase
@@ -318,6 +320,9 @@ func runClient(serverAddr string, code string) {
 				player.DisplayWelcome(player.WelcomeMsg)
 				player.DisplaySuggestions(activeSuggestions)
 				player.DisplayActiveBets(activeBets)
+				printPrompt(promptMsg)
+			case "buzzword_list":
+				player.DisplayBuzzwordList(msg)
 				printPrompt(promptMsg)
 			case "game_ended":
 				gameEnded = true
@@ -414,6 +419,12 @@ func runClient(serverAddr string, code string) {
 				}
 				continue
 
+			case "list_buzzwords":
+				if err := player.SendMessage(client.ClientMessage{Action: "list_buzzwords"}); err != nil {
+					fmt.Printf("❌ Error: %v\n", err)
+				}
+				continue
+
 			case "restart":
 				if err := player.AnnounceRestart(); err != nil {
 					fmt.Printf("❌ Error: %v\n", err)
@@ -501,9 +512,10 @@ func printClientHelp() {
 	fmt.Println("\n📝 Commands:")
 	fmt.Println("  1-9                         - Mark a cell by number")
 	fmt.Println("  restart                     - Restart game (host only)")
-	fmt.Println("  add_new_phrase <phrase>     - Suggest a buzzword (Phase 9)")
+	fmt.Println("  add_new_phrase <phrase>     - Suggest a buzzword")
 	fmt.Println("  approve <phrase>            - Approve suggestion (host only)")
 	fmt.Println("  reject <phrase>             - Reject suggestion (host only)")
+	fmt.Println("  list_buzzwords              - Show current buzzword pool + rejected")
 	fmt.Println("  bet: <player> wins|loses    - Place a bet (AND to chain)")
 	fmt.Println("  leaderboard                 - Show top players")
 	fmt.Println("  stats                       - Show your stats")

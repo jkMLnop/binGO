@@ -2,21 +2,23 @@ package client
 
 // ServerMessage matches server/types.go
 type ServerMessage struct {
-	Type        string       `json:"type"`
-	GameID      string       `json:"game_id"`
-	Code        string       `json:"code,omitempty"`
-	HostID      string       `json:"host_id,omitempty"`
-	PlayerID    string       `json:"player_id"`
-	Username    string       `json:"username,omitempty"`
-	Token       string       `json:"token,omitempty"`
-	Buzzwords   [][]string   `json:"buzzwords"`
-	Rows        int          `json:"rows"`
-	Cols        int          `json:"cols"`
-	Players     []string     `json:"players"`
-	Winner      string       `json:"winner"`
-	Message     string       `json:"message"`
-	Suggestions []Suggestion `json:"suggestions,omitempty"` // Phase 9: pending buzzword suggestions
-	ActiveBets  []Bet        `json:"active_bets,omitempty"` // Phase 9.5: active player bets
+	Type                string       `json:"type"`
+	GameID              string       `json:"game_id"`
+	Code                string       `json:"code,omitempty"`
+	HostID              string       `json:"host_id,omitempty"`
+	PlayerID            string       `json:"player_id"`
+	Username            string       `json:"username,omitempty"`
+	Token               string       `json:"token,omitempty"`
+	Buzzwords           [][]string   `json:"buzzwords"`
+	Rows                int          `json:"rows"`
+	Cols                int          `json:"cols"`
+	Players             []string     `json:"players"`
+	Winner              string       `json:"winner"`
+	Message             string       `json:"message"`
+	Suggestions         []Suggestion `json:"suggestions,omitempty"`          // Phase 9: pending buzzword suggestions
+	ActiveBets          []Bet        `json:"active_bets,omitempty"`          // Phase 9.5: active player bets
+	FlatBuzzwords       []string     `json:"flat_buzzwords,omitempty"`       // Phase 9.6: flat buzzword pool
+	RejectedSuggestions []string     `json:"rejected_suggestions,omitempty"` // Phase 9.6: host-rejected phrases
 }
 
 // ClientMessage matches server/types.go

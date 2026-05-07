@@ -133,3 +133,38 @@ func (p *Player) DisplayBetResults(bets []Bet) {
 	}
 	fmt.Printf("└%s┘\n", border)
 }
+
+// DisplayBuzzwordList prints the full buzzword pool and rejected suggestions (Phase 9.6).
+func (p *Player) DisplayBuzzwordList(msg ServerMessage) {
+	const innerWidth = 54
+	border := strings.Repeat("─", innerWidth)
+
+	fmt.Printf("\n┌%s┐\n", border)
+	fmt.Printf("│ 📋 Buzzword Pool (%d words)%-*s│\n", len(msg.FlatBuzzwords), innerWidth-27, "")
+	fmt.Printf("├%s┤\n", border)
+	if len(msg.FlatBuzzwords) == 0 {
+		fmt.Printf("│ %-*s│\n", innerWidth-1, "(none)")
+	} else {
+		for i, w := range msg.FlatBuzzwords {
+			line := fmt.Sprintf("%3d. %s", i+1, w)
+			if len(line) > innerWidth-2 {
+				line = line[:innerWidth-5] + "..."
+			}
+			fmt.Printf("│ %-*s│\n", innerWidth-2, line)
+		}
+	}
+
+	if len(msg.RejectedSuggestions) > 0 {
+		fmt.Printf("├%s┤\n", border)
+		fmt.Printf("│ ❌ Rejected This Round%-*s│\n", innerWidth-23, "")
+		fmt.Printf("├%s┤\n", border)
+		for _, r := range msg.RejectedSuggestions {
+			line := fmt.Sprintf("  %s", r)
+			if len(line) > innerWidth-2 {
+				line = line[:innerWidth-5] + "..."
+			}
+			fmt.Printf("│ %-*s│\n", innerWidth-2, line)
+		}
+	}
+	fmt.Printf("└%s┘\n", border)
+}

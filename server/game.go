@@ -50,21 +50,22 @@ func (p *Player) sendMessage(msg interface{}) error {
 
 // Game represents a bingo game session
 type Game struct {
-	ID            string
-	Code          string             // Join code for this game
-	HostID        string             // ID of the host player (immutable once set on first player connect)
-	Players       map[string]*Player // playerID -> Player
-	IsActive      bool               // Game is in progress
-	Orphaned      bool               // True when all players disconnected without a winner
-	Winner        string             // Player ID of winner (empty if no winner yet)
-	CreatedAt     time.Time          // When this game session started
-	EndedAt       time.Time          // When this game session ended (zero if still active)
-	Buzzwords     [][]string         // Buzzword pool for this game (may differ from server defaults)
-	Suggestions   []Suggestion       // Phase 9: pending buzzword suggestions (in-memory only)
-	SuggestionsMu sync.Mutex         // Protect Suggestions slice
-	Bets          []Bet              // Phase 9.5: active player bets (in-memory only)
-	BetsMu        sync.Mutex         // Protect Bets slice
-	PlayersMu     sync.RWMutex       // Protect Players map
+	ID                  string
+	Code                string             // Join code for this game
+	HostID              string             // ID of the host player (immutable once set on first player connect)
+	Players             map[string]*Player // playerID -> Player
+	IsActive            bool               // Game is in progress
+	Orphaned            bool               // True when all players disconnected without a winner
+	Winner              string             // Player ID of winner (empty if no winner yet)
+	CreatedAt           time.Time          // When this game session started
+	EndedAt             time.Time          // When this game session ended (zero if still active)
+	Buzzwords           [][]string         // Buzzword pool for this game (may differ from server defaults)
+	Suggestions         []Suggestion       // Phase 9: pending buzzword suggestions (in-memory only)
+	SuggestionsMu       sync.Mutex         // Protect Suggestions slice
+	RejectedSuggestions []string           // Phase 9.6: phrases rejected by host this round (in-memory)
+	Bets                []Bet              // Phase 9.5: active player bets (in-memory only)
+	BetsMu              sync.Mutex         // Protect Bets slice
+	PlayersMu           sync.RWMutex       // Protect Players map
 }
 
 // NewGame creates a new game session
@@ -146,6 +147,7 @@ func (g *Game) ResetBoard(buzzwords [][]string, rows, cols int) {
 	// Clear ephemeral in-game state for the new round
 	g.SuggestionsMu.Lock()
 	g.Suggestions = nil
+	g.RejectedSuggestions = nil
 	g.SuggestionsMu.Unlock()
 
 	g.BetsMu.Lock()

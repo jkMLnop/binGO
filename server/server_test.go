@@ -783,6 +783,102 @@ func TestHandleHostRejectEnforcement(t *testing.T) {
 	game.SuggestionsMu.Unlock()
 }
 
+func TestHandleHostRejectTracksRejected(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g-rej1", testBuzzwords(), 3, 3)
+	host := newPlayer("host")
+	player := newPlayer("player")
+	game.HostID = host.ID
+	game.AddPlayer(host)
+	game.AddPlayer(player)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	if err := srv.handlePlayerSuggest(game, player, "synergy"); err != nil {
+		t.Fatalf("suggest failed: %v", err)
+	}
+	if err := srv.handleHostReject(game, host, "synergy"); err != nil {
+		t.Fatalf("reject failed: %v", err)
+	}
+
+	game.SuggestionsMu.Lock()
+	defer game.SuggestionsMu.Unlock()
+	if len(game.RejectedSuggestions) != 1 {
+		t.Fatalf("expected 1 rejected suggestion, got %d", len(game.RejectedSuggestions))
+	}
+	if game.RejectedSuggestions[0] != "synergy" {
+		t.Errorf("unexpected rejected phrase: %q", game.RejectedSuggestions[0])
+	}
+}
+
+func TestHandleListBuzzwordsResponse(t *testing.T) {
+	ResetMetrics()
+	srv := NewServer(testBuzzwords(), 3, 3, "test-admin-key")
+	game := NewGame("g-lb1", testBuzzwords(), 3, 3)
+	host := newPlayer("host")
+	player := newPlayer("player")
+	game.HostID = host.ID
+	game.AddPlayer(host)
+	game.AddPlayer(player)
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.GamesMu.Unlock()
+
+	// Reject one phrase so it appears in the rejected list
+	if err := srv.handlePlayerSuggest(game, player, "circle back"); err != nil {
+		t.Fatalf("suggest failed: %v", err)
+	}
+	if err := srv.handleHostReject(game, host, "circle back"); err != nil {
+		t.Fatalf("reject failed: %v", err)
+	}
+
+	srv.handleListBuzzwords(game, player)
+
+	// Drain any queued broadcast messages (from suggest/reject) to find buzzword_list
+	var found *ServerMessage
+	for i := 0; i < 10; i++ {
+		select {
+		case raw := <-player.messages.send:
+			msg, ok := raw.(ServerMessage)
+			if !ok {
+				continue
+			}
+			if msg.Type == "buzzword_list" {
+				m := msg
+				found = &m
+			}
+		default:
+			i = 10 // break outer loop
+		}
+	}
+	if found == nil {
+		t.Fatal("no buzzword_list message received by player")
+	}
+	if len(found.FlatBuzzwords) == 0 {
+		t.Error("expected non-empty FlatBuzzwords")
+	}
+	if len(found.RejectedSuggestions) != 1 || found.RejectedSuggestions[0] != "circle back" {
+		t.Errorf("unexpected RejectedSuggestions: %v", found.RejectedSuggestions)
+	}
+}
+
+func TestResetBoardClearsRejectedSuggestions(t *testing.T) {
+	game := NewGame("g-res1", testBuzzwords(), 3, 3)
+	game.SuggestionsMu.Lock()
+	game.RejectedSuggestions = []string{"move the needle", "deep dive"}
+	game.SuggestionsMu.Unlock()
+
+	game.ResetBoard(testBuzzwords(), 3, 3)
+
+	game.SuggestionsMu.Lock()
+	defer game.SuggestionsMu.Unlock()
+	if len(game.RejectedSuggestions) != 0 {
+		t.Errorf("expected RejectedSuggestions to be cleared on reset, got %v", game.RejectedSuggestions)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Phase 9.5: Betting Tests
 // ---------------------------------------------------------------------------

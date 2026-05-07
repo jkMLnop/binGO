@@ -601,6 +601,8 @@ func (s *Server) processPlayerMessage(ctx context.Context, game *Game, player *P
 			log.Printf("Error handling bet: %v", err)
 			sendErr(err)
 		}
+	case "list_buzzwords":
+		s.handleListBuzzwords(game, player)
 	}
 }
 
@@ -794,6 +796,12 @@ func (s *Server) handleHostApprove(ctx context.Context, game *Game, player *Play
 		}
 	}
 
+	// Also append to the in-memory game buzzword pool so it shows up immediately
+	// in list_buzzwords and is available on the next restart of this game.
+	game.SuggestionsMu.Lock()
+	game.Buzzwords = append(game.Buzzwords, []string{phrase})
+	game.SuggestionsMu.Unlock()
+
 	s.broadcastSuggestionsUpdate(game, snapshot)
 	approvedMsg := ServerMessage{
 		Type:    "suggestion_broadcast",
@@ -826,11 +834,12 @@ func (s *Server) handleHostReject(game *Game, player *Player, phrase string) err
 		return fmt.Errorf("no pending suggestion matches %q", phrase)
 	}
 	game.Suggestions = remaining
-	snapshot := make([]Suggestion, len(remaining))
-	copy(snapshot, remaining)
+	snapshotSugs := make([]Suggestion, len(remaining))
+	copy(snapshotSugs, remaining)
+	game.RejectedSuggestions = append(game.RejectedSuggestions, phrase)
 	game.SuggestionsMu.Unlock()
 
-	s.broadcastSuggestionsUpdate(game, snapshot)
+	s.broadcastSuggestionsUpdate(game, snapshotSugs)
 	rejectedMsg := ServerMessage{
 		Type:    "suggestion_broadcast",
 		GameID:  game.ID,
@@ -848,6 +857,29 @@ func (s *Server) broadcastSuggestionsUpdate(game *Game, suggestions []Suggestion
 		Suggestions: suggestions,
 	}
 	_ = s.broadcastToGame(game.ID, msg)
+}
+
+// handleListBuzzwords responds to the requesting player with the full buzzword pool
+// and the list of phrases rejected by the host this round (Phase 9.6).
+func (s *Server) handleListBuzzwords(game *Game, player *Player) {
+	// Flatten [][]string pool into a single []string for readability
+	flat := make([]string, 0)
+	for _, group := range game.Buzzwords {
+		flat = append(flat, group...)
+	}
+
+	game.SuggestionsMu.Lock()
+	rejected := make([]string, len(game.RejectedSuggestions))
+	copy(rejected, game.RejectedSuggestions)
+	game.SuggestionsMu.Unlock()
+
+	msg := ServerMessage{
+		Type:                "buzzword_list",
+		GameID:              game.ID,
+		FlatBuzzwords:       flat,
+		RejectedSuggestions: rejected,
+	}
+	_ = player.sendMessage(msg)
 }
 
 // handlePlayerBet parses and registers a bet for the round (Phase 9.5)
