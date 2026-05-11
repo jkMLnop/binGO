@@ -160,7 +160,11 @@ func runClient(serverAddr string, code string) {
 
 	// Announce game code after host creates a game
 	if player.IsHostMode && welcomeMsg.Code != "" {
-		fmt.Printf("\n✓ Game created! Code: %s\n   Share this code with players to join.\n", welcomeMsg.Code)
+		shareURL := buildShareURL(serverAddr, welcomeMsg.Code)
+		cliHost := normalizeServerHost(serverAddr)
+		fmt.Printf("\nGame created! Code: %s\n", welcomeMsg.Code)
+		fmt.Printf("Share this link: %s\n", shareURL)
+		fmt.Printf("Or use code with CLI: ./binGO-CLI -mode client -server %s -code %s\n", cliHost, welcomeMsg.Code)
 	}
 
 	// Initialize game session from welcome message
@@ -506,6 +510,31 @@ func runClient(serverAddr string, code string) {
 			}
 		}
 	}
+}
+
+func normalizeServerHost(serverAddr string) string {
+	host := strings.TrimSpace(serverAddr)
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "ws://")
+	host = strings.TrimPrefix(host, "wss://")
+	host = strings.TrimSuffix(host, "/")
+	host = strings.TrimSuffix(host, "/ws")
+	return host
+}
+
+func buildShareURL(serverAddr string, code string) string {
+	host := normalizeServerHost(serverAddr)
+	if host == "" {
+		host = "bingoserver.live"
+	}
+
+	scheme := "https"
+	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.Contains(host, ":") {
+		scheme = "http"
+	}
+
+	return fmt.Sprintf("%s://%s/game/%s", scheme, host, code)
 }
 
 func printClientHelp() {

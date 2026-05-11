@@ -50,7 +50,7 @@ func (p *Player) DisplaySuggestions(suggestions []Suggestion) {
 	fmt.Printf("│ 📝 Pending Buzzword Suggestions%-16s│\n", "")
 	fmt.Printf("├%s┤\n", border)
 	for _, s := range suggestions {
-		line := fmt.Sprintf("  %-20s  suggested: \"%s\"", s.PlayerID, s.Phrase)
+		line := fmt.Sprintf("  %-19s suggested: \"%s\"", s.PlayerID, s.Phrase)
 		if len(line) > 48 {
 			line = line[:45] + "..."
 		}

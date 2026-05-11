@@ -149,7 +149,12 @@ func (s *Server) Stop(ctx context.Context) error {
 func (s *Server) createNewGame() {
 	s.GamesMu.Lock()
 	defer s.GamesMu.Unlock()
+	s.createNewGameLocked()
+}
 
+// createNewGameLocked creates a new game while GamesMu is already held.
+// Caller must hold s.GamesMu.Lock().
+func (s *Server) createNewGameLocked() {
 	gameID := fmt.Sprintf("game-%d", len(s.Games)+1)
 	newGame := NewGame(gameID, s.Buzzwords, s.Rows, s.Cols)
 	s.Games[gameID] = newGame
@@ -170,6 +175,22 @@ func (s *Server) createNewGame() {
 		log.Printf("Warning: failed to save game to DB: %v", err)
 		s.Metrics.RecordError("db")
 	}
+}
+
+// ensureActiveGameAvailable makes sure there is always at least one joinable game code.
+// If all games are inactive (e.g., only orphaned/admin-deleted remain), it auto-creates one.
+func (s *Server) ensureActiveGameAvailable() {
+	s.GamesMu.Lock()
+	defer s.GamesMu.Unlock()
+
+	for _, g := range s.Games {
+		if g != nil && g.IsActive {
+			return
+		}
+	}
+
+	s.createNewGameLocked()
+	log.Printf("♻️ Auto-created replacement game because no active games remained")
 }
 
 // createGameForHost creates a new on-demand game for a host player (Phase 9).
@@ -519,6 +540,7 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 		Rows:      s.Rows,
 		Cols:      s.Cols,
 		Players:   game.GetPlayerList(),
+		Winner:    game.Winner,
 		Message:   fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
 	}
 
@@ -1029,6 +1051,7 @@ func (s *Server) markGameOrphaned(ctx context.Context, game *Game) {
 	game.EndedAt = time.Now()
 	log.Printf("🕳️  Game %s (code: %s) orphaned — all players disconnected without a winner", game.ID, game.Code)
 	s.archiveGame(ctx, game)
+	s.ensureActiveGameAvailable()
 }
 
 // NotifyShutdown broadcasts a server_shutdown message to every connected player and

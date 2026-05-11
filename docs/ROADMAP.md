@@ -111,20 +111,20 @@ Before scaling to K8s, establish a persistent observability layer:
 **Goal:** Browser-based bingo client with URL-based game sharing (like Zoom meeting links)
 
 **Tasks:**
-- [ ] Web client (React + TypeScript)
-  - Game board UI (3x3 grid with click-to-mark)
-  - WebSocket integration (same protocol as CLI)
-  - Player list + join form
-  - Leaderboard display
+- [x] Web client (React + TypeScript)
+  - [x] Game board UI (3x3 grid with click-to-mark)
+  - [x] WebSocket integration (same protocol as CLI)
+  - [x] Player list + join form
+  - [x] Leaderboard display
 
-- [ ] Shareable links feature
-  - URL routing: `bingoserver.live/game/ABC123`
-  - Server `GET /api/game/:code` endpoint (added in Phase 7.5) validates code
-  - Web client pre-populates game code from URL
-  - Share button copies link to clipboard
-  - Works seamlessly from Phase 7.5 server endpoint
+- [x] Shareable links feature
+  - [x] URL routing: `bingoserver.live/game/ABC123`
+  - [x] Server `GET /api/game/:code` endpoint (added in Phase 7.5) validates code
+  - [x] Web client pre-populates game code from URL
+  - [x] Share button copies link to clipboard
+  - [x] Works seamlessly from Phase 7.5 server endpoint
 
-- [ ] CLI integration
+- [x] CLI integration
   - When host creates game, display shareable link:
     ```
     Game created! Code: ABC123
@@ -133,6 +133,6 @@ Before scaling to K8s, establish a persistent observability layer:
     ```
 
 - [ ] Mobile optimization
-  - Responsive design (works on phone/tablet)
-  - Touch-friendly board
-  - PWA features (offline fallback)
+  - [x] Responsive design (works on phone/tablet)
+  - [x] Touch-friendly board
+  - [ ] PWA features (offline fallback)

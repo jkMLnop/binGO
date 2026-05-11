@@ -698,6 +698,86 @@ func TestOrphanedGameNotJoinable(t *testing.T) {
 	t.Logf("✓ orphaned game correctly rejected new join with: %v", err)
 }
 
+// TestOrphanedGameAutoCreatesReplacement verifies that when the last active game
+// becomes orphaned, the server auto-creates a fresh active game code.
+func TestOrphanedGameAutoCreatesReplacement(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game := NewGame("game-orphan-replace", buzzwords, 3, 3)
+	player := newPlayer("solo")
+	game.AddPlayer(player)
+	game.HostID = player.ID
+
+	srv.GamesMu.Lock()
+	srv.Games[game.ID] = game
+	srv.CodeToGame[game.Code] = game
+	srv.GamesMu.Unlock()
+
+	beforeGames := len(srv.Games)
+
+	game.RemovePlayer(player.ID)
+	srv.markGameOrphaned(context.Background(), game)
+
+	if len(srv.Games) != beforeGames+1 {
+		t.Fatalf("expected one replacement game to be created, before=%d after=%d", beforeGames, len(srv.Games))
+	}
+
+	activeCount := 0
+	for _, g := range srv.Games {
+		if g != nil && g.IsActive {
+			activeCount++
+		}
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected exactly 1 active game after orphan replacement, got %d", activeCount)
+	}
+
+	if game.IsActive {
+		t.Fatal("original orphaned game should remain inactive")
+	}
+}
+
+// TestOrphanedGameNoReplacementWhenAnotherActiveExists verifies that a replacement
+// is not created if another active game already exists.
+func TestOrphanedGameNoReplacementWhenAnotherActiveExists(t *testing.T) {
+	buzzwords := testBuzzwords()
+	srv := NewServer(buzzwords, 3, 3, "8080")
+
+	game1 := NewGame("game-orphan-a", buzzwords, 3, 3)
+	p1 := newPlayer("p1")
+	game1.AddPlayer(p1)
+	game1.HostID = p1.ID
+
+	game2 := NewGame("game-stays-active", buzzwords, 3, 3)
+
+	srv.GamesMu.Lock()
+	srv.Games[game1.ID] = game1
+	srv.CodeToGame[game1.Code] = game1
+	srv.Games[game2.ID] = game2
+	srv.CodeToGame[game2.Code] = game2
+	srv.GamesMu.Unlock()
+
+	beforeGames := len(srv.Games)
+
+	game1.RemovePlayer(p1.ID)
+	srv.markGameOrphaned(context.Background(), game1)
+
+	if len(srv.Games) != beforeGames {
+		t.Fatalf("expected no replacement game when another active game exists, before=%d after=%d", beforeGames, len(srv.Games))
+	}
+
+	activeCount := 0
+	for _, g := range srv.Games {
+		if g != nil && g.IsActive {
+			activeCount++
+		}
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected exactly 1 active game to remain, got %d", activeCount)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Phase 9: Buzzword Suggestion Tests
 // ---------------------------------------------------------------------------

@@ -23,3 +23,7 @@ coverage.out
 /dagger/dagger
 
 bingo_demo.mp4
+
+# Web client artifacts
+/web-client/node_modules/
+/web-client/dist/

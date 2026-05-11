@@ -22,6 +22,7 @@ type GameInfo struct {
 	Code        string `json:"code"`
 	HostID      string `json:"host_id"`
 	Status      string `json:"status"`
+	Winner      string `json:"winner,omitempty"`
 	PlayerCount int    `json:"player_count"`
 	CreatedAt   int64  `json:"created_at"`
 }
@@ -66,6 +67,7 @@ func (s *Server) handleGetGameByCode(w http.ResponseWriter, r *http.Request) {
 			Code:        game.Code,
 			HostID:      game.HostID,
 			Status:      getGameStatus(game),
+			Winner:      game.Winner,
 			PlayerCount: game.PlayerCount(),
 			CreatedAt:   game.CreatedAt.Unix(),
 		}
