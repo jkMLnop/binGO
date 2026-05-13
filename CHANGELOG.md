@@ -4,6 +4,25 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+## [v9.2.0] - 2026-05-13
+
+### Phase 7.6 Complete: PWA, Web Client Tests & Container Regression
+
+**Summary:** Phase 7.6 is fully complete. The web client now has a PWA manifest (installability), an offline banner, extracted board logic with unit tests, API layer unit tests, and a container regression test that guards the embed.
+
+**What changed:**
+- ✅ `web-client/public/manifest.json` — PWA manifest: name `binGO`, `display: standalone`, theme `#152538`, background `#fffdf7`
+- ✅ `web-client/public/icon.svg` — SVG app icon (also used as favicon); served from embedded dist
+- ✅ `web-client/index.html` — `<link rel="manifest">`, `theme-color` meta, favicon link
+- ✅ Offline banner (`OfflineBanner` component in `App.tsx`) — fixed red bar shown via `navigator.onLine` + `window online/offline` events; disappears on reconnect. No service worker (limited value for a live multiplayer game)
+- ✅ `web-client/src/lib/board.ts` — `BoardCell`, `BoardState`, `toCellId`, `hasBingo` extracted from `App.tsx` for testability
+- ✅ `web-client/src/lib/board.test.ts` — 24 unit tests: `toCellId` mapping, all win conditions (row/col/both diagonals), no-win cases, 1×1 edge case, extra marks ignored
+- ✅ `web-client/src/lib/api.test.ts` — 13 unit tests: `fetchGameByCode`, `fetchLeaderboard`, `createGame` — success paths, error payloads, missing `data`, non-JSON response, URL encoding, HTTP method/headers
+- ✅ `vitest@1` + `@vitest/coverage-v8@1` added to `devDependencies`; `"test": "vitest run"` and `"test:watch": "vitest"` scripts added to `package.json`
+- ✅ `tests/container_regression_test.go` — `TestRegressionWebClientEmbedded`: verifies `GET /`, `GET /manifest.json` (parses JSON, checks `name="binGO"`), `GET /icon.svg` all return 200 from the built Docker image
+
+**Files changed:** `web-client/public/manifest.json` (new), `web-client/public/icon.svg` (new), `web-client/index.html`, `web-client/src/App.tsx`, `web-client/src/styles.css`, `web-client/src/lib/board.ts` (new), `web-client/src/lib/board.test.ts` (new), `web-client/src/lib/api.test.ts` (new), `web-client/package.json`, `tests/container_regression_test.go`
+
 ## [v9.1.0] - 2026-05-13
 
 ### Phase 7.6: Custom Domain, Web Client Deployment & OTel Fix

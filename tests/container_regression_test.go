@@ -18,6 +18,7 @@
 //   13.4 zero-player shutdown           → TestRegressionZeroPlayerShutdown
 //   14.1 WS connection-flood (429)      → TestRegressionWSConnLimit
 //   14.2 code-guess brute-force         → TestRegressionCodeGuessRateLimit
+//   15.1–15.3 web client embed          → TestRegressionWebClientEmbedded
 
 package tests
 
@@ -804,5 +805,66 @@ func TestRegressionCodeGuessRateLimit(t *testing.T) {
 			containerLogs(t, ctx, c))
 	} else {
 		t.Log("✓ 14.2c: rate_limit_exceeded WARN event found in container logs")
+	}
+}
+
+// ─── 15.1: Web client static assets are embedded and served ──────────────────
+//
+// Regression guard for: Dockerfile npm build step removed / web-client/dist
+// not embedded in binary → static files return 404.
+//
+// Coverage map (REGRESSION_TESTS.md):
+//   15.1 GET /           → 200, text/html
+//   15.2 GET /manifest.json → 200, valid JSON with name="binGO"
+//   15.3 GET /icon.svg   → 200, image/svg+xml
+
+func TestRegressionWebClientEmbedded(t *testing.T) {
+	ctx := context.Background()
+	c, baseURL := startBingoServer(t, ctx, nil, "")
+
+	_ = c // container managed by t.Cleanup via startBingoServer
+
+	// 15.1: root serves the React SPA index.html
+	resp, err := http.Get(baseURL + "/")
+	if err != nil {
+		t.Fatalf("15.1 FAIL: GET /: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("15.1 FAIL: GET / returned %d, want 200", resp.StatusCode)
+	} else {
+		t.Log("✓ 15.1: GET / → 200")
+	}
+
+	// 15.2: manifest.json is present and has name = "binGO"
+	resp2, err := http.Get(baseURL + "/manifest.json")
+	if err != nil {
+		t.Fatalf("15.2 FAIL: GET /manifest.json: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("15.2 FAIL: GET /manifest.json returned %d, want 200", resp2.StatusCode)
+	} else {
+		body, _ := io.ReadAll(resp2.Body)
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err != nil {
+			t.Errorf("15.2 FAIL: manifest.json is not valid JSON: %v", err)
+		} else if m["name"] != "binGO" {
+			t.Errorf("15.2 FAIL: manifest name = %q, want \"binGO\"", m["name"])
+		} else {
+			t.Log("✓ 15.2: manifest.json present with name=binGO")
+		}
+	}
+
+	// 15.3: icon.svg is present
+	resp3, err := http.Get(baseURL + "/icon.svg")
+	if err != nil {
+		t.Fatalf("15.3 FAIL: GET /icon.svg: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Errorf("15.3 FAIL: GET /icon.svg returned %d, want 200", resp3.StatusCode)
+	} else {
+		t.Log("✓ 15.3: icon.svg → 200")
 	}
 }

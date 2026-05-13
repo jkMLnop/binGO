@@ -4,30 +4,6 @@ The evolution of binGO-CLI organized by development phases.
 
 ## TODO
 
-#### Phase 7.6: Custom Domain Setup
-**Goal:** Point yubetcha.com to Fly.io for production shareable links
-
-> **Sequence note:** Do this first — infrastructure only, no code changes. Unblocks proper share URLs (`https://yubetcha.com/room/:code`, `/game/:code`, `/bet/:code`) for all Phase 12 features.
-
-**Tasks:**
-- [x] Register yubetcha.com domain (Namecheap)
-- [x] Add Fly.io DNS records (A + AAAA) and verify SSL certificate via Let's Encrypt
-- [x] Update README with production URL (yubetcha.com)
-- [x] Embed web client in Go binary (`//go:embed web-client/dist`) — served at `/`
-  - SPA fallback: unknown paths serve `index.html` so React Router works
-  - Dockerfile updated to run `npm run build` before `go build`
-  - Local build: run `cd web-client && npm run build` before `go build`
-- [x] Fix OTel traces export spam — tracing now opt-in via `OTEL_EXPORTER_OTLP_ENDPOINT`
-  - If env var is unset, tracer is skipped entirely (no more connection refused logs)
-  - Set the env var in Fly.io secrets to re-enable for Grafana Cloud
-
-- [ ] PWA offline fallback (web client)
-  - Add `manifest.json` and service worker via Vite PWA plugin (`vite-plugin-pwa`)
-  - Cache static assets and last-visited game/room pages for offline display
-  - Show a "You're offline" banner when WebSocket connection is lost rather than a blank screen
-
-
-
 #### Phase 9.6: In-Game Chat
 **Goal:** Let players send free-form text messages to everyone in the game during play
 

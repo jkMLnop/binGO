@@ -1,64 +1,9 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { createGame, fetchGameByCode, fetchLeaderboard } from "./lib/api";
+import { hasBingo, toCellId } from "./lib/board";
+import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
-
-type BoardCell = {
-  id: string;
-  text: string;
-  marked: boolean;
-};
-
-type BoardState = {
-  rows: number;
-  cols: number;
-  cells: BoardCell[];
-};
-
-function toCellId(row: number, col: number): string {
-  return `${String.fromCharCode(65 + row)}${col + 1}`;
-}
-
-function hasBingo(board: BoardState): boolean {
-  const marked = new Set(board.cells.filter((cell) => cell.marked).map((cell) => cell.id));
-
-  for (let r = 0; r < board.rows; r += 1) {
-    let rowWin = true;
-    for (let c = 0; c < board.cols; c += 1) {
-      if (!marked.has(toCellId(r, c))) {
-        rowWin = false;
-      }
-    }
-    if (rowWin) {
-      return true;
-    }
-  }
-
-  for (let c = 0; c < board.cols; c += 1) {
-    let colWin = true;
-    for (let r = 0; r < board.rows; r += 1) {
-      if (!marked.has(toCellId(r, c))) {
-        colWin = false;
-      }
-    }
-    if (colWin) {
-      return true;
-    }
-  }
-
-  let diagMain = true;
-  let diagReverse = true;
-  for (let i = 0; i < board.rows; i += 1) {
-    if (!marked.has(toCellId(i, i))) {
-      diagMain = false;
-    }
-    if (!marked.has(toCellId(i, board.cols - 1 - i))) {
-      diagReverse = false;
-    }
-  }
-
-  return diagMain || diagReverse;
-}
 
 type HelpEntry = { cmd: string; desc: string; hostOnly?: boolean };
 
@@ -849,12 +794,37 @@ function GamePage() {
   );
 }
 
+function OfflineBanner() {
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  if (isOnline) return null;
+  return (
+    <div className="offline-banner" role="alert">
+      You're offline — reconnect to keep playing
+    </div>
+  );
+}
+
 export default function App() {
-    return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/game/:code" element={<GamePage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+  return (
+    <>
+      <OfflineBanner />
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/game/:code" element={<GamePage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
