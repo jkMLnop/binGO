@@ -5,27 +5,21 @@ The evolution of binGO-CLI organized by development phases.
 ## TODO
 
 #### Phase 7.6: Custom Domain Setup
-**Goal:** Point bingoserver.live to Fly.io for production shareable links
+**Goal:** Point yubetcha.com to Fly.io for production shareable links
 
-> **Sequence note:** Do this first — infrastructure only, no code changes. Unblocks proper share URLs (`https://bingoserver.live/room/:code`, `/game/:code`, `/bet/:code`) for all Phase 12 features.
+> **Sequence note:** Do this first — infrastructure only, no code changes. Unblocks proper share URLs (`https://yubetcha.com/room/:code`, `/game/:code`, `/bet/:code`) for all Phase 12 features.
 
 **Tasks:**
-- [ ] Register or configure bingoserver.live domain
-  - Register domain (Namecheap, GoDaddy, etc.) if not already owned
-  - Or verify you have admin access to existing domain
-
-- [ ] Add Fly.io DNS records
-  - Point domain's nameservers to Fly.io or add CNAME record
-  - Fly.io DNS instructions: `flyctl certs create bingoserver.live`
-  - This auto-provisions SSL/TLS certificate
-
-- [ ] Verify SSL certificate
-  - `flyctl certs list` to see certificate status
-  - Visit https://bingoserver.live to confirm working
-
-- [ ] Update README with production URL
-  - Change references from bingo-server.fly.dev to bingoserver.live
-  - Update shareable link examples
+- [x] Register yubetcha.com domain (Namecheap)
+- [x] Add Fly.io DNS records (A + AAAA) and verify SSL certificate via Let's Encrypt
+- [x] Update README with production URL (yubetcha.com)
+- [x] Embed web client in Go binary (`//go:embed web-client/dist`) — served at `/`
+  - SPA fallback: unknown paths serve `index.html` so React Router works
+  - Dockerfile updated to run `npm run build` before `go build`
+  - Local build: run `cd web-client && npm run build` before `go build`
+- [x] Fix OTel traces export spam — tracing now opt-in via `OTEL_EXPORTER_OTLP_ENDPOINT`
+  - If env var is unset, tracer is skipped entirely (no more connection refused logs)
+  - Set the env var in Fly.io secrets to re-enable for Grafana Cloud
 
 - [ ] PWA offline fallback (web client)
   - Add `manifest.json` and service worker via Vite PWA plugin (`vite-plugin-pwa`)
@@ -166,7 +160,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 - [ ] **Rate limiting** (`server/ratelimit.go`): 3 `place_bet` / 60 s per player. 10 `join_bet` / 60 s per player.
 - [ ] **Metrics** (`server/metrics.go`): `bingo_bets_placed_total` Counter. `bingo_bet_positions_total` CounterVec (label: `side`). `bingo_bets_resolved_total` CounterVec (label: `outcome`).
 - [ ] **Logging** (`server/logger.go`): `BetPlaced`, `BetPositionJoined`, `BetResolved`.
-- [ ] **Web client** (`web-client/src/`): Add `/room/:code` route. Left panel: game status + "Join Game" button → `/game/BINGO-:code`. Right panel: bet feed with for/against counts, status badge, countdown. "Place a Bet" modal (description, resolves_at, optional locked_at). Join FOR/AGAINST buttons. Share button copies `https://bingoserver.live/bet/:bet_code`. Share button on room copies `https://bingoserver.live/room/:code`.
+- [ ] **Web client** (`web-client/src/`): Add `/room/:code` route. Left panel: game status + "Join Game" button → `/game/BINGO-:code`. Right panel: bet feed with for/against counts, status badge, countdown. "Place a Bet" modal (description, resolves_at, optional locked_at). Join FOR/AGAINST buttons. Share button copies `https://yubetcha.com/bet/:bet_code`. Share button on room copies `https://yubetcha.com/room/:code`.
 - [ ] **Tests**: full bet lifecycle; 403 on non-creator resolve; 409 on duplicate position; rate limit enforcement; DB integration tests.
 
 ---
@@ -224,7 +218,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 ---
 
 #### Phase 13: Public Bet Search Engine + Agentic Auto-Settlement
-**Goal:** Transform bingoserver.live into a Polymarket-style public bet discovery platform where anyone can find, join, and watch bets on real-world media events settle automatically — powered by a local Python agent stack (YouTube/Twitch/Zoom/local audio) running on your machine, posting results back to the Fly.io server.
+**Goal:** Transform yubetcha.com into a Polymarket-style public bet discovery platform where anyone can find, join, and watch bets on real-world media events settle automatically — powered by a local Python agent stack (YouTube/Twitch/Zoom/local audio) running on your machine, posting results back to the Fly.io server.
 
 **Design boundary — two completely separate bet worlds:**
 
@@ -264,7 +258,7 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 - [ ] **Server auth** (`server/auth.go`): Add `AGENT_API_KEY` env var (fallback: `dev-agent-key-local-only`). Add `agentAuthMiddleware` checking `X-Agent-Key` header — used on resolve/create endpoints.
 - [ ] **HTTP** (`server/api.go`): `GET /api/bets/search?q=&source=&status=` (partial match search, returns paginated bet cards). `POST /api/public-bets/` (agent or admin creates a public bet). `GET /api/public-bets/:code` (full detail + positions). `POST /api/public-bets/:code/join` (`{side}` — any authenticated user). `PATCH /api/public-bets/:code/resolve` (agent auth only — `{outcome, evidence}`).
 - [ ] **Metrics** (`server/metrics.go`): `bingo_public_bets_active` Gauge. `bingo_public_bets_created_total` Counter. `bingo_public_bets_resolved_total` CounterVec (label: `source_type`).
-- [ ] **Web client** (`web-client/src/`): Replace placeholder landing page (`/`) with search engine UI. Empty state: large centered search bar + "Trending bets" section (top 10 open bets by position count). As user types: debounced `GET /api/bets/search?q=<partial>` (150ms debounce). Results: bet cards showing description, source type icon, for/against counts, status badge, expiry countdown. Click card → `/bet/:code` public bet detail page (FOR/AGAINST join buttons, source link, settlement evidence when resolved). Share button copies `https://bingoserver.live/bet/:code`.
+- [ ] **Web client** (`web-client/src/`): Replace placeholder landing page (`/`) with search engine UI. Empty state: large centered search bar + "Trending bets" section (top 10 open bets by position count). As user types: debounced `GET /api/bets/search?q=<partial>` (150ms debounce). Results: bet cards showing description, source type icon, for/against counts, status badge, expiry countdown. Click card → `/bet/:code` public bet detail page (FOR/AGAINST join buttons, source link, settlement evidence when resolved). Share button copies `https://yubetcha.com/bet/:code`.
 - [ ] **Tests**: `SearchPublicBets` full-text matching, agent auth (403 without key, 200 with), join deduplication (409), public bet lifecycle integration test.
 
 ---

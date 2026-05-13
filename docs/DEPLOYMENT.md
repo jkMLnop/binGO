@@ -95,11 +95,11 @@ This guide covers deploying the binGO-CLI server with persistent database to clo
    ```
 
 ### Update DNS
-To use a custom domain like `bingoserver.live`:
+To use a custom domain like `yubetcha.com`:
 
 1. **Add domain in Fly.io:**
    ```bash
-   flyctl certs create bingoserver.live
+   flyctl certs create yubetcha.com
    ```
 
 2. **Get CNAME records from:**
@@ -111,7 +111,7 @@ To use a custom domain like `bingoserver.live`:
 
 4. **Verify:**
    ```bash
-   curl https://bingoserver.live/api/status
+   curl https://yubetcha.com/api/status
    ```
 
 ## Database Management

@@ -107,7 +107,7 @@ go run . -mode standalone
 The easiest way to play remotely—just connect to the public production server:
 
 ```bash
-./binGO-CLI -mode client -server bingo-server.fly.dev -code GAME-CODE
+./binGO-CLI -mode client -server yubetcha.com -code GAME-CODE
 ```
 
 Replace `GAME-CODE` with the code from a friend hosting a game, or start your own game by having someone run the server locally and share the code.

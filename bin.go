@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -21,6 +23,27 @@ import (
 	"github.com/jkMLnop/binGO-CLI/shared"
 	"github.com/jkMLnop/binGO-CLI/standalone"
 )
+
+//go:embed all:web-client/dist
+var webClientDist embed.FS
+
+// spaFileServer serves the embedded web client, falling back to index.html for
+// unknown paths so that React Router's client-side routing works correctly.
+func spaFileServer(dist fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(dist))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" {
+			p = "index.html"
+		}
+		if _, err := dist.Open(p); err != nil {
+			// Path is a SPA route, not a file — serve index.html
+			http.ServeFileFS(w, r, dist, "index.html")
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+}
 
 // version is set at build time via -ldflags "-X main.version=<value>"
 var version = "dev"
@@ -85,6 +108,11 @@ func runServer(port string, dbPath string) {
 		log.Printf("Database enabled: %s", dbPath)
 	} else {
 		log.Println("Running without database (use -db flag to enable)")
+	}
+
+	// Serve embedded web client (Phase 7.6)
+	if distFS, fsErr := fs.Sub(webClientDist, "web-client/dist"); fsErr == nil {
+		srv.StaticHandler = spaFileServer(distFS)
 	}
 
 	// Bootstrap OpenTelemetry tracing → Grafana Tempo (or OTEL_EXPORTER_OTLP_ENDPOINT)
@@ -526,7 +554,7 @@ func normalizeServerHost(serverAddr string) string {
 func buildShareURL(serverAddr string, code string) string {
 	host := normalizeServerHost(serverAddr)
 	if host == "" {
-		host = "bingoserver.live"
+		host = "yubetcha.com"
 	}
 
 	scheme := "https"

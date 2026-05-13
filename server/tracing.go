@@ -28,7 +28,9 @@ func InitTracer(srv *Server) (func(context.Context), error) {
 
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "http://localhost:4318"
+		// No endpoint configured — skip tracing to avoid noisy connection errors.
+		// Set OTEL_EXPORTER_OTLP_ENDPOINT to enable (e.g. Grafana Cloud Tempo).
+		return func(context.Context) {}, nil
 	}
 
 	// The SDK's WithEndpoint option takes host:port only (no scheme).

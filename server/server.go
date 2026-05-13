@@ -21,23 +21,24 @@ import (
 
 // Server manages the WebSocket server and game sessions
 type Server struct {
-	Games        map[string]*Game // gameID -> Game (for backward compatibility)
-	CodeToGame   map[string]*Game // Code -> Game (Phase 7.3: code-based access)
-	Buzzwords    [][]string
-	Rows         int
-	Cols         int
-	GamesMu      sync.RWMutex
-	Port         string
-	Server       *http.Server
-	Mux          *http.ServeMux            // Custom mux for this server
-	TokenManager *TokenManager             // JWT token manager
-	Sessions     map[string]*ClientSession // IP -> ClientSession for tracking usernames
-	SessionsMu   sync.RWMutex
-	DB           db.GameStore  // Database store (Phase 7.5)
-	Metrics      *Metrics      // Prometheus metrics (Phase 8)
-	Logger       *Logger       // Structured JSON logger (Phase 8)
-	Tracer       trace.Tracer  // OTel tracer (Phase 8)
-	cleanupStop  chan struct{} // signals startCleanupRoutine to exit
+	Games         map[string]*Game // gameID -> Game (for backward compatibility)
+	CodeToGame    map[string]*Game // Code -> Game (Phase 7.3: code-based access)
+	Buzzwords     [][]string
+	Rows          int
+	Cols          int
+	GamesMu       sync.RWMutex
+	Port          string
+	Server        *http.Server
+	Mux           *http.ServeMux            // Custom mux for this server
+	TokenManager  *TokenManager             // JWT token manager
+	Sessions      map[string]*ClientSession // IP -> ClientSession for tracking usernames
+	SessionsMu    sync.RWMutex
+	DB            db.GameStore  // Database store (Phase 7.5)
+	Metrics       *Metrics      // Prometheus metrics (Phase 8)
+	Logger        *Logger       // Structured JSON logger (Phase 8)
+	Tracer        trace.Tracer  // OTel tracer (Phase 8)
+	cleanupStop   chan struct{} // signals startCleanupRoutine to exit
+	StaticHandler http.Handler  // SPA web client handler (optional, Phase 7.6)
 	// Rate-limiting state (Phase 8.8)
 	ConnCounts     map[string]int           // active WS connections per IP
 	ConnCountsMu   sync.Mutex               // protects ConnCounts
@@ -114,6 +115,11 @@ func (s *Server) registerHandlers() {
 	// If METRICS_AUTH_TOKEN is set, require "Authorization: Bearer <token>".
 	// If unset (local dev / docker-compose), the endpoint is open.
 	s.Mux.Handle("/metrics", metricsAuthMiddleware(promhttp.Handler()))
+
+	// Serve embedded web client at / (Phase 7.6 — set by bin.go when built with embed)
+	if s.StaticHandler != nil {
+		s.Mux.Handle("/", s.StaticHandler)
+	}
 }
 
 // startHTTPServer creates and starts the HTTP server

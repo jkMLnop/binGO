@@ -4,16 +4,22 @@ FROM golang:${GO_VERSION}-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache git gcc musl-dev sqlite-dev
+# Install build dependencies (Node.js for web client + CGO for SQLite)
+RUN apk add --no-cache git gcc musl-dev sqlite-dev nodejs npm
 
-# Copy go mod files
+# Go dependencies (cached layer)
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
+# Web client dependencies (cached layer)
+COPY web-client/package.json web-client/package-lock.json* ./web-client/
+RUN cd web-client && npm install
+
+# Build web client
+COPY web-client/ ./web-client/
+RUN cd web-client && npm run build
+
+# Copy remaining source and build Go binary
 COPY . .
 
 # Build the binary with SQLite support and version injection

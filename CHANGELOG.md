@@ -4,6 +4,21 @@ All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
 
+## [v9.1.0] - 2026-05-13
+
+### Phase 7.6: Custom Domain, Web Client Deployment & OTel Fix
+
+**Summary:** yubetcha.com is now the production domain. The web client is embedded directly in the Go binary and served at `/`. OTel tracing is now opt-in via env var to eliminate noisy connection-refused log spam.
+
+**What changed:**
+- ✅ Domain `yubetcha.com` registered on Namecheap, A + AAAA DNS records pointing to Fly.io, Let's Encrypt SSL issued and verified
+- ✅ Web client (`web-client/dist/`) embedded in Go binary via `//go:embed` — served at `/` with SPA fallback (React Router paths serve `index.html`)
+- ✅ Dockerfile updated: `npm install && npm run build` runs before `go build` so the embed always includes a fresh production build
+- ✅ OTel tracing is now opt-in: if `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, `InitTracer` returns a no-op immediately — no more `traces export: connection refused` spam in Fly.io logs. Set the env var in Fly.io secrets to re-enable for Grafana Cloud Tempo.
+- ✅ All `bingoserver.live` references updated to `yubetcha.com` across codebase (ROADMAP, DEPLOYMENT, README, `bin.go`)
+
+**Files changed:** `bin.go`, `server/server.go`, `server/tracing.go`, `Dockerfile`, `README.md`, `docs/ROADMAP.md`, `docs/DEPLOYMENT.md`
+
 ## [v9.0.0] - 2026-05-03
 
 ### Phase 9 + 9.5 Complete: Client Menu, Buzzword Suggestions, Leaderboard, Player Stats & Betting
