@@ -4,23 +4,6 @@ The evolution of binGO-CLI organized by development phases.
 
 ## TODO
 
-#### Phase 9.6: In-Game Chat
-**Goal:** Let players send free-form text messages to everyone in the game during play
-
-**Tasks:**
-- [ ] Client command: `say <message>` (or a `/` prefix shorthand like `/hello everyone`)
-  - Sends a `chat` action WebSocket message to the server
-  - Server broadcasts `chat_message` event to all players in the game
-- [ ] Server handler: `handlePlayerChat(game, player, text)`
-  - Validate message is non-empty and within a reasonable length limit (e.g. 200 chars)
-  - Broadcast `ServerMessage{Type:"chat_message", PlayerID: player.ID, Message: text}`
-- [ ] Client display: chat messages printed inline below the board between redraws
-  - Format: `💬 <username>: <message>`
-  - On next full redraw (cell mark, player_update, etc.) the line scrolls away naturally
-  - No persistent chat history panel — keeps the UI simple
-- [ ] Help text updated with `say` command
-- [ ] Rate-limit chat (e.g. 5 messages / 10 s per player) using existing rate-limit infrastructure
-
 #### Phase 10: Kubernetes & Scaling (Future)
 **Goal:** Run multiple server instances with shared database
 
@@ -253,14 +236,15 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 ---
 
 ##### Phase 13.2: Twitch Settlement Agent
-**Goal:** Monitor Twitch channels via EventSub webhooks or polling; use chat as a proxy for event detection; evaluate bet conditions and auto-settle.
+**Goal:** Monitor Twitch streams via local audio capture — same BlackHole → faster-whisper pipeline as 13.3, reusing the same `SourceAdapter` interface. No Twitch API keys, no chat proxy heuristics.
 
-- [ ] **Twitch adapter** (`agent/adapters/twitch.py`): `twitchAPI` Python library. Two detection modes:
-  - **Chat proxy** (default): bot joins channel chat, monitors messages for event signals (e.g. "GG", raid announcements, win/loss callouts). Ring buffer of last 50 chat messages passed to LLM evaluator as context.
-  - **EventSub polling** (optional): poll Twitch EventSub REST API for stream online/offline, channel predictions, clip created. No inbound webhook needed.
-- [ ] **Polling vs webhook config**: `TWITCH_USE_WEBHOOKS=false` by default (polling mode). When `true`, starts local HTTP listener on configurable port; ngrok tunnel URL registered as EventSub callback.
-- [ ] **LLM evaluator**: same `ConditionEvaluator` as 13.1 — chat context replaces transcript. Prompt adjusted: "Given these recent chat messages, has the following event occurred: {condition}?"
-- [ ] **Tests**: mock Twitch chat fixture tests. EventSub polling mock. Full settlement lifecycle with local Go server.
+> **Prerequisite:** Phase 13.3 (local listener) must be complete — this phase is a thin config layer on top of it.
+
+- [ ] **Twitch adapter** (`agent/adapters/twitch.py`): Open the Twitch stream URL in the system browser or via `streamlink` → audio routes through BlackHole → existing `LocalAudioAdapter` from 13.3 handles transcription. `streamlink` preferred (headless, no browser needed): `streamlink twitch.tv/<channel> best --player-fifo` piped to a virtual audio sink.
+- [ ] **Stream discovery**: Poll Twitch Helix API (`GET /streams?user_login=`) every 60 s to detect when a tracked channel goes live. No EventSub, no webhooks needed.
+- [ ] **Config**: `TWITCH_CHANNELS` env var (comma-separated list of channel names to track). Agent starts capture automatically when a tracked channel goes live; stops on stream end.
+- [ ] **LLM evaluator**: same `ConditionEvaluator` as 13.1/13.3 — transcript replaces chat. No prompt changes needed.
+- [ ] **Tests**: mock `streamlink` subprocess with WAV fixture piped as audio. Stream discovery polling mock. Full settlement lifecycle with local Go server.
 
 ---
 
@@ -306,3 +290,16 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 - [ ] **Publish to server**: approved suggestions → `POST /api/public-bets/` with `source_type=youtube|twitch`, `status=open`, `creator_username` tag. Appear on landing page trending section.
 - [ ] **Scheduling**: full ingestion + generation run weekly per creator (heavy). Pattern extraction cached — only re-run if new content volume > 5 items since last run.
 - [ ] **Tests**: pattern extraction with known creator transcript fixture. Bet generation smoke test (verify structured output schema). Score filter boundary tests. End-to-end: corpus → published bet on local server.
+
+---
+
+## Deferred / Maybe Never
+
+#### Phase 9.6: In-Game Chat
+**Goal:** Let players send free-form text messages to everyone in the game during play.
+
+Deferred — the existing in-game bet system (`bet: <player> wins`) already provides structured social interaction. Free-form chat may add noise without much value for a bingo game. Revisit if users ask for it.
+
+- `say <message>` command → `chat` WebSocket action → `chat_message` broadcast
+- Rate-limit: 5 messages / 10 s per player
+- Display: `💬 <username>: <message>` inline below board, scrolls away on next redraw
