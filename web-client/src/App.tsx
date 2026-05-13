@@ -275,7 +275,7 @@ function HomePage() {
     <main className="shell">
       <section className="panel hero">
         <p className="eyebrow">binGO web client</p>
-        <h1>Connect to localhost:8080</h1>
+        <h1>Connect to {window.location.host}</h1>
         <p>Choose exactly like the CLI client:</p>
 
         <div className="cli-flow">
