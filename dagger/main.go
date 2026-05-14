@@ -230,9 +230,11 @@ func runRelease(ctx context.Context, client *dagger.Client, source *dagger.Direc
 	secret := client.SetSecret("gh-token", ghToken)
 	goContainer := client.Container().
 		From(fmt.Sprintf("golang:%s-alpine", defaultGoVersion)).
+		WithExec([]string{"apk", "add", "--no-cache", "nodejs", "npm"}).
 		WithMountedDirectory("/src", source).
 		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "0")
+		WithEnvVariable("CGO_ENABLED", "0").
+		WithExec([]string{"sh", "-c", "cd web-client && npm install && npm run build"})
 	fmt.Println("=== Building release binaries ===")
 	macBinary := goContainer.
 		WithEnvVariable("GOOS", "darwin").
