@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasBingo, toCellId } from "./board";
+import { hasBingo, shuffleArray, toCellId } from "./board";
 import type { BoardState } from "./board";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -134,3 +134,45 @@ describe("hasBingo — edge cases", () => {
     ).toBe(true);
   });
 });
+
+// ─── shuffleArray ─────────────────────────────────────────────────────────────
+
+describe("shuffleArray", () => {
+  it("returns an array with the same elements", () => {
+    const input = ["a", "b", "c", "d", "e"];
+    expect(shuffleArray(input).sort()).toEqual([...input].sort());
+  });
+
+  it("does not mutate the original array", () => {
+    const input = ["x", "y", "z"];
+    const copy = [...input];
+    shuffleArray(input);
+    expect(input).toEqual(copy);
+  });
+
+  it("returns an array of the same length", () => {
+    const input = Array.from({ length: 25 }, (_, i) => `word${i}`);
+    expect(shuffleArray(input)).toHaveLength(25);
+  });
+
+  it("handles an empty array", () => {
+    expect(shuffleArray([])).toEqual([]);
+  });
+
+  it("handles a single-element array", () => {
+    expect(shuffleArray(["solo"])).toEqual(["solo"]);
+  });
+
+  it("produces different orderings across multiple calls (board uniqueness)", () => {
+    // With a 25-word pool the probability of two shuffles being identical is
+    // 1/25! ≈ 6e-26 — astronomically unlikely, so a persistent failure here
+    // means the shuffle is broken (e.g. always returns input order).
+    const pool = Array.from({ length: 25 }, (_, i) => `buzzword${i}`);
+    const seen = new Set<string>();
+    for (let i = 0; i < 10; i += 1) {
+      seen.add(shuffleArray(pool).join(","));
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
