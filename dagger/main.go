@@ -279,10 +279,11 @@ func runAll(ctx context.Context, client *dagger.Client, source *dagger.Directory
 func goBase(client *dagger.Client, source *dagger.Directory) *dagger.Container {
 	return client.Container().
 		From(fmt.Sprintf("golang:%s-alpine", defaultGoVersion)).
-		WithExec([]string{"apk", "add", "--no-cache", "gcc", "musl-dev", "sqlite-dev"}).
+		WithExec([]string{"apk", "add", "--no-cache", "gcc", "musl-dev", "sqlite-dev", "nodejs", "npm"}).
 		WithMountedDirectory("/src", source).
 		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "1")
+		WithEnvVariable("CGO_ENABLED", "1").
+		WithExec([]string{"sh", "-c", "cd web-client && npm install && npm run build"})
 }
 
 func buildImage(client *dagger.Client, source *dagger.Directory, version string) *dagger.Container {
