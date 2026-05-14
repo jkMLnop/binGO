@@ -658,6 +658,18 @@ button:hover {
   cursor: not-allowed;
 }
 
+.dead-game-panel {
+  background: #fdf2f2;
+  border: 1.5px solid #e0a0a0;
+  border-radius: 6px;
+}
+
+.dead-game-reason {
+  color: #8b2222;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
 .header-actions {
   display: flex;
   gap: 0.6rem;

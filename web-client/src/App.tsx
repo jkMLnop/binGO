@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { createGame, fetchGameByCode, fetchLeaderboard } from "./lib/api";
-import { hasBingo, toCellId } from "./lib/board";
+import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
 
@@ -335,6 +335,8 @@ function GamePage() {
   const [showBuzzwords, setShowBuzzwords] = useState(false);
   const [showSuggestModal, setShowSuggestModal] = useState(false);
   const [showBetModal, setShowBetModal] = useState(false);
+  const [gameDead, setGameDead] = useState(false);
+  const [gameDeadReason, setGameDeadReason] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const tokenRef = useRef<string>("");
   const winSentRef = useRef(false);
@@ -349,7 +351,18 @@ function GamePage() {
       try {
         const gameInfo = await fetchGameByCode(normalizedCode);
         if (mounted) {
-          if (gameInfo.winner) {
+          const GAME_TTL_SECONDS = 60 * 60; // 60 minutes
+          const ageSeconds = Math.floor(Date.now() / 1000) - gameInfo.created_at;
+          if (ageSeconds > GAME_TTL_SECONDS) {
+            setGameDead(true);
+            setGameDeadReason("This game code has expired. Game codes are valid for 60 minutes.");
+            setGameStatus("Game code expired");
+          } else if (gameInfo.status === "ended" && !gameInfo.winner) {
+            // Orphaned — host left before anyone won
+            setGameDead(true);
+            setGameDeadReason("The host has left and this game is no longer active.");
+            setGameStatus("Game unavailable");
+          } else if (gameInfo.winner) {
             // Game already has a winner — pre-set the ended state immediately from
             // the HTTP API so the UI is correct before the WebSocket even connects.
             gameEndedRef.current = true;
@@ -459,7 +472,7 @@ function GamePage() {
         setError("");
 
         const cells: BoardCell[] = [];
-        const words = message.buzzwords.flat();
+        const words = shuffleArray(message.buzzwords.flat());
         for (let i = 0; i < message.rows * message.cols; i += 1) {
           const row = Math.floor(i / message.cols);
           const col = i % message.cols;
@@ -507,7 +520,7 @@ function GamePage() {
         setRejectedSuggestions([]);
         setShowBuzzwords(false);
         const cells: BoardCell[] = [];
-        const words = message.buzzwords.flat();
+        const words = shuffleArray(message.buzzwords.flat());
         for (let i = 0; i < message.rows * message.cols; i += 1) {
           const row = Math.floor(i / message.cols);
           const col = i % message.cols;
@@ -675,7 +688,11 @@ function GamePage() {
 
       {error ? <section className="panel error">{error}</section> : null}
 
-      {!connected ? (
+      {!connected && gameDead ? (
+        <section className="panel dead-game-panel">
+          <p className="dead-game-reason">{gameDeadReason}</p>
+        </section>
+      ) : !connected ? (
         <section className="panel">
           <form className="join-form" onSubmit={connectToGame}>
             <label htmlFor="username">Username</label>
@@ -709,20 +726,22 @@ function GamePage() {
               )}
             </div>
           )}
-          <div className="board" role="grid" aria-label="Bingo board">
-            {board?.cells.map((cell) => (
-              <button
-                key={cell.id}
-                type="button"
-                className={`board-cell ${cell.marked ? "marked" : ""} ${winner ? "ended" : ""}`}
-                onClick={() => toggleCell(cell.id)}
-                disabled={Boolean(winner) || winPending}
-              >
-                <span className="cell-id">{cell.id}</span>
-                <span>{cell.text}</span>
-              </button>
-            ))}
-          </div>
+          {winner === "" && (
+            <div className="board" role="grid" aria-label="Bingo board">
+              {board?.cells.map((cell) => (
+                <button
+                  key={cell.id}
+                  type="button"
+                  className={`board-cell ${cell.marked ? "marked" : ""}`}
+                  onClick={() => toggleCell(cell.id)}
+                  disabled={winPending}
+                >
+                  <span className="cell-id">{cell.id}</span>
+                  <span>{cell.text}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {winner !== "" && (
             <div className="post-game-actions">
               {isHost && hostConnected && (
