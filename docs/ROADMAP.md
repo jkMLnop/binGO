@@ -67,13 +67,104 @@ Before scaling to K8s, establish a persistent observability layer:
   - Integrate k6 metrics with self-hosted Prometheus/Grafana for unified dashboards (load test results alongside app metrics)
   - Keep existing `full_system_load_test.go` for quick smoke tests; k6 for capacity planning and stress testing
 
-#### Phase 12: Rooms, Live Bets & Bet Exchange
+#### Phase 11: Room Codes, QR Sharing & Per-Room Isolation
+**Goal:** Rename game share codes to room codes throughout the UI, add QR code sharing to the web client, bring the CLI's custom buzzword upload to the web client, and isolate leaderboards and buzzword lists per room so custom-list games don't compete against default-list games on a shared scoreboard.
+
+**Design decisions:**
+- Game codes keep their `BINGO-XXXXX` format — only the label changes ("game code" / "share code" → "room code" in all UI copy, CLI output, and docs).
+- QR codes encode the full join URL (`https://yubetcha.com/join/:code`) and are generated entirely client-side — no server round-trip.
+- Leaderboards are scoped to room code: a win in `BINGO-AB3K7` only appears on that room's board. The global `/api/leaderboard` remains for default-list games only (where `room_code IS NULL`).
+- Buzzword lists stored per room in a new `room_buzzwords` table. Server falls back to built-in `buzzwords.csv` when no custom list is set. Phase 12 (AI generation) writes to this same table.
+
+---
+
+##### Phase 11.1: Room Code Rename (UI & Docs)
+**Goal:** Rename "game code" / "share code" → "room code" everywhere in user-facing surfaces. No protocol or schema changes.
+
+- [ ] **Web client** (`web-client/src/`): Replace all "game code", "share code", "game link" label text with "room code". Update join flow copy, placeholder text, and help tooltips.
+- [ ] **CLI** (`client/display.go`, `client/player.go`): Update terminal output strings — "Your game code:" → "Room code:", "Share this code:" → "Share this room code:".
+- [ ] **Docs** (`README.md`, `docs/ADMIN_API.md`, `docs/DEPLOYMENT.md`): Update terminology throughout.
+- [ ] **Tests**: grep for old strings in user-facing output paths to confirm none remain; no logic changes needed.
+
+---
+
+##### Phase 11.2: QR Code Share Menu
+**Goal:** QR code generated client-side in the web app under the share menu so players can scan to join without typing the room code.
+
+- [ ] **Web client** (`web-client/src/`): Add share dropdown/modal to the active game view. Generate QR code client-side using the `qrcode` npm package (no server round-trip). QR encodes `https://yubetcha.com/join/:roomCode`. Display alongside a copy-link button and the plain room code text. Mobile-responsive: QR fills most of screen on narrow viewports for easy across-the-table scanning.
+- [ ] **No server changes required** — purely client-side generation.
+- [ ] **Tests** (`web-client/src/lib/`): Unit test that QR URL is correctly formed from room code; no trailing slashes or double-slashes.
+
+---
+
+##### Phase 11.3: Web Client Buzzword Upload
+**Goal:** Bring the CLI's custom buzzword list feature to the web client. The host can upload a JSON file or paste a JSON array before the game starts.
+
+- [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `room_buzzwords` table (`room_code` PK FK → `games.code`, `words` JSON array, `uploaded_by`, `uploaded_at`). Add `GameStore` methods: `SetRoomBuzzwords(roomCode string, words []string, uploadedBy string) error` and `GetRoomBuzzwords(roomCode string) ([]string, error)`. Server falls back to built-in list when `GetRoomBuzzwords` returns no rows.
+- [ ] **HTTP** (`server/api.go`): `POST /api/game/:code/buzzwords` (host auth required). Accepts `{words: string[]}` JSON body. Validates: min 24 words, max 500, each word max 60 chars, strip control chars, reject empty strings. `GET /api/game/:code/buzzwords` returns the active word list (custom or built-in).
+- [ ] **Web client** (`web-client/src/`): "Customize Word List" panel in the host game lobby. Two input methods: JSON file drag-and-drop (`.json`) or paste a JSON array directly. Preview shows word count + 5 sample words. "Use this list" → `POST /api/game/:code/buzzwords` → success toast. Validation errors shown inline. Link to example JSON format in help text.
+- [ ] **Tests**: upload validation (too few words, control char stripping, max word length), 403 for non-host, GET returns uploaded list, server falls back to built-in when unset.
+
+---
+
+##### Phase 11.4: Per-Room Leaderboards
+**Goal:** Leaderboard wins are scoped to the room code they were achieved in. Custom-list games are isolated from the global board so difficulty differences don't skew rankings.
+
+- [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add nullable `room_code` column to `wins_history` table (NULL = global/default-list game; backward-compatible). Add `GameStore` method `GetRoomLeaderboard(roomCode string, limit int) ([]LeaderboardEntry, error)`. Update `RecordWinInDB` to accept and store `roomCode`. Existing `GetLeaderboard` returns only rows where `room_code IS NULL`.
+- [ ] **HTTP** (`server/api.go`): `GET /api/leaderboard` unchanged (global, default-list wins only). Add `GET /api/game/:code/leaderboard` — per-room top players by win count for that room code. Both return the same `LeaderboardEntry` shape.
+- [ ] **Web client** (`web-client/src/`): Active game view shows a per-room leaderboard tab. Global leaderboard remains on landing/stats page but only reflects default-list games. Tab labels make the distinction clear ("This Room" vs "All Time").
+- [ ] **Tests**: `GetRoomLeaderboard` returns only wins for that room code. `GetLeaderboard` excludes room-scoped wins. Migration: existing NULL room_code rows unaffected.
+
+---
+
+#### Phase 12: AI-Powered Buzzword Generation
+**Goal:** Streaming chat interface in the web client where the host describes their event or topic — optionally pasting a URL — and an LLM generates a themed buzzword list ready to load into their room, with multiple distinct sets so friends at the same event don't get identical boards.
+
+**User story:** Going to Anime North. Go to yubetcha.com, host a room, click "Generate word list with AI". A chat opens — paste `https://www.animenorth.com/` and type a short description. The agent scrapes the page, combines it with its anime convention knowledge, and streams back 3 sets of 25 buzzwords (one per friend). Pick a set, it loads into the room, friends scan the QR code to join. The game becomes a scavenger hunt.
+
+**Why LLM is the right tool here:** This task requires synthesising scraped web content with broad world knowledge (e.g. what to expect at an anime convention), then generating multiple *distinct* creative lists of short observable phrases. Template-based approaches (category menus, keyword extraction) can't bridge the gap between a URL and playful, event-specific buzzwords. A locally-hosted LLM via Ollama provides the generation quality needed at zero per-request cost.
+
+**LLM provider decision:**
+- **This phase (interactive, web-based):** Ollama + `qwen3:30b-a3b` (default). The `a3b` MoE architecture means only ~3B parameters are active per token — ~2–3 tok/s on a 32 GB Intel i7 CPU, ~12 GB RAM at Q4 quantisation. Chosen for its 71% IFEval score (strong structured JSON instruction-following) and zero per-request cost. Configured via `OLLAMA_BASE_URL` and `OLLAMA_MODEL` env vars (shared with the Phase 14 Ollama instance). Feature gracefully disabled (HTTP 503 + clear message) when Ollama is unreachable. Optional upgrade: `qwen3:4b` for lower-RAM deployments (~2.5 GB, ~5 tok/s, 67% IFEval).
+- **Phase 14 settlement agent (local, 24/7):** Ollama + `deepseek-r1:8b` — stronger chain-of-thought reasoning for binary condition evaluation. Both phases share the same `OLLAMA_BASE_URL`.
+
+**Design decisions:**
+- URL scraping is server-side (avoids CORS, keeps API key off the client). Go `net/http` fetches with a 5 s timeout, strips HTML, truncates to 8 KB. Private IP ranges and non-HTTP(S) schemes rejected before connection (SSRF protection).
+- Streaming: Go handler writes `text/event-stream` SSE; React client renders tokens word-by-word as they arrive — same feel as Perplexity / ChatGPT search.
+- Structured output: LLM returns `{"sets": [{"label": string, "words": string[]}]}` as the final `data: [DONE]` SSE event after conversational tokens.
+- Server validates the returned JSON (min 24 words per set, max 60 chars each, no cross-set duplicates) before writing to the `room_buzzwords` table from Phase 11.3.
+
+---
+
+##### Phase 12.1: Server-Side LLM Proxy + URL Scraper
+**Goal:** Go endpoint that optionally scrapes a URL, calls the LLM API with a bingo-card designer system prompt, and streams the response as SSE. Validated with `curl` before any web client work.
+
+- [ ] **Config** (`bin.go` / env): Add `OLLAMA_BASE_URL` (default `http://localhost:11434`) and `OLLAMA_MODEL` (default `qwen3:30b-a3b`) env vars. At startup, probe `GET $OLLAMA_BASE_URL/api/tags` — log a warning if unreachable (feature disabled, HTTP 503 returned to clients). Add both vars to `docs/DEPLOYMENT.md`. Note: these env vars are shared with the Phase 14 settlement agent.
+- [ ] **URL scraper** (`server/scraper.go` — new file): `ScrapeURL(url string) (string, error)`. Fetches with 5 s timeout and `User-Agent: binGO-buzzword-agent/1.0`. Parses HTML via `golang.org/x/net/html`, extracts visible text nodes. Truncates to 8 KB. **SSRF protection:** resolve hostname before connecting; reject if resolved IP is RFC 1918, loopback, link-local, or multicast — or if scheme is not `http`/`https`.
+- [ ] **LLM client** (`server/llm.go` — new file): `LLMClient` interface: `StreamGenerate(ctx context.Context, messages []ChatMessage, w http.ResponseWriter) error`. One implementation for this phase: `OllamaClient` (calls `POST $OLLAMA_BASE_URL/api/chat` with `"stream": true`, model from `OLLAMA_MODEL`). Reads the NDJSON response stream Ollama emits, extracts `response` fields, forwards each as `data: <token>\n\n` SSE event to the web client. Ends with `data: [DONE]\n\n` carrying the validated `{sets:[...]}` JSON. The `LLMClient` interface is defined so an `OpenAIClient` implementation can be added later as an optional upgrade.
+- [ ] **HTTP** (`server/api.go`): `POST /api/game/:code/generate-buzzwords` (host-only auth). Body: `{topic: string, url?: string, messages?: [{role, content}]}`. Validates: topic ≤ 500 chars; URL if present passes SSRF check. Scrapes URL → appends excerpt to system context → calls `LLMClient.StreamGenerate`. Returns HTTP 503 with `{"error": "AI generation not available — Ollama is not reachable"}` when Ollama health probe failed at startup or connection refused at request time.
+- [ ] **Prompt template** (`server/llm.go`): System: *"You are a bingo card designer. Generate a themed buzzword list for a scavenger-hunt style bingo game. The words should be short observable things (2–5 words), specific to the topic, and fun to spot in person. Output 3 distinct sets of 25 words each. Return your final answer as JSON: `{\"sets\": [{\"label\": \"Set A\", \"words\": [...]}]}`."* User message: topic text + URL excerpt when available.
+- [ ] **Tests** (`server/`): SSRF protection unit tests (reject `192.168.x.x`, `127.0.0.1`, `file://`, `http://metadata.google.internal`). Scraper strips tags and truncates. `OllamaClient` test with a mock HTTP server replaying a fixture NDJSON stream. HTTP 503 when Ollama health probe fails (mock server returns 500 or is not started). Host-only 403 for non-host callers.
+
+---
+
+##### Phase 12.2: Streaming Chat UI
+**Goal:** Chat interface in the web client that renders the LLM token stream, lets the host refine with follow-up messages, then saves the chosen word set to their room.
+
+- [ ] **Web client** (`web-client/src/`): "Generate with AI" button in the host lobby (alongside "Upload JSON" from Phase 11.3). Opens a `/game/:code/generate` route. Layout: topic input + optional URL field at top; streaming chat output renders below token-by-token as SSE arrives. When stream ends, 3 word-set cards appear (label + word count + 5 sample words). "Use this set" → `POST /api/game/:code/buzzwords` → toast → return to lobby. "Regenerate" reruns with the same prompt. "Start over" clears history. HTTP 503 shows an error card ("AI generation not available — Ollama is not running on this server").
+- [ ] **SSE client** (`web-client/src/lib/api.ts`): `streamBuzzwords(gameCode, topic, url, messages, onToken, onDone)` — uses `fetch` with `ReadableStream` to `POST /api/game/:code/generate-buzzwords`. Calls `onToken(chunk)` per SSE data event, `onDone(sets)` on the `[DONE]` event.
+- [ ] **Follow-up prompts**: Text input at the bottom of the chat view appends to `messages` history and sends a new request — enables iterative refinement ("make them funnier", "add more cosplay-related items", "remove food").
+- [ ] **Tests** (`web-client/src/lib/`): `streamBuzzwords` unit test against a mock SSE endpoint. "Use Set" flow saves words via upload API and navigates back to lobby. HTTP 503 error card renders correctly.
+
+---
+
+#### Phase 13: Rooms, Live Bets & Bet Exchange
 **Goal:** Persistent rooms hosting bingo games and a live prediction-bet exchange. Implemented in 6 incremental sub-phases.
 
 **Design decisions:**
 - Room code (`AB3K7`, 5-char) → game code `BINGO-AB3K7`. Existing standalone games keep their random `BINGO-XXXXX` codes for backward compat.
 - Bingo game inside a room is created lazily on first `room_login`, not at room creation time.
-- Existing Phase 9.5 in-game bet types (`Bet`, `BetCondition`) are renamed to `GameBet`, `GameBetCondition` before Phase 12.1 to avoid name collision.
+- Existing Phase 9.5 in-game bet types (`Bet`, `BetCondition`) are renamed to `GameBet`, `GameBetCondition` before Phase 13.1 to avoid name collision.
 
 **Code relationships:**
 ```
@@ -86,7 +177,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.0: Prerequisite — Rename GameBet types
+##### Phase 13.0: Prerequisite — Rename GameBet types
 
 - [ ] Rename `Bet` → `GameBet` and `BetCondition` → `GameBetCondition` in `server/types.go`
 - [ ] Update all references in `server/server.go`, `server/game.go` (`Game.Bets []Bet` → `[]GameBet`)
@@ -95,7 +186,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.1: Room Foundation
+##### Phase 13.1: Room Foundation
 **Goal:** Rooms table, `Room` struct, room API, `room_login` / `room_welcome` WebSocket messages. No bets yet.
 
 - [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `rooms` table (`id`, `code` 5-char unique, `host_id`, `linked_room_code` nullable FK → rooms.code, `created_at`). Add optional `room_code` FK column to `games` table. Add `GameStore` methods: `CreateRoom`, `GetRoom`, `GetLinkedRooms`.
@@ -108,7 +199,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.2: Simple Bets
+##### Phase 13.2: Simple Bets
 **Goal:** DB-persisted bets in rooms — place, join sides, manual resolve by creator/host. No workers, no branching yet.
 
 - [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `bets` table (`id`, `code` unique e.g. `BET-AB3K7-X9Q2M`, `room_code` FK, `parent_bet_code` nullable, `creator_username`, `description` max 280 chars, `locked_at` nullable, `resolves_at`, `status` enum `open|locked|pending_resolution|disputed|won|lost|cancelled`, `created_at`, `resolved_at`, `dispute_deadline` nullable). Add `bet_positions` table (`id`, `bet_code` FK, `username`, `side` `for|against`, `joined_at`). Indexes: `idx_bets_room_code`, `idx_bets_resolves_at`, `idx_bets_status`, `idx_bets_parent`, `idx_positions_bet_code`, `idx_positions_username`. Add `GameStore` methods: `CreateBet`, `GetBetByCode`, `GetBetsByRoom`, `CreateBetPosition`, `GetBetPositions`, `ResolveBet`.
@@ -124,7 +215,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.3: Auto-Resolution Workers + Dispute
+##### Phase 13.3: Auto-Resolution Workers + Dispute
 **Goal:** Lock worker, majority-vote resolution worker, 10-min dispute window, dispute expiry worker.
 
 - [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `GameStore` methods: `GetExpiredBets`, `GetLockedBets`, `DisputeBet`.
@@ -140,7 +231,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.4: Bet Branching
+##### Phase 13.4: Bet Branching
 **Goal:** `parent_bet_code` FK, branch creation, `resolves_at` ≤ parent validation, bet tree display.
 
 - [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `GameStore` method: `GetBetTree(betCode string)` — returns bet + all descendants recursively.
@@ -153,7 +244,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.5: Side-Bet Rooms
+##### Phase 13.5: Side-Bet Rooms
 **Goal:** `linked_room_code`, event forwarding from linked room to side rooms, `sidebet` CLI command.
 
 - [ ] **Validation** (`server/api.go`): On `POST /api/rooms`, if `linked_room_code` provided: verify room exists (HTTP 404); reject circular links (HTTP 422).
@@ -166,7 +257,7 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 12.6: CLI Room Mode + Admin API
+##### Phase 13.6: CLI Room Mode + Admin API
 **Goal:** `-mode room` flag, full room lobby CLI, bet detail view, admin room endpoints.
 
 - [ ] **bin.go**: Add `-mode room` flag. Dispatch to `runRoom(serverAddr, roomCode string)`.
@@ -176,12 +267,12 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-#### Phase 13: Public Bet Search Engine + Agentic Auto-Settlement
+#### Phase 14: Public Bet Search Engine + Agentic Auto-Settlement
 **Goal:** Transform yubetcha.com into a Polymarket-style public bet discovery platform where anyone can find, join, and watch bets on real-world media events settle automatically — powered by a local Python agent stack (YouTube/Twitch/Zoom/local audio) running on your machine, posting results back to the Fly.io server.
 
 **Design boundary — two completely separate bet worlds:**
 
-| | Private Room Bets (Phase 12) | Public Bets (Phase 13) |
+| | Private Room Bets (Phase 13) | Public Bets (Phase 14) |
 |---|---|---|
 | Access | Room code invite only | Anyone via search |
 | Discoverability | Never indexed, never searchable | Landing page search engine |
@@ -199,7 +290,7 @@ Mac mini (local agent stack)            Fly.io (cloud server)
 ────────────────────────────            ─────────────────────
 Settlement agent (cron/poll) ────────→  POST /api/public-bets/:code/resolve
 Recommendation agent (batch) ────────→  POST /api/public-bets/ (create suggestion)
-Ollama llama3.1:8b (LLM)
+Ollama deepseek-r1:8b (LLM)
 faster-whisper base (STT)
 Local listener (Zoom/any audio)
 ```
@@ -210,7 +301,7 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 ---
 
-##### Phase 13.0: Public Bet Foundation
+##### Phase 14.0: Public Bet Foundation
 **Goal:** `public_bets` DB table, search API, agent auth, and landing page search UI. Prerequisite for all other Phase 13 sub-phases.
 
 - [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `public_bets` table (`id`, `code` unique e.g. `PUB-X9Q2M`, `creator_username` nullable, `description` max 280 chars, `source_url` nullable, `source_type` enum `youtube|twitch|twitter|zoom|local|manual`, `tags` JSON array, `status` enum `open|locked|pending_resolution|disputed|won|lost|cancelled|expired`, `resolves_at`, `locked_at` nullable, `created_at`, `resolved_at` nullable, `settlement_evidence` text nullable, `dispute_deadline` nullable). Add `public_bet_positions` table (mirrors `bet_positions` but FK → `public_bets.code`). Indexes: `idx_public_bets_status`, `idx_public_bets_resolves_at`, `idx_public_bets_source_type`, `idx_public_bet_positions_bet_code`. Add `GameStore` methods: `CreatePublicBet`, `GetPublicBetByCode`, `SearchPublicBets(query string, sourceType string, status string, limit int)`, `CreatePublicBetPosition`, `GetPublicBetPositions`, `ResolvePublicBet`.
@@ -222,12 +313,12 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 ---
 
-##### Phase 13.1: YouTube Settlement Agent
+##### Phase 14.1: YouTube Settlement Agent
 **Goal:** Python agent that monitors YouTube channels, fetches transcripts, evaluates bet conditions via LLM, and settles bets automatically.
 
 > **Agent stack lives in `agent/` directory** (new Python project, separate from Go server). Uses `pyproject.toml` / `uv` for dependency management.
 
-- [ ] **Agent scaffold** (`agent/`): Create Python project with `uv`. Core interface: `SourceAdapter` abstract class with `poll(bet: PublicBet) -> TranscriptChunk | None`. `ConditionEvaluator` class wraps Ollama (`llama3.1:8b`) with structured JSON output. `SettlementClient` posts results to Go server via `PATCH /api/public-bets/:code/resolve`. Scheduler: APScheduler cron job, 5-min interval per tracked source. Config via `.env` file: `BINGO_SERVER_URL`, `AGENT_API_KEY`, `OLLAMA_BASE_URL` (default `http://localhost:11434`).
+- [ ] **Agent scaffold** (`agent/`): Create Python project with `uv`. Core interface: `SourceAdapter` abstract class with `poll(bet: PublicBet) -> TranscriptChunk | None`. `ConditionEvaluator` class wraps Ollama (`deepseek-r1:8b`) with structured JSON output. `SettlementClient` posts results to Go server via `PATCH /api/public-bets/:code/resolve`. Scheduler: APScheduler cron job, 5-min interval per tracked source. Config via `.env` file: `BINGO_SERVER_URL`, `AGENT_API_KEY`, `OLLAMA_BASE_URL` (default `http://localhost:11434`).
 - [ ] **YouTube adapter** (`agent/adapters/youtube.py`): `youtube-transcript-api` library fetches captions for video ID. YouTube Data API v3 (`google-api-python-client`) polls channel for new uploads since last check. Fallback: `yt-dlp` audio download → `faster-whisper base` transcription when no captions available. Stores `last_checked_at` per channel in `agent/state.db` (SQLite, separate from server DB).
 - [ ] **LLM condition evaluator** (`agent/evaluator.py`): Prompt template: given transcript and bet description, return `{met: bool, confidence: float, evidence: str}`. Structured output enforced via Ollama JSON mode. Confidence threshold: only settle if `confidence >= 0.85`. Below threshold: log as `uncertain`, retry on next poll cycle with more transcript context.
 - [ ] **Settlement loop** (`agent/scheduler.py`): For each `open` public bet with `source_type=youtube`: fetch new transcript chunks → evaluate → if met: `PATCH /api/public-bets/:code/resolve {outcome: "won", evidence: "..."}`. If `resolves_at` passed with no match: resolve as `lost`. Idempotent: skip bets already in terminal state.
@@ -235,20 +326,20 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 ---
 
-##### Phase 13.2: Twitch Settlement Agent
+##### Phase 14.2: Twitch Settlement Agent
 **Goal:** Monitor Twitch streams via local audio capture — same BlackHole → faster-whisper pipeline as 13.3, reusing the same `SourceAdapter` interface. No Twitch API keys, no chat proxy heuristics.
 
-> **Prerequisite:** Phase 13.3 (local listener) must be complete — this phase is a thin config layer on top of it.
+> **Prerequisite:** Phase 14.3 (local listener) must be complete — this phase is a thin config layer on top of it.
 
 - [ ] **Twitch adapter** (`agent/adapters/twitch.py`): Open the Twitch stream URL in the system browser or via `streamlink` → audio routes through BlackHole → existing `LocalAudioAdapter` from 13.3 handles transcription. `streamlink` preferred (headless, no browser needed): `streamlink twitch.tv/<channel> best --player-fifo` piped to a virtual audio sink.
 - [ ] **Stream discovery**: Poll Twitch Helix API (`GET /streams?user_login=`) every 60 s to detect when a tracked channel goes live. No EventSub, no webhooks needed.
 - [ ] **Config**: `TWITCH_CHANNELS` env var (comma-separated list of channel names to track). Agent starts capture automatically when a tracked channel goes live; stops on stream end.
-- [ ] **LLM evaluator**: same `ConditionEvaluator` as 13.1/13.3 — transcript replaces chat. No prompt changes needed.
+- [ ] **LLM evaluator**: same `ConditionEvaluator` as 14.1/14.3 — transcript replaces chat. No prompt changes needed.
 - [ ] **Tests**: mock `streamlink` subprocess with WAV fixture piped as audio. Stream discovery polling mock. Full settlement lifecycle with local Go server.
 
 ---
 
-##### Phase 13.3: Local Listener Agent (Universal Audio Monitor)
+##### Phase 14.3: Local Listener Agent (Universal Audio Monitor)
 **Goal:** Capture any audio playing on the Mac (Zoom calls, browser streams, local video) via system audio routing, transcribe with faster-whisper, and feed to the same condition evaluator. Enables bingo auto-marking and bet settlement for any meeting or stream without platform-specific integration.
 
 **Setup (one-time, macOS):**
@@ -258,7 +349,7 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 - [ ] **Local listener** (`agent/adapters/local_audio.py`): `sounddevice` library captures audio from BlackHole input device in 3-second chunks. `faster-whisper` (`base` model, CPU) transcribes each chunk. Transcript chunks appended to sliding window (last 60s). Emits `TranscriptChunk` events consumed by scheduler.
 - [ ] **Bingo auto-mark integration**: For each transcript chunk, check against active game's buzzword list (exact + fuzzy match via `rapidfuzz`). On match: call `POST /api/games/:code/mark` on Go server (new endpoint) to mark the cell for all players. No LLM needed — pure string matching is fast and deterministic.
-- [ ] **Bet condition evaluation**: Same `ConditionEvaluator` as 13.1/13.2 — local transcript replaces YouTube/Twitch source.
+- **Bet condition evaluation**: Same `ConditionEvaluator` as 14.1/14.2 — local transcript replaces YouTube/Twitch source.
 - [ ] **CLI mode** (`bin.go`): Add `-mode listen -server <addr> -code <game_code>` flag. Starts the local listener agent and connects to a running game session. Prints "Listening... (BlackHole detected)" or setup instructions if BlackHole not found.
   > **Note:** `-mode listen` is a Python subprocess launched by the Go binary, or alternatively a standalone `agent/listen.py` CLI script. TBD based on packaging preference.
 - [ ] **Performance**: On 2018 Intel i7 Mac mini, `faster-whisper base` transcribes a 3s chunk in ~1-2s. Acceptable lag for bingo (cell marks appear 2-4s after word is spoken). Document minimum hardware requirements.
@@ -266,12 +357,12 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 ---
 
-##### Phase 13.4: Zoom SDK Bot Integration
+##### Phase 14.4: Zoom SDK Bot Integration
 **Goal:** Dedicated Zoom bot that joins meetings as a silent participant and receives the official Zoom live transcript stream — higher quality than local audio capture, works even when not personally in the meeting.
 
 > **Prerequisite:** Zoom Marketplace app registration (free for development). Requires `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET` env vars.
 
-- [ ] **Zoom bot** (`agent/adapters/zoom_sdk.py`): Zoom Meeting SDK (server-to-server OAuth). Bot joins meeting by meeting ID, receives `meeting.transcription_message` webhook events (requires live transcription enabled on host's Zoom account). Falls back to Phase 13.3 local audio listener if SDK join fails or host hasn't enabled transcription.
+- [ ] **Zoom bot** (`agent/adapters/zoom_sdk.py`): Zoom Meeting SDK (server-to-server OAuth). Bot joins meeting by meeting ID, receives `meeting.transcription_message` webhook events (requires live transcription enabled on host's Zoom account). Falls back to Phase 14.3 local audio listener if SDK join fails or host hasn't enabled transcription.
 - [ ] **Webhook receiver** (`agent/webhook_server.py`): Small FastAPI server (port 8090) receiving Zoom webhook push events. `ngrok http 8090` tunnels it to a public URL registered in Zoom Marketplace dashboard. Alternatively: Fly.io webhook relay endpoint (`POST /internal/zoom-webhook`) forwarded to local agent via long-poll queue.
 - [ ] **Transcript dispatch**: Zoom transcript events → same `TranscriptChunk` interface → `ConditionEvaluator` + bingo auto-mark. Unified pipeline regardless of source.
 - [ ] **Bet suggestion during calls** (`agent/suggester.py`): Every 5 minutes during an active meeting, run LLM pass on the last 5-minute transcript window: "Based on this conversation, suggest 3 funny, specific bets that participants could place about what will happen before the meeting ends. Format: {description, resolves_at_minutes}." Push suggestions to Go server via `POST /api/public-bets/` with `source_type=zoom` and `status=suggested` (new status — visible to room participants but not yet open for joining).
@@ -279,7 +370,7 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 ---
 
-##### Phase 13.5: Recommendation Engine
+##### Phase 14.5: Recommendation Engine
 **Goal:** Ingest a creator's content history, extract behavioral patterns, and generate funny/specific bet suggestions that surface on the landing page as recommended bets.
 
 > **Start with 2-3 cherry-picked creators** to validate before generalising. Good candidates: high-volume streamers or podcasters with distinctive verbal patterns.
