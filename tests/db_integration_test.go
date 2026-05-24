@@ -143,7 +143,7 @@ func TestWinRecording(t *testing.T) {
 	}
 
 	// Record a win
-	if err := store.RecordWin(ctx, "alice", gameCode); err != nil {
+	if err := store.RecordWin(ctx, "alice", gameCode, ""); err != nil {
 		t.Fatalf("failed to record win: %v", err)
 	}
 
@@ -158,7 +158,7 @@ func TestWinRecording(t *testing.T) {
 	}
 
 	// Record another win for alice
-	if err := store.RecordWin(ctx, "alice", "GAME-002"); err != nil {
+	if err := store.RecordWin(ctx, "alice", "GAME-002", ""); err != nil {
 		t.Fatalf("failed to record second win: %v", err)
 	}
 
@@ -191,12 +191,12 @@ func TestLeaderboardAccuracy(t *testing.T) {
 	}
 
 	// Record wins
-	store.RecordWin(ctx, "alice", "GAME-001")
-	store.RecordWin(ctx, "alice", "GAME-002")
-	store.RecordWin(ctx, "bob", "GAME-003")
-	store.RecordWin(ctx, "charlie", "GAME-004")
-	store.RecordWin(ctx, "bob", "GAME-005")
-	store.RecordWin(ctx, "bob", "GAME-006")
+	store.RecordWin(ctx, "alice", "GAME-001", "")
+	store.RecordWin(ctx, "alice", "GAME-002", "")
+	store.RecordWin(ctx, "bob", "GAME-003", "")
+	store.RecordWin(ctx, "charlie", "GAME-004", "")
+	store.RecordWin(ctx, "bob", "GAME-005", "")
+	store.RecordWin(ctx, "bob", "GAME-006", "")
 
 	// Get leaderboard
 	leaderboard, err := store.GetLeaderboard(ctx, 10)
@@ -336,9 +336,9 @@ func TestAPILeaderboardEndpoint(t *testing.T) {
 	}
 
 	// Record wins
-	store.RecordWin(ctx, "player1", "GAME-001")
-	store.RecordWin(ctx, "player1", "GAME-002")
-	store.RecordWin(ctx, "player2", "GAME-003")
+	store.RecordWin(ctx, "player1", "GAME-001", "")
+	store.RecordWin(ctx, "player1", "GAME-002", "")
+	store.RecordWin(ctx, "player2", "GAME-003", "")
 
 	// Verify leaderboard is queryable from DB
 	leaderboard, err := store.GetLeaderboard(ctx, 10)

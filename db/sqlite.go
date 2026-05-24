@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,17 +48,27 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		last_modified_at INTEGER NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS rooms (
+		id TEXT PRIMARY KEY,
+		code TEXT UNIQUE NOT NULL,
+		host_id TEXT NOT NULL,
+		created_at INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms(code);
+
 	CREATE TABLE IF NOT EXISTS games (
 		id TEXT PRIMARY KEY,
 		code TEXT UNIQUE NOT NULL,
 		host_id TEXT NOT NULL,
+		room_code TEXT,
 		status TEXT NOT NULL DEFAULT 'active',
 		buzzwords JSON,
 		winner_id TEXT,
 		created_at INTEGER NOT NULL,
 		ended_at INTEGER,
 		expires_at INTEGER NOT NULL,
-		FOREIGN KEY (host_id) REFERENCES hosts(id)
+		FOREIGN KEY (host_id) REFERENCES hosts(id),
+		FOREIGN KEY (room_code) REFERENCES rooms(code)
 	);
 
 	CREATE TABLE IF NOT EXISTS players (
@@ -74,7 +86,17 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		id TEXT PRIMARY KEY,
 		player_username TEXT NOT NULL,
 		game_code TEXT NOT NULL,
-		won_at INTEGER NOT NULL
+		room_code TEXT,
+		won_at INTEGER NOT NULL,
+		FOREIGN KEY (room_code) REFERENCES rooms(code)
+	);
+
+	CREATE TABLE IF NOT EXISTS room_buzzwords (
+		room_code TEXT PRIMARY KEY,
+		words JSON NOT NULL,
+		uploaded_by TEXT NOT NULL,
+		uploaded_at INTEGER NOT NULL,
+		FOREIGN KEY (room_code) REFERENCES rooms(code)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_games_code ON games(code);
@@ -83,6 +105,7 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_players_game_id ON players(game_id);
 	CREATE INDEX IF NOT EXISTS idx_hosts_username ON hosts(username);
 	CREATE INDEX IF NOT EXISTS idx_wins_player_username ON wins_history(player_username);
+	CREATE INDEX IF NOT EXISTS idx_wins_room_code ON wins_history(room_code);
 
 	CREATE TABLE IF NOT EXISTS game_archives (
 		id TEXT PRIMARY KEY,
@@ -141,10 +164,10 @@ func (s *SQLiteStore) GetGameByCode(ctx context.Context, code string) (*Game, er
 	game := &Game{}
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, code, host_id, status, buzzwords, winner_id, created_at, ended_at, expires_at
+		`SELECT id, code, host_id, room_code, status, buzzwords, winner_id, created_at, ended_at, expires_at
 		 FROM games WHERE code = ?`,
 		code,
-	).Scan(&game.ID, &game.Code, &game.HostID, &game.Status, &game.Buzzwords, &game.WinnerID,
+	).Scan(&game.ID, &game.Code, &game.HostID, &game.RoomCode, &game.Status, &game.Buzzwords, &game.WinnerID,
 		&game.CreatedAt, &game.EndedAt, &game.ExpiresAt)
 
 	if err != nil {
@@ -165,10 +188,10 @@ func (s *SQLiteStore) GetGameByID(ctx context.Context, gameID string) (*Game, er
 	game := &Game{}
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, code, host_id, status, buzzwords, winner_id, created_at, ended_at, expires_at
+		`SELECT id, code, host_id, room_code, status, buzzwords, winner_id, created_at, ended_at, expires_at
 		 FROM games WHERE id = ?`,
 		gameID,
-	).Scan(&game.ID, &game.Code, &game.HostID, &game.Status, &game.Buzzwords, &game.WinnerID,
+	).Scan(&game.ID, &game.Code, &game.HostID, &game.RoomCode, &game.Status, &game.Buzzwords, &game.WinnerID,
 		&game.CreatedAt, &game.EndedAt, &game.ExpiresAt)
 
 	if err != nil {
@@ -479,18 +502,24 @@ func (s *SQLiteStore) UpdateHostBuzzwords(ctx context.Context, hostID string, ap
 }
 
 // RecordWin records a win in the history table
-func (s *SQLiteStore) RecordWin(ctx context.Context, playerUsername string, gameCode string) error {
+// roomCode is empty string for standalone games (stored as NULL).
+func (s *SQLiteStore) RecordWin(ctx context.Context, playerUsername string, gameCode string, roomCode string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	winID := generateID()
 	now := time.Now().Unix()
 
+	var roomCodeVal interface{}
+	if roomCode != "" {
+		roomCodeVal = roomCode
+	}
+
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO wins_history (id, player_username, game_code, won_at)
-		 VALUES (?, ?, ?, ?)`,
-		winID, playerUsername, gameCode, now,
+		`INSERT INTO wins_history (id, player_username, game_code, room_code, won_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		winID, playerUsername, gameCode, roomCodeVal, now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record win: %w", err)
@@ -518,7 +547,7 @@ func (s *SQLiteStore) GetPlayerWins(ctx context.Context, playerUsername string) 
 	return count, nil
 }
 
-// GetLeaderboard retrieves top players by win count
+// GetLeaderboard retrieves top players by win count for standalone (non-room) games only.
 func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -526,6 +555,7 @@ func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*Leaderb
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT player_username, COUNT(*) as wins FROM wins_history
+		 WHERE room_code IS NULL
 		 GROUP BY player_username ORDER BY wins DESC LIMIT ?`,
 		limit,
 	)
@@ -546,6 +576,39 @@ func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*Leaderb
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating leaderboard: %w", err)
+	}
+
+	return entries, nil
+}
+
+// GetRoomLeaderboard retrieves top players by win count for a specific room (Phase 11.4).
+func (s *SQLiteStore) GetRoomLeaderboard(ctx context.Context, roomCode string, limit int) ([]*LeaderboardEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT player_username, COUNT(*) as wins FROM wins_history
+		 WHERE room_code = ?
+		 GROUP BY player_username ORDER BY wins DESC LIMIT ?`,
+		roomCode, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query room leaderboard: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*LeaderboardEntry
+	for rows.Next() {
+		entry := &LeaderboardEntry{}
+		if err := rows.Scan(&entry.Username, &entry.Wins); err != nil {
+			return nil, fmt.Errorf("failed to scan room leaderboard entry: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating room leaderboard: %w", err)
 	}
 
 	return entries, nil
@@ -620,7 +683,147 @@ func (s *SQLiteStore) CleanupOldArchives(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// ── Room operations (Phase 11.0) ─────────────────────────────────────────────
+
+// CreateRoom creates a new room record.
+// The caller must pass a collision-checked 5-char alphanumeric code.
+func (s *SQLiteStore) CreateRoom(ctx context.Context, hostID string) (*Room, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	roomID := generateID()
+	code := generateRoomCode()
+	now := time.Now().Unix()
+
+	// Retry on code collision (extremely rare but possible)
+	for {
+		var exists int
+		err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM rooms WHERE code = ?`, code).Scan(&exists)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check room code uniqueness: %w", err)
+		}
+		if exists == 0 {
+			break
+		}
+		code = generateRoomCode()
+	}
+
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO rooms (id, code, host_id, created_at) VALUES (?, ?, ?, ?)`,
+		roomID, code, hostID, now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create room: %w", err)
+	}
+
+	return &Room{ID: roomID, Code: code, HostID: hostID, CreatedAt: now}, nil
+}
+
+// GetRoom retrieves a room by its 5-char code.
+func (s *SQLiteStore) GetRoom(ctx context.Context, code string) (*Room, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	room := &Room{}
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT id, code, host_id, created_at FROM rooms WHERE code = ?`,
+		code,
+	).Scan(&room.ID, &room.Code, &room.HostID, &room.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("room not found: %w", sql.ErrNoRows)
+		}
+		return nil, fmt.Errorf("failed to query room: %w", err)
+	}
+	return room, nil
+}
+
+// GetRoomByGameCode retrieves a room via the associated game code (BINGO-XXXXX).
+func (s *SQLiteStore) GetRoomByGameCode(ctx context.Context, gameCode string) (*Room, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	room := &Room{}
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT r.id, r.code, r.host_id, r.created_at
+		 FROM rooms r
+		 JOIN games g ON g.room_code = r.code
+		 WHERE g.code = ?`,
+		gameCode,
+	).Scan(&room.ID, &room.Code, &room.HostID, &room.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("room not found for game code %s: %w", gameCode, sql.ErrNoRows)
+		}
+		return nil, fmt.Errorf("failed to query room by game code: %w", err)
+	}
+	return room, nil
+}
+
+// ── Buzzword operations (Phase 11.3) ─────────────────────────────────────────
+
+// SetRoomBuzzwords stores or replaces the custom buzzword list for a room.
+func (s *SQLiteStore) SetRoomBuzzwords(ctx context.Context, roomCode string, words []string, uploadedBy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := json.Marshal(words)
+	if err != nil {
+		return fmt.Errorf("failed to marshal buzzwords: %w", err)
+	}
+
+	now := time.Now().Unix()
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO room_buzzwords (room_code, words, uploaded_by, uploaded_at)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(room_code) DO UPDATE SET words = excluded.words,
+		   uploaded_by = excluded.uploaded_by, uploaded_at = excluded.uploaded_at`,
+		roomCode, data, uploadedBy, now,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set room buzzwords: %w", err)
+	}
+	return nil
+}
+
+// GetRoomBuzzwords retrieves the custom buzzword list for a room.
+// Returns (nil, nil) when no custom list has been set.
+func (s *SQLiteStore) GetRoomBuzzwords(ctx context.Context, roomCode string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var raw []byte
+	err := s.db.QueryRowContext(ctx,
+		`SELECT words FROM room_buzzwords WHERE room_code = ?`, roomCode,
+	).Scan(&raw)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // no custom list set
+		}
+		return nil, fmt.Errorf("failed to query room buzzwords: %w", err)
+	}
+
+	var words []string
+	if err := json.Unmarshal(raw, &words); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal room buzzwords: %w", err)
+	}
+	return words, nil
+}
+
 // generateID generates a unique ID (simple UUID-like string)
 func generateID() string {
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Nanosecond())
+}
+
+// generateRoomCode generates a random 5-character alphanumeric room code (uppercase).
+func generateRoomCode() string {
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var sb strings.Builder
+	for range 5 {
+		sb.WriteByte(chars[rand.Intn(len(chars))])
+	}
+	return sb.String()
 }

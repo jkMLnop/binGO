@@ -51,6 +51,7 @@ export type ServerMessage = {
   type: string;
   game_id: string;
   code?: string;
+  room_code?: string; // Phase 11.0: 5-char room code
   host_id?: string;
   player_id: string;
   username?: string;

@@ -95,7 +95,7 @@ func TestSQLiteStoreBasics(t *testing.T) {
 	}
 
 	// Test win recording
-	if err := store.RecordWin(ctx, "bob", gameCode); err != nil {
+	if err := store.RecordWin(ctx, "bob", gameCode, ""); err != nil {
 		t.Fatalf("failed to record win: %v", err)
 	}
 
@@ -304,10 +304,10 @@ func TestGetPlayerStatsWithWins(t *testing.T) {
 	}
 
 	// Record 2 wins for alice
-	if err := store.RecordWin(ctx, "alice", gameCodes[0].code); err != nil {
+	if err := store.RecordWin(ctx, "alice", gameCodes[0].code, ""); err != nil {
 		t.Fatalf("RecordWin failed: %v", err)
 	}
-	if err := store.RecordWin(ctx, "alice", gameCodes[1].code); err != nil {
+	if err := store.RecordWin(ctx, "alice", gameCodes[1].code, ""); err != nil {
 		t.Fatalf("RecordWin failed: %v", err)
 	}
 

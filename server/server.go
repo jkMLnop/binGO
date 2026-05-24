@@ -23,10 +23,12 @@ import (
 type Server struct {
 	Games         map[string]*Game // gameID -> Game (for backward compatibility)
 	CodeToGame    map[string]*Game // Code -> Game (Phase 7.3: code-based access)
+	Rooms         map[string]*Room // roomCode -> Room (Phase 11.0)
 	Buzzwords     [][]string
 	Rows          int
 	Cols          int
 	GamesMu       sync.RWMutex
+	RoomsMu       sync.RWMutex
 	Port          string
 	Server        *http.Server
 	Mux           *http.ServeMux            // Custom mux for this server
@@ -59,6 +61,7 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 	srv := &Server{
 		Games:        make(map[string]*Game),
 		CodeToGame:   make(map[string]*Game),
+		Rooms:        make(map[string]*Room),
 		Buzzwords:    buzzwords,
 		Rows:         rows,
 		Cols:         cols,
@@ -106,6 +109,10 @@ func (s *Server) registerHandlers() {
 	s.Mux.HandleFunc("/api/game/", s.handleGetGameByCode)
 	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
 	s.Mux.HandleFunc("/api/player/", s.handleGetPlayerStats) // Phase 9: player stats
+
+	// Room API handlers (Phase 11.0)
+	s.Mux.HandleFunc("/api/rooms", s.handleCreateRoom)
+	s.Mux.HandleFunc("/api/room/", s.handleRoomRoutes)
 
 	// Admin API handlers (Phase 8) - register both with and without trailing path
 	s.Mux.HandleFunc("/admin/api/games", s.handleAdminGames)
@@ -316,7 +323,45 @@ func (s *Server) handlePlayerConnect(ctx context.Context, ws *websocket.Conn) (*
 	}
 
 	var game *Game
-	if code == "" && loginMsg.Action == "host" {
+	if loginMsg.Action == "room_login" {
+		// Phase 11.0: room_login — resolve room → game (lazy creation on first login)
+		roomCode := loginMsg.RoomCode
+		if roomCode == "" {
+			errMsg := ServerMessage{Type: "error", Message: "room_code required for room_login"}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			s.Metrics.RecordError("input")
+			return nil, nil, fmt.Errorf("room_code required for room_login")
+		}
+		room, roomErr := s.getOrCreateRoom(strings.ToUpper(roomCode))
+		if roomErr != nil {
+			if !s.getCodeLimiter(clientIP).Allow() {
+				s.Logger.RateLimitExceeded(clientIP, "code_guess", 0)
+				s.Metrics.RecordRateLimit("code_guess")
+				errMsg := ServerMessage{Type: "error", Message: "Too many failed attempts. Please wait before trying again."}
+				websocket.JSON.Send(ws, errMsg)
+				ws.Close()
+				return nil, nil, fmt.Errorf("rate limited: too many invalid code attempts from %s", clientIP)
+			}
+			errMsg := ServerMessage{Type: "error", Message: roomErr.Error()}
+			websocket.JSON.Send(ws, errMsg)
+			ws.Close()
+			return nil, nil, roomErr
+		}
+		// Lazily create the game the first time someone joins this room
+		game = room.GetGame()
+		if game == nil {
+			var createErr error
+			game, createErr = s.createGameForHost(ctx, username, nil)
+			if createErr != nil {
+				errMsg := ServerMessage{Type: "error", Message: createErr.Error()}
+				websocket.JSON.Send(ws, errMsg)
+				ws.Close()
+				return nil, nil, createErr
+			}
+			room.SetGame(game)
+		}
+	} else if code == "" && loginMsg.Action == "host" {
 		// Host flow: create a fresh game for this player (Phase 9)
 		var createErr error
 		game, createErr = s.createGameForHost(ctx, username, loginMsg.Buzzwords)
@@ -534,10 +579,15 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 	if len(buzzwords) == 0 {
 		buzzwords = s.Buzzwords
 	}
+
+	// Include room code if this game is attached to a room (Phase 11.0)
+	roomCode := s.roomCodeForGame(game)
+
 	welcomeMsg := ServerMessage{
 		Type:      "welcome",
 		GameID:    game.ID,
 		Code:      game.Code,   // Phase 7.3: Include game code
+		RoomCode:  roomCode,    // Phase 11.0: 5-char room code (empty for standalone)
 		HostID:    game.HostID, // Include host player ID (immutable)
 		PlayerID:  player.ID,
 		Username:  player.ID, // username is the player ID
@@ -659,10 +709,12 @@ func (s *Server) handlePlayerWin(ctx context.Context, game *Game, player *Player
 	game.EndedAt = time.Now()
 	log.Printf("🏆 Player %s WON game %s!", player.ID, game.ID)
 
-	// Record win in database with a 3s deadline
+	// Record win in database with a 3s deadline.
+	// Resolve room code for scoped leaderboard (nil when no room).
 	dbCtx, dbCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer dbCancel()
-	if err := RecordWinInDB(dbCtx, s.DB, game, player.ID); err != nil {
+	roomCode := s.roomCodeForGame(game)
+	if err := RecordWinInDB(dbCtx, s.DB, game, player.ID, roomCode); err != nil {
 		log.Printf("Warning: failed to record win in DB: %v", err)
 		s.Metrics.RecordError("db")
 	}

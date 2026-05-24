@@ -2,20 +2,22 @@ package server
 
 // ClientMessage represents messages sent from client to server
 type ClientMessage struct {
-	Action    string     `json:"action"`              // "login", "host", "win", "restart", "suggest", "approve", "reject", "bet"
+	Action    string     `json:"action"`              // "login", "room_login", "host", "win", "restart", "suggest", "approve", "reject", "bet"
 	Username  string     `json:"username,omitempty"`  // for login action
 	Token     string     `json:"token,omitempty"`     // JWT token for re-authentication
 	Code      string     `json:"code,omitempty"`      // Phase 7.3: Game join code (for remote players)
+	RoomCode  string     `json:"room_code,omitempty"` // Phase 11.0: 5-char room code (for room_login)
 	Phrase    string     `json:"phrase,omitempty"`    // Phase 9: buzzword suggestion or bet text
 	Buzzwords [][]string `json:"buzzwords,omitempty"` // Phase 9: custom buzzwords for host game creation
 }
 
 // ServerMessage represents messages sent from server to client
 type ServerMessage struct {
-	Type                string       `json:"type"` // "welcome", "game_ended", "error", "suggestion_broadcast", "bets_update"
+	Type                string       `json:"type"` // "welcome", "room_welcome", "game_ended", "error", "suggestion_broadcast", "bets_update"
 	GameID              string       `json:"game_id"`
-	Code                string       `json:"code,omitempty"`    // Phase 7.3: Game code for joining
-	HostID              string       `json:"host_id,omitempty"` // Host player ID (immutable)
+	Code                string       `json:"code,omitempty"`      // Phase 7.3: Game code for joining
+	RoomCode            string       `json:"room_code,omitempty"` // Phase 11.0: 5-char room code
+	HostID              string       `json:"host_id,omitempty"`   // Host player ID (immutable)
 	PlayerID            string       `json:"player_id"`
 	Username            string       `json:"username,omitempty"` // authenticated username
 	Token               string       `json:"token,omitempty"`    // JWT token issued on login

@@ -13,6 +13,11 @@ type GameStore interface {
 	Init(ctx context.Context) error
 	Close(ctx context.Context) error
 
+	// Room operations (Phase 11.0)
+	CreateRoom(ctx context.Context, hostID string) (*Room, error)
+	GetRoom(ctx context.Context, code string) (*Room, error)
+	GetRoomByGameCode(ctx context.Context, gameCode string) (*Room, error)
+
 	// Game operations
 	CreateGame(ctx context.Context, code string, hostID string, buzzwords json.RawMessage) (gameID string, err error)
 	GetGameByCode(ctx context.Context, code string) (*Game, error)
@@ -37,14 +42,29 @@ type GameStore interface {
 	UpdateHostBuzzwords(ctx context.Context, hostID string, approvedBuzzwords json.RawMessage) error
 
 	// Win history operations
-	RecordWin(ctx context.Context, playerUsername string, gameCode string) error
+	RecordWin(ctx context.Context, playerUsername string, gameCode string, roomCode string) error
 	GetPlayerWins(ctx context.Context, playerUsername string) (int, error)
 	GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error)
+	GetRoomLeaderboard(ctx context.Context, roomCode string, limit int) ([]*LeaderboardEntry, error)
 	GetPlayerStats(ctx context.Context, username string) (*PlayerStats, error)
+
+	// Buzzword operations (Phase 11.3)
+	SetRoomBuzzwords(ctx context.Context, roomCode string, words []string, uploadedBy string) error
+	GetRoomBuzzwords(ctx context.Context, roomCode string) ([]string, error)
 
 	// Game archive operations
 	ArchiveGame(ctx context.Context, gameID, code, hostID, winnerID string, playerCount int, createdAt, endedAt time.Time) error
 	CleanupOldArchives(ctx context.Context) (deletedCount int, err error)
+}
+
+// Room represents a bingo room (Phase 11.0)
+// The room code (5-char alphanumeric) is the player-facing identifier.
+// The associated game code retains the BINGO-XXXXX format for backward compat.
+type Room struct {
+	ID        string
+	Code      string // 5-char alphanumeric, e.g. "AB3K7"
+	HostID    string
+	CreatedAt int64 // Unix timestamp
 }
 
 // Game represents a game session
@@ -52,7 +72,8 @@ type Game struct {
 	ID        string
 	Code      string
 	HostID    string
-	Status    string // "active", "ended"
+	RoomCode  *string // nullable — nil for standalone games not in a room (Phase 11.0)
+	Status    string  // "active", "ended"
 	Buzzwords json.RawMessage
 	WinnerID  *string // nullable - nil if no winner yet
 	CreatedAt int64   // Unix timestamp

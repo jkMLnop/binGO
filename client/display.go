@@ -22,9 +22,15 @@ func (p *Player) DisplayWelcome(welcomeMsg ServerMessage) {
 		fmt.Printf("   %s: %s\n", hostLabel, welcomeMsg.HostID)
 	}
 
-	// Display game code
+	// Display room/game code
 	if welcomeMsg.Code != "" {
-		fmt.Printf("   Game code: %s\n", welcomeMsg.Code)
+		roomCode := welcomeMsg.RoomCode
+		if roomCode != "" {
+			fmt.Printf("   Room code: %s\n", roomCode)
+			fmt.Printf("   Game code: %s\n", welcomeMsg.Code)
+		} else {
+			fmt.Printf("   Room code: %s\n", welcomeMsg.Code)
+		}
 	}
 }
 

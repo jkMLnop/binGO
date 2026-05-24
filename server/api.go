@@ -293,3 +293,236 @@ func getGameStatus(game *Game) string {
 	}
 	return "active"
 }
+
+// ── Room API handlers (Phase 11.0) ────────────────────────────────────────────
+
+// RoomInfo is the API response shape for room endpoints.
+type RoomInfo struct {
+	Code        string `json:"code"`      // 5-char room code
+	GameCode    string `json:"game_code"` // BINGO-XXXXX (empty if game not yet created)
+	HostID      string `json:"host_id"`
+	PlayerCount int    `json:"player_count"`
+	GameStatus  string `json:"game_status"` // "pending", "active", "ended"
+}
+
+// handleCreateRoom creates a new room.
+// POST /api/rooms
+func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var body struct {
+		HostID string `json:"host_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		body.HostID = "" // allow empty body → auto-generate host ID
+	}
+	hostID := body.HostID
+	if hostID == "" {
+		hostID = fmt.Sprintf("host-%d", len(s.Rooms)+1)
+	}
+
+	room, err := s.createRoom(r.Context(), hostID)
+	if err != nil {
+		log.Printf("Error creating room: %v", err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to create room")
+		return
+	}
+
+	info := RoomInfo{
+		Code:        room.Code,
+		GameCode:    "",
+		HostID:      room.HostID,
+		PlayerCount: 0,
+		GameStatus:  "pending",
+	}
+	if g := room.GetGame(); g != nil {
+		info.GameCode = g.Code
+		info.PlayerCount = g.PlayerCount()
+		info.GameStatus = getGameStatus(g)
+	}
+
+	writeAPISuccess(w, info)
+}
+
+// handleRoomRoutes dispatches sub-routes under /api/room/:code/*.
+func (s *Server) handleRoomRoutes(w http.ResponseWriter, r *http.Request) {
+	// Path: /api/room/<code>[/<sub>]
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/room/")
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing room code")
+		return
+	}
+	code := strings.ToUpper(parts[0])
+	sub := ""
+	if len(parts) == 2 {
+		sub = parts[1]
+	}
+
+	switch {
+	case sub == "" && r.Method == http.MethodGet:
+		s.handleGetRoom(w, r, code)
+	case sub == "buzzwords" && r.Method == http.MethodGet:
+		s.handleGetRoomBuzzwords(w, r, code)
+	case sub == "buzzwords" && r.Method == http.MethodPost:
+		s.handleSetRoomBuzzwords(w, r, code)
+	case sub == "leaderboard" && r.Method == http.MethodGet:
+		s.handleGetRoomLeaderboard(w, r, code)
+	default:
+		writeAPIError(w, http.StatusNotFound, "not found")
+	}
+}
+
+// handleGetRoom returns a lobby snapshot for the given room.
+// GET /api/room/:code
+func (s *Server) handleGetRoom(w http.ResponseWriter, r *http.Request, code string) {
+	room, err := s.getOrCreateRoom(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("room %s not found", code))
+		return
+	}
+
+	info := RoomInfo{
+		Code:        room.Code,
+		HostID:      room.HostID,
+		PlayerCount: 0,
+		GameStatus:  "pending",
+	}
+	if g := room.GetGame(); g != nil {
+		info.GameCode = g.Code
+		info.PlayerCount = g.PlayerCount()
+		info.GameStatus = getGameStatus(g)
+	}
+
+	writeAPISuccess(w, info)
+}
+
+// handleGetRoomBuzzwords returns the active buzzword list for a room.
+// GET /api/room/:code/buzzwords
+func (s *Server) handleGetRoomBuzzwords(w http.ResponseWriter, r *http.Request, code string) {
+	if s.DB == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "buzzwords not available - database not enabled")
+		return
+	}
+
+	words, err := s.DB.GetRoomBuzzwords(r.Context(), code)
+	if err != nil {
+		log.Printf("Error fetching room buzzwords for %s: %v", code, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to fetch buzzwords")
+		return
+	}
+
+	if words == nil {
+		// Fall back to built-in list
+		flat := make([]string, 0)
+		for _, row := range s.Buzzwords {
+			flat = append(flat, row...)
+		}
+		words = flat
+	}
+
+	writeAPISuccess(w, map[string]interface{}{"words": words, "custom": words != nil})
+}
+
+// BuzzwordUploadRequest is the body for POST /api/room/:code/buzzwords.
+type BuzzwordUploadRequest struct {
+	Words      []string `json:"words"`
+	UploadedBy string   `json:"uploaded_by"`
+}
+
+// handleSetRoomBuzzwords validates and stores a custom buzzword list for a room.
+// POST /api/room/:code/buzzwords
+func (s *Server) handleSetRoomBuzzwords(w http.ResponseWriter, r *http.Request, code string) {
+	if s.DB == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "buzzwords not available - database not enabled")
+		return
+	}
+
+	var body BuzzwordUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Validate
+	if len(body.Words) < 24 {
+		writeAPIError(w, http.StatusBadRequest, "word list must contain at least 24 words")
+		return
+	}
+	if len(body.Words) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "word list must not exceed 500 words")
+		return
+	}
+	cleaned := make([]string, 0, len(body.Words))
+	for _, word := range body.Words {
+		// Strip control characters
+		word = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f {
+				return -1
+			}
+			return r
+		}, word)
+		word = strings.TrimSpace(word)
+		if word == "" {
+			continue
+		}
+		if len(word) > 60 {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("word too long (max 60 chars): %q", word))
+			return
+		}
+		cleaned = append(cleaned, word)
+	}
+	if len(cleaned) < 24 {
+		writeAPIError(w, http.StatusBadRequest, "word list must contain at least 24 non-empty words")
+		return
+	}
+
+	uploadedBy := body.UploadedBy
+	if uploadedBy == "" {
+		uploadedBy = "host"
+	}
+
+	if err := s.DB.SetRoomBuzzwords(r.Context(), code, cleaned, uploadedBy); err != nil {
+		log.Printf("Error setting room buzzwords for %s: %v", code, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to save buzzwords")
+		return
+	}
+
+	writeAPISuccess(w, map[string]interface{}{"words_saved": len(cleaned)})
+}
+
+// handleGetRoomLeaderboard returns per-room top players by win count.
+// GET /api/room/:code/leaderboard?limit=10
+func (s *Server) handleGetRoomLeaderboard(w http.ResponseWriter, r *http.Request, code string) {
+	if s.DB == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "leaderboard not available - database not enabled")
+		return
+	}
+
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	entries, err := s.DB.GetRoomLeaderboard(r.Context(), code, limit)
+	if err != nil {
+		log.Printf("Error fetching room leaderboard for %s: %v", code, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to retrieve leaderboard")
+		return
+	}
+
+	result := make([]LeaderboardEntryResponse, 0, len(entries))
+	for i, e := range entries {
+		result = append(result, LeaderboardEntryResponse{
+			Username: e.Username,
+			Wins:     e.Wins,
+			Rank:     i + 1,
+		})
+	}
+	writeAPISuccess(w, result)
+}

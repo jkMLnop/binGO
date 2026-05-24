@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { createGame, fetchGameByCode, fetchLeaderboard } from "./lib/api";
+import QRCode from "qrcode";
+import { createGame, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
@@ -289,14 +290,14 @@ function HomePage() {
           </button>
 
           <form className="join-form cli-join" onSubmit={handleJoin}>
-            <label htmlFor="join-code">2) Join existing game (with code)</label>
+            <label htmlFor="join-code">2) Join existing game (with room code)</label>
             <input
               id="join-code"
               value={code}
               onChange={(event) => setCode(event.target.value)}
               placeholder="BINGO-ABCDE"
               maxLength={11}
-              aria-label="Game code"
+              aria-label="Room code"
             />
             <button type="submit" className="ghost-btn">Join by Code</button>
           </form>
@@ -317,7 +318,7 @@ function GamePage() {
   const normalizedCode = code.toUpperCase();
   const [username, setUsername] = useState("");
   const [currentUser, setCurrentUser] = useState("");
-  const [gameStatus, setGameStatus] = useState("Checking game code...");
+  const [gameStatus, setGameStatus] = useState("Checking room code...");
   const [error, setError] = useState("");
   const [players, setPlayers] = useState<string[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -337,6 +338,13 @@ function GamePage() {
   const [showBetModal, setShowBetModal] = useState(false);
   const [gameDead, setGameDead] = useState(false);
   const [gameDeadReason, setGameDeadReason] = useState("");
+  const [showQR, setShowQR] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [roomCode, setRoomCode] = useState("");
+  const [roomLeaderboard, setRoomLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardTab, setLeaderboardTab] = useState<"all" | "room">("all");
+  const [showBuzzwordUpload, setShowBuzzwordUpload] = useState(false);
+  const [buzzwordUploadError, setBuzzwordUploadError] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const tokenRef = useRef<string>("");
   const winSentRef = useRef(false);
@@ -355,8 +363,8 @@ function GamePage() {
           const ageSeconds = Math.floor(Date.now() / 1000) - gameInfo.created_at;
           if (ageSeconds > GAME_TTL_SECONDS) {
             setGameDead(true);
-            setGameDeadReason("This game code has expired. Game codes are valid for 60 minutes.");
-            setGameStatus("Game code expired");
+            setGameDeadReason("This room code has expired. Room codes are valid for 60 minutes.");
+            setGameStatus("Room code expired");
           } else if (gameInfo.status === "ended" && !gameInfo.winner) {
             // Orphaned — host left before anyone won
             setGameDead(true);
@@ -376,7 +384,7 @@ function GamePage() {
       } catch (err) {
         if (mounted) {
           setError(err instanceof Error ? err.message : "Game not available");
-          setGameStatus("Unable to validate this game code");
+          setGameStatus("Unable to validate this room code");
         }
       }
     }
@@ -482,6 +490,11 @@ function GamePage() {
         setBoard({ rows: message.rows, cols: message.cols, cells });
         if (!existingWinner) {
           setGameStatus(`Connected to ${message.game_id}`);
+        }
+        // Phase 11.0: capture room code from welcome message
+        if (message.room_code) {
+          setRoomCode(message.room_code);
+          fetchRoomLeaderboard(message.room_code).then(setRoomLeaderboard).catch(() => {});
         }
         // If existingWinner is set, keep the status from validateCode (already informative).
       }
@@ -638,11 +651,21 @@ function GamePage() {
     }
   }
 
+  async function handleShowQR() {
+    try {
+      const url = await QRCode.toDataURL(gameLink, { width: 256, margin: 2 });
+      setQrDataUrl(url);
+      setShowQR(true);
+    } catch {
+      setGameStatus("QR code generation failed.");
+    }
+  }
+
   return (
     <main className="shell">
       <section className="panel game-header">
         <div>
-          <p className="eyebrow">game code</p>
+          <p className="eyebrow">room code</p>
           <h1>{normalizedCode}</h1>
           <p>{gameStatus}</p>
           {connected && currentUser ? (
@@ -660,11 +683,28 @@ function GamePage() {
           <button onClick={copyShareLink} className="ghost-btn" type="button">
             Copy Share Link
           </button>
+          <button onClick={handleShowQR} className="ghost-btn" type="button">
+            QR Code
+          </button>
         </div>
       </section>
 
       {showHelp && connected && (
         <HelpPanel isHost={isHost} onClose={() => setShowHelp(false)} />
+      )}
+
+      {showQR && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="QR Code to share game">
+          <div className="modal-panel qr-panel">
+            <h2>Share this game</h2>
+            <p className="qr-link">{gameLink}</p>
+            {qrDataUrl && <img src={qrDataUrl} alt="QR code for game link" width={256} height={256} />}
+            <div className="modal-actions">
+              <button onClick={copyShareLink} className="ghost-btn" type="button">Copy Link</button>
+              <button onClick={() => setShowQR(false)} className="ghost-btn" type="button">Close</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showBuzzwords && (
@@ -771,6 +811,11 @@ function GamePage() {
                 <button type="button" className="toolbar-btn" onClick={handleListBuzzwords}>
                   📋 Buzzwords
                 </button>
+                {isHost && roomCode && (
+                  <button type="button" className="toolbar-btn" onClick={() => { setBuzzwordUploadError(""); setShowBuzzwordUpload(true); }}>
+                    📤 Upload Word List
+                  </button>
+                )}
               </div>
             )}
           </article>
@@ -786,8 +831,22 @@ function GamePage() {
 
         <article className="panel">
           <h2>Leaderboard</h2>
+          {roomCode && (
+            <div className="tab-row">
+              <button
+                type="button"
+                className={`tab-btn${leaderboardTab === "all" ? " active" : ""}`}
+                onClick={() => setLeaderboardTab("all")}
+              >All Time</button>
+              <button
+                type="button"
+                className={`tab-btn${leaderboardTab === "room" ? " active" : ""}`}
+                onClick={() => { setLeaderboardTab("room"); fetchRoomLeaderboard(roomCode).then(setRoomLeaderboard).catch(() => {}); }}
+              >This Room</button>
+            </div>
+          )}
           <ul className="list">
-            {leaderboard.map((entry) => (
+            {(leaderboardTab === "room" && roomCode ? roomLeaderboard : leaderboard).map((entry) => (
               <li key={entry.username}>
                 <span>#{entry.rank}</span>
                 <span>{entry.username}</span>
@@ -809,7 +868,106 @@ function GamePage() {
             onClose={() => setShowBetModal(false)}
           />
         )}
+        {showBuzzwordUpload && roomCode && (
+          <BuzzwordUploadModal
+            roomCode={roomCode}
+            uploadedBy={currentUser}
+            error={buzzwordUploadError}
+            onClose={() => setShowBuzzwordUpload(false)}
+            onSubmit={async (words) => {
+              try {
+                await setRoomBuzzwords(roomCode, words, currentUser);
+                setShowBuzzwordUpload(false);
+                setGameStatus("Custom word list uploaded for next round.");
+              } catch (e) {
+                setBuzzwordUploadError(e instanceof Error ? e.message : "Upload failed");
+              }
+            }}
+          />
+        )}
     </main>
+  );
+}
+
+// ─── Phase 11.3: Buzzword Upload Modal ──────────────────────────────────────
+function BuzzwordUploadModal({
+  roomCode,
+  uploadedBy,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  roomCode: string;
+  uploadedBy: string;
+  error: string;
+  onClose: () => void;
+  onSubmit: (words: string[]) => Promise<void>;
+}) {
+  const [raw, setRaw] = useState("");
+  const [parseError, setParseError] = useState("");
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      setRaw((evt.target?.result as string) || "");
+      setParseError("");
+    };
+    reader.readAsText(file);
+  }
+
+  async function handleSubmit(evt: FormEvent) {
+    evt.preventDefault();
+    let words: string[] = [];
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (!Array.isArray(parsed)) throw new Error("Expected a JSON array");
+        words = (parsed as unknown[]).map(String);
+      } catch (err) {
+        setParseError(err instanceof Error ? err.message : "Invalid JSON");
+        return;
+      }
+    } else {
+      // One word/phrase per line
+      words = trimmed.split("\n").map((w) => w.trim()).filter(Boolean);
+    }
+    if (words.length < 24) {
+      setParseError(`Need at least 24 words — got ${words.length}`);
+      return;
+    }
+    setParseError("");
+    await onSubmit(words);
+  }
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Upload custom word list">
+      <div className="modal-panel">
+        <h2>Upload Word List</h2>
+        <p>For room <strong>{roomCode}</strong>. Needs ≥ 24 words. Takes effect on next restart.</p>
+        <form onSubmit={handleSubmit}>
+          <label>
+            Upload JSON file or paste words below
+            <input type="file" accept=".json,.txt,.csv" onChange={handleFile} />
+          </label>
+          <textarea
+            rows={8}
+            placeholder={"[\"Synergy\", \"Circle back\", ...]\n— or one phrase per line —"}
+            value={raw}
+            onChange={(e) => { setRaw(e.target.value); setParseError(""); }}
+          />
+          {(parseError || error) && (
+            <p className="inline-error">{parseError || error}</p>
+          )}
+          <div className="modal-actions">
+            <button type="submit" className="action-btn">Upload</button>
+            <button type="button" className="ghost-btn" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

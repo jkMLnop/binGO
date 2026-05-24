@@ -44,6 +44,14 @@ func (l *Logger) logEvent(level, eventType, message string, details interface{})
 	l.logger.Println(string(data))
 }
 
+// RoomCreated logs when a room is created (Phase 11.0)
+func (l *Logger) RoomCreated(code, hostID string) {
+	l.logEvent("INFO", "room_created", "Room created", map[string]interface{}{
+		"code":    code,
+		"host_id": hostID,
+	})
+}
+
 // GameCreated logs when a game is created
 func (l *Logger) GameCreated(gameID, code, hostID string, details map[string]interface{}) {
 	d := map[string]interface{}{

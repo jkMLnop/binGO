@@ -8,6 +8,7 @@ import (
 type Metrics struct {
 	GameCount                prometheus.Gauge
 	PlayerCount              prometheus.Gauge
+	RoomsActive              prometheus.Gauge // Phase 11.0: active rooms
 	GameCreationDuration     prometheus.Histogram
 	DatabaseQueryDuration    prometheus.Histogram
 	GamesCreatedTotal        prometheus.Counter
@@ -40,6 +41,10 @@ func NewMetrics() *Metrics {
 		PlayerCount: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "bingo_player_count",
 			Help: "Total number of connected players",
+		}),
+		RoomsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "bingo_rooms_active",
+			Help: "Total number of active rooms (Phase 11.0)",
 		}),
 		GameCreationDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "bingo_game_creation_duration_ms",
@@ -96,6 +101,7 @@ func NewMetrics() *Metrics {
 	prometheus.MustRegister(
 		globalMetrics.GameCount,
 		globalMetrics.PlayerCount,
+		globalMetrics.RoomsActive,
 		globalMetrics.GameCreationDuration,
 		globalMetrics.DatabaseQueryDuration,
 		globalMetrics.GamesCreatedTotal,
@@ -118,6 +124,7 @@ func ResetMetrics() {
 		// Unregister all metrics from Prometheus registry
 		prometheus.Unregister(globalMetrics.GameCount)
 		prometheus.Unregister(globalMetrics.PlayerCount)
+		prometheus.Unregister(globalMetrics.RoomsActive)
 		prometheus.Unregister(globalMetrics.GameCreationDuration)
 		prometheus.Unregister(globalMetrics.DatabaseQueryDuration)
 		prometheus.Unregister(globalMetrics.GamesCreatedTotal)

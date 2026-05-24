@@ -90,14 +90,15 @@ func RecordPlayerInDB(ctx context.Context, store db.GameStore, gameID string, us
 	return playerID, nil
 }
 
-// RecordWinInDB records a game win in the database
-func RecordWinInDB(ctx context.Context, store db.GameStore, game *Game, winnerUsername string) error {
+// RecordWinInDB records a game win in the database.
+// roomCode is empty for standalone games (not in a room).
+func RecordWinInDB(ctx context.Context, store db.GameStore, game *Game, winnerUsername string, roomCode string) error {
 	if store == nil {
 		return nil // DB not enabled
 	}
 
 	// Record in wins_history
-	if err := store.RecordWin(ctx, winnerUsername, game.Code); err != nil {
+	if err := store.RecordWin(ctx, winnerUsername, game.Code, roomCode); err != nil {
 		return fmt.Errorf("failed to record win in DB: %w", err)
 	}
 
@@ -106,7 +107,7 @@ func RecordWinInDB(ctx context.Context, store db.GameStore, game *Game, winnerUs
 		log.Printf("Warning: failed to update game winner in DB: %v", err)
 	}
 
-	log.Printf("Win recorded in DB: username=%s, gameCode=%s", winnerUsername, game.Code)
+	log.Printf("Win recorded in DB: username=%s, gameCode=%s, roomCode=%s", winnerUsername, game.Code, roomCode)
 	return nil
 }
 

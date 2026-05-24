@@ -5,6 +5,7 @@ type ServerMessage struct {
 	Type                string       `json:"type"`
 	GameID              string       `json:"game_id"`
 	Code                string       `json:"code,omitempty"`
+	RoomCode            string       `json:"room_code,omitempty"` // Phase 11.0: 5-char room code
 	HostID              string       `json:"host_id,omitempty"`
 	PlayerID            string       `json:"player_id"`
 	Username            string       `json:"username,omitempty"`
@@ -26,7 +27,8 @@ type ClientMessage struct {
 	Action    string     `json:"action"`
 	Username  string     `json:"username,omitempty"`
 	Token     string     `json:"token,omitempty"`
-	Code      string     `json:"code,omitempty"` // Phase 7.3: Game join code
+	Code      string     `json:"code,omitempty"`      // Phase 7.3: Game join code
+	RoomCode  string     `json:"room_code,omitempty"` // Phase 11.0: 5-char room code
 	Cell      string     `json:"cell,omitempty"`
 	CardID    string     `json:"cardId,omitempty"`
 	Phrase    string     `json:"phrase,omitempty"`    // Phase 9: buzzword suggestion or bet text

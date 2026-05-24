@@ -82,31 +82,31 @@ Before scaling to K8s, establish a persistent observability layer:
 ##### Phase 11.0: Room Foundation
 **Goal:** Introduce the `Room` entity as the canonical identifier for a bingo session. Every new game is associated with a room. The room code (`AB3K7`, 5-char alphanumeric) is the player-facing identifier; the game code (`BINGO-AB3K7`) is retained internally and for backward-compatible CLI connections. Standalone games without a room continue to work unchanged.
 
-- [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `rooms` table (`id`, `code` 5-char unique, `host_id`, `created_at`). Add nullable `room_code` FK column to `games` table (NULL for pre-existing standalone games). Add `GameStore` methods: `CreateRoom(hostID string) (*Room, error)`, `GetRoom(code string) (*Room, error)`, `GetRoomByGameCode(gameCode string) (*Room, error)`.
-- [ ] **Server** (`server/room.go` — new file): `Room` struct (`Code`, `HostID`, `Game *Game` nil until first login, `mu sync.RWMutex`). `NewRoom(hostID string)`. `GenerateRoomCode()` — 5-char alphanumeric, collision-checked against DB. `getOrCreateRoom(code string)`. Add `Rooms map[string]*Room` + `RoomsMu sync.RWMutex` to `Server` struct.
-- [ ] **HTTP** (`server/api.go`): `POST /api/rooms` (host auth; returns `{code, game_code}`). `GET /api/room/:code` (lobby snapshot: room info, game status, player count). Existing `/api/game/:code` endpoints unchanged for backward compat.
-- [ ] **WebSocket** (`server/types.go`, `server/server.go`): Add `room_login` client action (`{room_code, username, token}`). Server resolves room → game, then follows existing login flow. Add `room_welcome` server message (game status, players online). Existing `login` action with game code (`BINGO-XXXXX`) remains supported.
-- [ ] **Metrics** (`server/metrics.go`): Add `bingo_rooms_active` Gauge.
-- [ ] **Logging** (`server/logger.go`): Add `RoomCreated(code, hostID string)`.
-- [ ] **Tests** (`server/room_test.go`): `NewRoom`, `GenerateRoomCode` uniqueness and format (5-char alphanum), room creation API, `room_login` WS flow, backward-compat `login` with game code still works, `GetRoomByGameCode` round-trip, lazy game creation on first login.
+- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add `rooms` table (`id`, `code` 5-char unique, `host_id`, `created_at`). Add nullable `room_code` FK column to `games` table (NULL for pre-existing standalone games). Add `GameStore` methods: `CreateRoom(hostID string) (*Room, error)`, `GetRoom(code string) (*Room, error)`, `GetRoomByGameCode(gameCode string) (*Room, error)`.
+- [x] **Server** (`server/room.go` — new file): `Room` struct (`Code`, `HostID`, `Game *Game` nil until first login, `mu sync.RWMutex`). `NewRoom(hostID string)`. `GenerateRoomCode()` — 5-char alphanumeric, collision-checked against DB. `getOrCreateRoom(code string)`. Add `Rooms map[string]*Room` + `RoomsMu sync.RWMutex` to `Server` struct.
+- [x] **HTTP** (`server/api.go`): `POST /api/rooms` (host auth; returns `{code, game_code}`). `GET /api/room/:code` (lobby snapshot: room info, game status, player count). Existing `/api/game/:code` endpoints unchanged for backward compat.
+- [x] **WebSocket** (`server/types.go`, `server/server.go`): Add `room_login` client action (`{room_code, username, token}`). Server resolves room → game, then follows existing login flow. Add `room_welcome` server message (game status, players online). Existing `login` action with game code (`BINGO-XXXXX`) remains supported.
+- [x] **Metrics** (`server/metrics.go`): Add `bingo_rooms_active` Gauge.
+- [x] **Logging** (`server/logger.go`): Add `RoomCreated(code, hostID string)`.
+- [x] **Tests** (`server/room_test.go`): `NewRoom`, `GenerateRoomCode` uniqueness and format (5-char alphanum), room creation API, `room_login` WS flow, backward-compat `login` with game code still works, `GetRoomByGameCode` round-trip, lazy game creation on first login.
 
 ---
 
 ##### Phase 11.1: Room Code Rename (UI & Docs)
 **Goal:** Rename "game code" / "share code" → "room code" everywhere in user-facing surfaces. "Room code" now refers to the 5-char code from Phase 11.0 (e.g. `AB3K7`). No protocol changes.
 
-- [ ] **Web client** (`web-client/src/`): Replace all "game code", "share code", "game link" label text with "room code". Update join flow copy, placeholder text, and help tooltips.
-- [ ] **CLI** (`client/display.go`, `client/player.go`): Update terminal output strings — "Your game code:" → "Room code:", "Share this code:" → "Share this room code:".
-- [ ] **Docs** (`README.md`, `docs/ADMIN_API.md`, `docs/DEPLOYMENT.md`): Update terminology throughout.
-- [ ] **Tests**: grep for old strings in user-facing output paths to confirm none remain; no logic changes needed.
+- [x] **Web client** (`web-client/src/`): Replace all "game code", "share code", "game link" label text with "room code". Update join flow copy, placeholder text, and help tooltips.
+- [x] **CLI** (`client/display.go`, `client/player.go`): Update terminal output strings — "Your game code:" → "Room code:", "Share this code:" → "Share this room code:".
+- [x] **Docs** (`README.md`, `docs/ADMIN_API.md`, `docs/DEPLOYMENT.md`): Update terminology throughout.
+- [x] **Tests**: grep for old strings in user-facing output paths to confirm none remain; no logic changes needed.
 
 ---
 
 ##### Phase 11.2: QR Code Share Menu
 **Goal:** QR code generated client-side in the web app under the share menu so players can scan to join without typing the room code.
 
-- [ ] **Web client** (`web-client/src/`): Add share dropdown/modal to the active game view. Generate QR code client-side using the `qrcode` npm package (no server round-trip). QR encodes `https://yubetcha.com/join/:roomCode`. Display alongside a copy-link button and the plain room code text. Mobile-responsive: QR fills most of screen on narrow viewports for easy across-the-table scanning.
-- [ ] **No server changes required** — purely client-side generation.
+- [x] **Web client** (`web-client/src/`): Add share dropdown/modal to the active game view. Generate QR code client-side using the `qrcode` npm package (no server round-trip). QR encodes `https://yubetcha.com/join/:roomCode`. Display alongside a copy-link button and the plain room code text. Mobile-responsive: QR fills most of screen on narrow viewports for easy across-the-table scanning.
+- [x] **No server changes required** — purely client-side generation.
 - [ ] **Tests** (`web-client/src/lib/`): Unit test that QR URL is correctly formed from room code; no trailing slashes or double-slashes.
 
 ---
@@ -114,9 +114,9 @@ Before scaling to K8s, establish a persistent observability layer:
 ##### Phase 11.3: Web Client Buzzword Upload
 **Goal:** Bring the CLI's custom buzzword list feature to the web client. The host can upload a JSON file or paste a JSON array before the game starts.
 
-- [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add `room_buzzwords` table (`room_code` PK FK → `rooms.code`, `words` JSON array, `uploaded_by`, `uploaded_at`). Add `GameStore` methods: `SetRoomBuzzwords(roomCode string, words []string, uploadedBy string) error` and `GetRoomBuzzwords(roomCode string) ([]string, error)`. Server falls back to built-in list when `GetRoomBuzzwords` returns no rows.
-- [ ] **HTTP** (`server/api.go`): `POST /api/room/:code/buzzwords` (host auth required). Accepts `{words: string[]}` JSON body. Validates: min 24 words, max 500, each word max 60 chars, strip control chars, reject empty strings. `GET /api/room/:code/buzzwords` returns the active word list (custom or built-in).
-- [ ] **Web client** (`web-client/src/`): "Customize Word List" panel in the host game lobby. Two input methods: JSON file drag-and-drop (`.json`) or paste a JSON array directly. Preview shows word count + 5 sample words. "Use this list" → `POST /api/room/:code/buzzwords` → success toast. Validation errors shown inline. Link to example JSON format in help text.
+- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add `room_buzzwords` table (`room_code` PK FK → `rooms.code`, `words` JSON array, `uploaded_by`, `uploaded_at`). Add `GameStore` methods: `SetRoomBuzzwords(roomCode string, words []string, uploadedBy string) error` and `GetRoomBuzzwords(roomCode string) ([]string, error)`. Server falls back to built-in list when `GetRoomBuzzwords` returns no rows.
+- [x] **HTTP** (`server/api.go`): `POST /api/room/:code/buzzwords` (host auth required). Accepts `{words: string[]}` JSON body. Validates: min 24 words, max 500, each word max 60 chars, strip control chars, reject empty strings. `GET /api/room/:code/buzzwords` returns the active word list (custom or built-in).
+- [x] **Web client** (`web-client/src/`): "Customize Word List" panel in the host game lobby. Two input methods: JSON file drag-and-drop (`.json`) or paste a JSON array directly. Preview shows word count + 5 sample words. "Use this list" → `POST /api/room/:code/buzzwords` → success toast. Validation errors shown inline. Link to example JSON format in help text.
 - [ ] **Tests**: upload validation (too few words, control char stripping, max word length), 403 for non-host, GET returns uploaded list, server falls back to built-in when unset.
 
 ---
@@ -124,9 +124,9 @@ Before scaling to K8s, establish a persistent observability layer:
 ##### Phase 11.4: Per-Room Leaderboards
 **Goal:** Leaderboard wins are scoped to the room code they were achieved in. Custom-list games are isolated from the global board so difficulty differences don't skew rankings.
 
-- [ ] **DB** (`db/store.go`, `db/sqlite.go`): Add nullable `room_code` column to `wins_history` table — FK → `rooms.code` (NULL = standalone game not in a room; backward-compatible). Add `GameStore` method `GetRoomLeaderboard(roomCode string, limit int) ([]LeaderboardEntry, error)`. Update `RecordWinInDB` to accept and store `roomCode`. Existing `GetLeaderboard` returns only rows where `room_code IS NULL`.
-- [ ] **HTTP** (`server/api.go`): `GET /api/leaderboard` unchanged (global, standalone wins only). Add `GET /api/room/:code/leaderboard` — per-room top players by win count. Both return the same `LeaderboardEntry` shape.
-- [ ] **Web client** (`web-client/src/`): Active game view shows a per-room leaderboard tab. Global leaderboard remains on landing/stats page but only reflects default-list games. Tab labels make the distinction clear ("This Room" vs "All Time").
+- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add nullable `room_code` column to `wins_history` table — FK → `rooms.code` (NULL = standalone game not in a room; backward-compatible). Add `GameStore` method `GetRoomLeaderboard(roomCode string, limit int) ([]LeaderboardEntry, error)`. Update `RecordWinInDB` to accept and store `roomCode`. Existing `GetLeaderboard` returns only rows where `room_code IS NULL`.
+- [x] **HTTP** (`server/api.go`): `GET /api/leaderboard` unchanged (global, standalone wins only). Add `GET /api/room/:code/leaderboard` — per-room top players by win count. Both return the same `LeaderboardEntry` shape.
+- [x] **Web client** (`web-client/src/`): Active game view shows a per-room leaderboard tab. Global leaderboard remains on landing/stats page but only reflects default-list games. Tab labels make the distinction clear ("This Room" vs "All Time").
 - [ ] **Tests**: `GetRoomLeaderboard` returns only wins for that room code. `GetLeaderboard` excludes room-scoped wins. Migration: existing NULL room_code rows unaffected.
 
 ---
