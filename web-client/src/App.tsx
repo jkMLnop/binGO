@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { createGame, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords } from "./lib/api";
+import { createGame, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords, streamBuzzwords } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
+import type { WordSet } from "./lib/api";
 
 type HelpEntry = { cmd: string; desc: string; hostOnly?: boolean };
 
@@ -345,8 +346,10 @@ function GamePage() {
   const [leaderboardTab, setLeaderboardTab] = useState<"all" | "room">("all");
   const [showBuzzwordUpload, setShowBuzzwordUpload] = useState(false);
   const [buzzwordUploadError, setBuzzwordUploadError] = useState("");
+  const [showGenerate, setShowGenerate] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const tokenRef = useRef<string>("");
+  const hostIdRef = useRef<string>("");
   const winSentRef = useRef(false);
   // Sync guard: set immediately (before React re-renders) whenever the game ends.
   // Checked in toggleCell and the hasBingo effect to prevent any interaction window.
@@ -469,7 +472,9 @@ function GamePage() {
         setConnected(true);
         const resolvedUser = message.username || name;
         setCurrentUser(resolvedUser);
-        setIsHost(!!message.host_id && message.player_id === message.host_id);
+        const hostMatch = !!message.host_id && message.player_id === message.host_id;
+        setIsHost(hostMatch);
+        if (hostMatch) hostIdRef.current = message.host_id ?? "";
         setHostConnected(true);
         setPlayers(message.players || []);
         const existingWinner = message.winner || "";
@@ -816,6 +821,11 @@ function GamePage() {
                     📤 Upload Word List
                   </button>
                 )}
+                {isHost && roomCode && (
+                  <button type="button" className="toolbar-btn" onClick={() => setShowGenerate(true)}>
+                    ✨ Generate with AI
+                  </button>
+                )}
               </div>
             )}
           </article>
@@ -885,7 +895,218 @@ function GamePage() {
             }}
           />
         )}
+        {showGenerate && roomCode && (
+          <GenerateModal
+            roomCode={roomCode}
+            hostId={hostIdRef.current}
+            onApply={async (words) => {
+              await setRoomBuzzwords(roomCode, words, currentUser);
+              setShowGenerate(false);
+              setGameStatus("AI-generated word list saved for next round.");
+            }}
+            onClose={() => setShowGenerate(false)}
+          />
+        )}
     </main>
+  );
+}
+
+// ─── Phase 12.2: AI Generate Modal ──────────────────────────────────────────
+
+function FollowUpInput({ onSubmit, disabled }: { onSubmit: (msg: string) => void; disabled: boolean }) {
+  const [value, setValue] = useState("");
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+    setValue("");
+  }
+  return (
+    <form onSubmit={handleSubmit} className="follow-up-form">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Refine: 'make them funnier', 'add cosplay items'…"
+        disabled={disabled}
+      />
+      <button type="submit" className="ghost-btn" disabled={disabled || !value.trim()}>
+        Send
+      </button>
+    </form>
+  );
+}
+
+function GenerateModal({
+  roomCode,
+  hostId,
+  onApply,
+  onClose,
+}: {
+  roomCode: string;
+  hostId: string;
+  onApply: (words: string[]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [topic, setTopic] = useState("");
+  const [url, setUrl] = useState("");
+  const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState("");
+  const [sets, setSets] = useState<WordSet[] | null>(null);
+  const [genError, setGenError] = useState("");
+  const [applying, setApplying] = useState(false);
+  const outputRef = useRef<HTMLDivElement>(null);
+
+  async function generate(msgs: Array<{ role: string; content: string }>) {
+    setStreaming(true);
+    setStreamText("");
+    setSets(null);
+    setGenError("");
+    await streamBuzzwords(
+      roomCode,
+      topic,
+      url || undefined,
+      msgs,
+      hostId,
+      (chunk) => {
+        setStreamText((t) => t + chunk);
+        if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+      },
+      (newSets) => {
+        setSets(newSets);
+        setStreaming(false);
+      },
+      (err) => {
+        setGenError(err);
+        setStreaming(false);
+      },
+    );
+  }
+
+  function handleGenerate(e: FormEvent) {
+    e.preventDefault();
+    if (!topic.trim() && !url.trim()) return;
+    const userMsg = { role: "user", content: topic.trim() || url.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    generate(newMessages);
+  }
+
+  async function handleApply(words: string[]) {
+    setApplying(true);
+    try {
+      await onApply(words);
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : "Apply failed");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  function handleStartOver() {
+    setTopic("");
+    setUrl("");
+    setMessages([]);
+    setStreamText("");
+    setSets(null);
+    setGenError("");
+  }
+
+  const hasOutput = streamText || sets || genError;
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Generate word list with AI">
+      <div className="modal-panel generate-modal">
+        <div className="generate-modal-header">
+          <h2>✨ Generate Word List with AI</h2>
+          <button type="button" className="help-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        {!hasOutput && (
+          <form onSubmit={handleGenerate} className="modal-form">
+            <label>
+              Describe your event or topic
+              <input
+                autoFocus
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="e.g. Anime North convention"
+                maxLength={500}
+              />
+            </label>
+            <label>
+              URL (optional — we'll scrape it for context)
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://example.com/event-page"
+              />
+            </label>
+            <div className="modal-actions">
+              <button
+                type="submit"
+                className="action-btn"
+                disabled={streaming || (!topic.trim() && !url.trim())}
+              >
+                {streaming ? "Generating…" : "Generate"}
+              </button>
+              <button type="button" className="ghost-btn" onClick={onClose}>Cancel</button>
+            </div>
+          </form>
+        )}
+
+        {hasOutput && (
+          <>
+            <div className="generate-output" ref={outputRef}>
+              <pre className="stream-text">{streamText || (streaming ? "Thinking…" : "")}</pre>
+            </div>
+
+            {sets && (
+              <div className="word-sets">
+                {sets.map((set) => (
+                  <div key={set.label} className="word-set-card">
+                    <div className="word-set-header">
+                      <strong>{set.label}</strong>
+                      <span className="word-count">{set.words.length} words</span>
+                    </div>
+                    <p className="word-set-preview">{set.words.slice(0, 5).join(", ")}…</p>
+                    <button
+                      type="button"
+                      className="action-btn"
+                      onClick={() => handleApply(set.words)}
+                      disabled={applying}
+                    >
+                      {applying ? "Saving…" : "Use this set"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {genError && <p className="inline-error">{genError}</p>}
+
+            {sets && !streaming && (
+              <FollowUpInput
+                onSubmit={(msg) => {
+                  const userMsg = { role: "user", content: msg };
+                  const newMessages = [...messages, userMsg];
+                  setMessages(newMessages);
+                  generate(newMessages);
+                }}
+                disabled={streaming}
+              />
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn" onClick={handleStartOver}>Start Over</button>
+              <button type="button" className="ghost-btn" onClick={onClose}>Close</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

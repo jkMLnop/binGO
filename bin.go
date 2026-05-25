@@ -110,6 +110,17 @@ func runServer(port string, dbPath string) {
 		log.Println("Running without database (use -db flag to enable)")
 	}
 
+	// Initialise Ollama LLM client for AI buzzword generation (Phase 12)
+	ollamaBaseURL := os.Getenv("OLLAMA_BASE_URL")
+	if ollamaBaseURL == "" {
+		ollamaBaseURL = "http://localhost:11434"
+	}
+	ollamaModel := os.Getenv("OLLAMA_MODEL")
+	if ollamaModel == "" {
+		ollamaModel = "qwen3:30b-a3b"
+	}
+	srv.InitLLMClient(ollamaBaseURL, ollamaModel)
+
 	// Serve embedded web client (Phase 7.6)
 	if distFS, fsErr := fs.Sub(webClientDist, "web-client/dist"); fsErr == nil {
 		srv.StaticHandler = spaFileServer(distFS)

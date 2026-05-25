@@ -371,6 +371,8 @@ func (s *Server) handleRoomRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleSetRoomBuzzwords(w, r, code)
 	case sub == "leaderboard" && r.Method == http.MethodGet:
 		s.handleGetRoomLeaderboard(w, r, code)
+	case sub == "generate-buzzwords" && r.Method == http.MethodPost:
+		s.handleGenerateBuzzwords(w, r, code)
 	default:
 		writeAPIError(w, http.StatusNotFound, "not found")
 	}
@@ -525,4 +527,86 @@ func (s *Server) handleGetRoomLeaderboard(w http.ResponseWriter, r *http.Request
 		})
 	}
 	writeAPISuccess(w, result)
+}
+
+// ── Phase 12.1: AI Buzzword Generation ────────────────────────────────────────
+
+// generateBuzzwordsRequest is the body for POST /api/room/:code/generate-buzzwords.
+type generateBuzzwordsRequest struct {
+	HostID   string        `json:"host_id"`
+	Topic    string        `json:"topic"`
+	URL      string        `json:"url,omitempty"`
+	Messages []ChatMessage `json:"messages,omitempty"`
+}
+
+// handleGenerateBuzzwords streams AI-generated buzzword sets as SSE.
+// POST /api/room/:code/generate-buzzwords
+// Requires host_id matching the room's HostID.
+// Returns HTTP 503 when Ollama is not configured or not reachable.
+func (s *Server) handleGenerateBuzzwords(w http.ResponseWriter, r *http.Request, code string) {
+	if s.LLMClient == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — Ollama is not reachable")
+		return
+	}
+
+	room, err := s.getOrCreateRoom(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("room %s not found", code))
+		return
+	}
+
+	var body generateBuzzwordsRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Host-only auth: require host_id matching the room
+	if body.HostID == "" || body.HostID != room.HostID {
+		writeAPIError(w, http.StatusForbidden, "only the room host can generate buzzwords")
+		return
+	}
+
+	// Validate topic length
+	topic := strings.TrimSpace(body.Topic)
+	if len(topic) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "topic must be 500 characters or fewer")
+		return
+	}
+
+	// Build the user message content
+	userContent := topic
+
+	// Optionally scrape URL and append to context
+	if body.URL != "" {
+		excerpt, scrapeErr := ScrapeURL(body.URL)
+		if scrapeErr != nil {
+			log.Printf("URL scrape failed for room %s: %v", code, scrapeErr)
+			// Non-fatal: proceed without URL content
+		} else if excerpt != "" {
+			if topic != "" {
+				userContent = fmt.Sprintf("Topic: %s\n\nURL excerpt:\n%s", topic, excerpt)
+			} else {
+				userContent = fmt.Sprintf("URL excerpt:\n%s", excerpt)
+			}
+		}
+	}
+
+	// Merge conversation history with new user message
+	messages := make([]ChatMessage, 0, len(body.Messages)+1)
+	messages = append(messages, body.Messages...)
+	if userContent != "" {
+		messages = append(messages, ChatMessage{Role: "user", Content: userContent})
+	}
+
+	if len(messages) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "topic or messages required")
+		return
+	}
+
+	if err := s.LLMClient.StreamGenerate(r.Context(), messages, w); err != nil {
+		log.Printf("LLM generation error for room %s: %v", code, err)
+		// If streaming has started (headers already sent) we cannot write a JSON error —
+		// the SSE "error" event was already written inside StreamGenerate.
+	}
 }

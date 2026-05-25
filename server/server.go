@@ -46,6 +46,8 @@ type Server struct {
 	ConnCountsMu   sync.Mutex               // protects ConnCounts
 	CodeLimiters   map[string]*rate.Limiter // per-IP token-bucket for code guesses
 	CodeLimitersMu sync.Mutex               // protects CodeLimiters
+	// AI buzzword generation (Phase 12)
+	LLMClient LLMClient // nil when Ollama is unreachable or not configured
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -76,6 +78,7 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 		Logger:       NewLogger(),
 		Tracer:       trace.NewNoopTracerProvider().Tracer("bingo-server"),
 		cleanupStop:  make(chan struct{}),
+		LLMClient:    nil, // set by InitLLMClient after health probe
 	}
 	return srv
 }
@@ -88,6 +91,21 @@ func (s *Server) SetDB(store db.GameStore) {
 // SetTracer sets the OTel tracer for this server
 func (s *Server) SetTracer(t trace.Tracer) {
 	s.Tracer = t
+}
+
+// InitLLMClient probes the Ollama health endpoint and, if reachable, stores a
+// configured OllamaClient. When Ollama is not reachable the LLMClient field
+// stays nil and the generate-buzzwords endpoint returns HTTP 503.
+func (s *Server) InitLLMClient(baseURL, model string) {
+	client := NewOllamaClient(baseURL, model)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if client.Healthy(ctx) {
+		s.LLMClient = client
+		log.Printf("Ollama LLM client ready (model: %s, base: %s)", model, baseURL)
+	} else {
+		log.Printf("Warning: Ollama not reachable at %s — AI buzzword generation disabled", baseURL)
+	}
 }
 
 // Start begins listening for connections

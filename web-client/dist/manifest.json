@@ -1,0 +1,17 @@
+{
+  "name": "binGO",
+  "short_name": "binGO",
+  "description": "Multiplayer bingo for your next meeting",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#152538",
+  "background_color": "#fffdf7",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

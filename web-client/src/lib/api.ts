@@ -152,3 +152,98 @@ export async function getRoomBuzzwords(roomCode: string): Promise<string[]> {
   }
   return payload.data;
 }
+
+// ─── Phase 12.2: AI Buzzword Generation (SSE streaming) ──────────────────────
+
+/** One labelled set of buzzwords returned by the LLM. */
+export type WordSet = {
+  label: string;
+  words: string[];
+};
+
+/** A single SSE event from the generate-buzzwords endpoint. */
+export type SSEEvent =
+  | { type: "token"; content: string }
+  | { type: "done"; sets: WordSet[] }
+  | { type: "error"; error: string };
+
+/**
+ * Stream AI-generated buzzword sets for a room.
+ *
+ * Calls POST /api/room/:roomCode/generate-buzzwords with the given topic, optional
+ * URL, and conversation history. Fires onToken for each streamed text chunk,
+ * onDone when the LLM has finished and sets are validated, or onError on failure.
+ */
+export async function streamBuzzwords(
+  roomCode: string,
+  topic: string,
+  url: string | undefined,
+  messages: Array<{ role: string; content: string }>,
+  hostId: string,
+  onToken: (chunk: string) => void,
+  onDone: (sets: WordSet[]) => void,
+  onError: (err: string) => void,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/room/${encodeURIComponent(roomCode)}/generate-buzzwords`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, url, messages, host_id: hostId }),
+    });
+  } catch (err) {
+    onError(err instanceof Error ? err.message : "Network error");
+    return;
+  }
+
+  if (!response.ok) {
+    const raw = await response.text();
+    let errMsg = `HTTP ${response.status}`;
+    try {
+      const parsed = JSON.parse(raw) as ApiResponse<null>;
+      if (parsed.error) errMsg = parsed.error;
+    } catch {
+      /* ignore */
+    }
+    onError(errMsg);
+    return;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    onError("No response body from server");
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Process all complete SSE lines in the buffer
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? ""; // hold the last (possibly incomplete) line
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (!data) continue;
+      try {
+        const event = JSON.parse(data) as SSEEvent;
+        if (event.type === "token") {
+          onToken(event.content);
+        } else if (event.type === "done") {
+          onDone(event.sets);
+        } else if (event.type === "error") {
+          onError(event.error);
+        }
+      } catch {
+        /* skip malformed SSE lines */
+      }
+    }
+  }
+}
+

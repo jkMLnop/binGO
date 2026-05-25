@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGame, fetchGameByCode, fetchLeaderboard } from "./api";
+import { createGame, fetchGameByCode, fetchLeaderboard, streamBuzzwords } from "./api";
+import type { WordSet } from "./api";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -136,5 +137,140 @@ describe("createGame", () => {
     await createGame();
     const calledInit = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
     expect(calledInit.method).toBe("POST");
+  });
+});
+
+// ─── streamBuzzwords ──────────────────────────────────────────────────────────
+
+/** Build a ReadableStream that emits the given SSE lines, then closes. */
+function makeSSEStream(lines: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const text = lines.join("\n") + "\n";
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(text));
+      controller.close();
+    },
+  });
+}
+
+function mockSSEFetch(status: number, sseLines: string[]): void {
+  global.fetch = vi.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300,
+    status,
+    body: makeSSEStream(sseLines),
+    text: async () => JSON.stringify({ success: false, error: "err" }),
+  } as unknown as Response);
+}
+
+describe("streamBuzzwords", () => {
+  const validSets: WordSet[] = [
+    { label: "Set A", words: Array.from({ length: 25 }, (_, i) => `word-a-${i}`) },
+    { label: "Set B", words: Array.from({ length: 25 }, (_, i) => `word-b-${i}`) },
+    { label: "Set C", words: Array.from({ length: 25 }, (_, i) => `word-c-${i}`) },
+  ];
+
+  it("fires onToken for each token event", async () => {
+    const lines = [
+      `data: ${JSON.stringify({ type: "token", content: "Hello" })}`,
+      `data: ${JSON.stringify({ type: "token", content: " world" })}`,
+      `data: ${JSON.stringify({ type: "done", sets: validSets })}`,
+    ];
+    mockSSEFetch(200, lines);
+
+    const tokens: string[] = [];
+    let doneSets: WordSet[] | null = null;
+    await streamBuzzwords("AB3K7", "anime", undefined, [], "host-1",
+      (c) => tokens.push(c),
+      (s) => { doneSets = s; },
+      () => {},
+    );
+
+    expect(tokens).toEqual(["Hello", " world"]);
+    expect(doneSets).toHaveLength(3);
+  });
+
+  it("fires onDone with sets when done event arrives", async () => {
+    const lines = [
+      `data: ${JSON.stringify({ type: "done", sets: validSets })}`,
+    ];
+    mockSSEFetch(200, lines);
+
+    let doneSets: WordSet[] | null = null;
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+      () => {},
+      (s) => { doneSets = s; },
+      () => {},
+    );
+
+    expect(doneSets).not.toBeNull();
+    expect(doneSets![0].label).toBe("Set A");
+  });
+
+  it("fires onError when server returns 503", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      body: null,
+      text: async () => JSON.stringify({ success: false, error: "Ollama is not reachable" }),
+    } as unknown as Response);
+
+    let errorMsg = "";
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+      () => {},
+      () => {},
+      (e) => { errorMsg = e; },
+    );
+
+    expect(errorMsg).toContain("Ollama");
+  });
+
+  it("fires onError when an error SSE event arrives", async () => {
+    const lines = [
+      `data: ${JSON.stringify({ type: "error", error: "LLM parse failed" })}`,
+    ];
+    mockSSEFetch(200, lines);
+
+    let errorMsg = "";
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+      () => {},
+      () => {},
+      (e) => { errorMsg = e; },
+    );
+
+    expect(errorMsg).toBe("LLM parse failed");
+  });
+
+  it("URL-encodes the room code", async () => {
+    mockSSEFetch(200, [`data: ${JSON.stringify({ type: "done", sets: validSets })}`]);
+    await streamBuzzwords("AB 3K7", "topic", undefined, [], "host-1", () => {}, () => {}, () => {});
+    const calledUrl = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(calledUrl).toContain(encodeURIComponent("AB 3K7"));
+  });
+
+  it("includes host_id in the request body", async () => {
+    mockSSEFetch(200, [`data: ${JSON.stringify({ type: "done", sets: validSets })}`]);
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "the-host", () => {}, () => {}, () => {});
+    const calledInit = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(calledInit.body as string) as { host_id: string };
+    expect(body.host_id).toBe("the-host");
+  });
+
+  it("skips malformed SSE lines without throwing", async () => {
+    const lines = [
+      "data: not-json",
+      `data: ${JSON.stringify({ type: "done", sets: validSets })}`,
+    ];
+    mockSSEFetch(200, lines);
+
+    let doneSets: WordSet[] | null = null;
+    await expect(
+      streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+        () => {},
+        (s) => { doneSets = s; },
+        () => {},
+      )
+    ).resolves.not.toThrow();
+    expect(doneSets).not.toBeNull();
   });
 });
