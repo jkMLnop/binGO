@@ -1,5 +1,10 @@
 # Changelog
 
+> **Archive notice:** This file is a historical record up to v9.2.0.
+> Releases from v9.3.0 onwards are documented in [GitHub Releases](https://github.com/jkMLnop/binGO-CLI/releases).
+> Use `gh release create vX.Y.Z --generate-notes` to create new releases.
+> Do not update this file manually.
+
 All notable changes to binGO-CLI are documented in this file.
 
 ## [Unreleased]
