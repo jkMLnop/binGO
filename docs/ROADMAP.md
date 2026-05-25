@@ -396,6 +396,79 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 
 ---
 
+#### Phase 15: Agentic DevOps Loop
+**Goal:** Close the human-in-the-loop gap between code push and confirmed healthy deployment. A cloud agent watches every CI run, reads Fly.io logs on failure, generates a targeted hotfix branch, runs tests, and opens a PR — all without manual intervention.
+
+**Motivation:** The staging crash-loop from Phase 11 (SQLite schema migration missing `room_code` column) required ~2 hours of manual diagnosis and repair that a well-instrumented agent could have resolved in minutes. This phase makes that entire loop autonomous.
+
+**Architecture:**
+
+```
+GitHub Actions CI (push to main)
+  ↓
+Dagger pipeline: test → build → deploy → smoke-test
+  ↓ (on smoke-test failure)
+GitHub Actions: trigger "hotfix agent" workflow
+  ↓
+Agent workflow:
+  1. fetch Fly.io logs (flyctl logs --no-tail)
+  2. extract error pattern (structured log field or stderr line)
+  3. call LLM with: error message + relevant source files + git diff
+  4. LLM proposes minimal fix (unified diff)
+  5. agent applies diff to a new feat/hotfix-<timestamp> branch
+  6. runs go test ./... + integration tests
+  7. opens PR against main with "[auto-hotfix]" prefix
+  8. posts Fly.io log excerpt as PR comment (evidence)
+  9. pings owner via GitHub notification
+```
+
+**Design decisions:**
+- Agent is a GitHub Actions workflow, not a standalone service — no additional infrastructure, runs in the CI environment.
+- LLM: GitHub Models API (free tier, GPT-4o or Claude Sonnet) for code generation. No local Ollama needed — cloud agent can't reach a local machine.
+- Scope limited: agent only opens PRs, never auto-merges. Human approves and merges. Trust boundary is explicit.
+- Agent auth: uses `GITHUB_TOKEN` for PR/branch creation; `FLY_API_TOKEN` for log fetching. Both already exist as CI secrets.
+- Idempotent: one hotfix PR per failed CI run (tagged with run ID). Re-runs don't create duplicates.
+- Smoke-test step in Dagger: after `fly deploy`, wait 15s and `curl /api/status` — fail the pipeline immediately rather than waiting for Fly.io's health-check timeout. This is the trigger for the agent loop.
+
+---
+
+##### Phase 15.0: Dagger Smoke-Test Step
+**Goal:** Add a health-check step to the Dagger `deploy` function. Pipeline fails fast if the deployed server doesn't respond within 30s. Prerequisite for all other Phase 15 sub-phases.
+
+- [ ] **`dagger/main.go`**: After `fly deploy`, add a `waitForHealthy(ctx, appURL string, timeoutSeconds int) error` helper. Polls `GET <appURL>/api/status` every 3s for up to `timeoutSeconds`. Fails the Dagger pipeline with `"deploy health check failed: <last error>"` if server never responds. `appURL` derived from env: `https://bingo-server-staging.fly.dev` for staging, `https://bingo-server.fly.dev` for production.
+- [ ] **Tests** (`dagger/main_test.go`): `waitForHealthy` unit tests — mock HTTP server returning 200 after N attempts; timeout reached; immediate 200.
+
+---
+
+##### Phase 15.1: Hotfix Agent Workflow
+**Goal:** GitHub Actions workflow triggered on CI failure that fetches logs, calls LLM, generates a fix branch, and opens a PR.
+
+- [ ] **`.github/workflows/hotfix-agent.yml`**: Workflow triggered by `workflow_run` event (on `ci.yml` failure) or manually via `workflow_dispatch`. Steps:
+  1. Checkout repo
+  2. `flyctl logs --app bingo-server-staging --no-tail` → extract last 50 lines
+  3. Identify error pattern: grep for `level=error` or `Failed to initialize` or `panic:`
+  4. Call GitHub Models API (or OpenAI via `OPENAI_API_KEY` secret) with system prompt + error + relevant files (identified by file path in error message)
+  5. Apply LLM-generated unified diff via `git apply`
+  6. Run `go build ./...` and `go test ./...` — abort and post failure comment if tests fail
+  7. Create branch `feat/hotfix-<run-id>`, push, open PR via `gh pr create`
+  8. Post PR comment with raw Fly.io log excerpt and LLM reasoning
+- [ ] **LLM prompt template**: System: *"You are a Go backend engineer. A deployment of a Go + SQLite server failed with the error below. Identify the root cause and generate the minimal unified diff to fix it. Focus on the file paths mentioned in the error. Output only a valid unified diff — no prose, no markdown fences."* User: `<error lines>\n\n<relevant source file contents>`.
+- [ ] **Relevant-file extraction**: Parse error message for Go file paths (e.g. `db/sqlite.go:42`) → include those files' contents in the prompt (capped at 8 KB per file, 3 files max to stay within context window).
+- [ ] **Secrets required**: `FLY_API_TOKEN` (already in CI), `GH_TOKEN` (already in CI), `OPENAI_API_KEY` or `GITHUB_MODELS_TOKEN` (new — add to repo secrets).
+- [ ] **Tests**: workflow unit-testable logic (file extraction, prompt assembly) extracted to a shell script or small Go tool in `tools/hotfix-agent/`.
+
+---
+
+##### Phase 15.2: Agent Observability
+**Goal:** Track agent activations, success rate, and time-to-PR in Prometheus/Grafana so you can see whether the loop is working.
+
+- [ ] **GitHub Actions step** (in `hotfix-agent.yml`): After PR creation, call `POST /metrics/agent-event` (new internal endpoint, agent-key auth) with `{event: "hotfix_pr_opened", run_id, pr_number, error_type}`.
+- [ ] **Server** (`server/metrics.go`): Add `bingo_agent_hotfix_total` CounterVec (labels: `outcome` = `pr_opened|tests_failed|no_fix_generated`). Add `bingo_agent_hotfix_latency_ms` Histogram.
+- [ ] **Grafana dashboard** (`grafana-dashboards/bingo-dashboard.json`): Add "Agentic Ops" row — panel for `bingo_agent_hotfix_total` by outcome, panel for hotfix latency distribution.
+- [ ] **Tests**: agent event endpoint (auth, counter increment).
+
+---
+
 ## Deferred / Maybe Never
 
 #### Phase 9.6: In-Game Chat
