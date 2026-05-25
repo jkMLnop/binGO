@@ -34,11 +34,17 @@ func NewSQLiteStore(ctx context.Context, dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
-// Init creates the database schema
+// Init creates the database schema and runs any needed column migrations.
 func (s *SQLiteStore) Init(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Phase 1: base schema.
+	// CREATE TABLE IF NOT EXISTS is a no-op when the table already exists,
+	// so columns added in later phases (e.g. room_code) won't appear on old
+	// databases.  Those are handled in the migration step below.
+	// Note: idx_wins_room_code is intentionally absent here; it is created
+	// after the migration that adds the column.
 	schema := `
 	CREATE TABLE IF NOT EXISTS hosts (
 		id TEXT PRIMARY KEY,
@@ -105,7 +111,6 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	CREATE INDEX IF NOT EXISTS idx_players_game_id ON players(game_id);
 	CREATE INDEX IF NOT EXISTS idx_hosts_username ON hosts(username);
 	CREATE INDEX IF NOT EXISTS idx_wins_player_username ON wins_history(player_username);
-	CREATE INDEX IF NOT EXISTS idx_wins_room_code ON wins_history(room_code);
 
 	CREATE TABLE IF NOT EXISTS game_archives (
 		id TEXT PRIMARY KEY,
@@ -124,6 +129,44 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to create schema: %w", err)
 	}
 
+	// Phase 2: column migrations for databases created before Phase 11.
+	// ALTER TABLE ... ADD COLUMN is idempotent here because addColumnIfNotExists
+	// checks pragma_table_info first.
+	if err := s.addColumnIfNotExists(ctx, "games", "room_code", "TEXT"); err != nil {
+		return fmt.Errorf("failed to migrate games.room_code: %w", err)
+	}
+	if err := s.addColumnIfNotExists(ctx, "wins_history", "room_code", "TEXT"); err != nil {
+		return fmt.Errorf("failed to migrate wins_history.room_code: %w", err)
+	}
+
+	// Phase 3: indexes that depend on migrated columns.
+	if _, err := s.db.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_wins_room_code ON wins_history(room_code)`); err != nil {
+		return fmt.Errorf("failed to create idx_wins_room_code: %w", err)
+	}
+
+	return nil
+}
+
+// addColumnIfNotExists adds a column to a table only when it is absent,
+// avoiding "duplicate column name" errors on databases that are already
+// up to date.
+func (s *SQLiteStore) addColumnIfNotExists(ctx context.Context, table, column, typ string) error {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`,
+		table, column,
+	).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("checking column %s.%s: %w", table, column, err)
+	}
+	if count == 0 {
+		if _, err := s.db.ExecContext(ctx,
+			fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, typ),
+		); err != nil {
+			return fmt.Errorf("adding column %s.%s: %w", table, column, err)
+		}
+	}
 	return nil
 }
 
