@@ -16,8 +16,14 @@ coverage.out
 *.db
 
 # Compiled programs (only in root directory)
+/bin
+/bingo
 /binGO
 /binGO-*
+
+# Log files
+app.log
+*.log
 
 # Dagger compiled binary
 /dagger/dagger

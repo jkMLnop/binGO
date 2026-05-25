@@ -207,24 +207,30 @@
       },
       "id": 4,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
         },
-        "tooltip": {
-          "mode": "single"
-        }
+        "text": {},
+        "textMode": "auto"
       },
+      "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "bingo_players_connected_total",
+          "expr": "bingo_player_count",
           "refId": "A",
-          "legendFormat": "Total Players Connected"
+          "legendFormat": "Connected Players"
         }
       ],
-      "title": "Total Players Connected",
-      "type": "timeseries"
+      "title": "Connected Players",
+      "type": "stat"
     },
     {
       "datasource": "Prometheus",
