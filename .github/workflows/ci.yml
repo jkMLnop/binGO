@@ -118,11 +118,35 @@ jobs:
         working-directory: web-client
         run: npx playwright install --with-deps chromium
 
+      - name: Wait for staging to be healthy
+        run: |
+          echo "Waiting for staging server to be healthy..."
+          for i in $(seq 1 18); do
+            if curl -sf https://bingo-server-staging.fly.dev/api/status > /dev/null; then
+              echo "✓ Staging is healthy"
+              exit 0
+            fi
+            echo "  attempt $i/18 — retrying in 10s"
+            sleep 10
+          done
+          echo "✗ Staging did not become healthy in 3 minutes"
+          exit 1
+
       - name: Run staging smoke tests
         working-directory: web-client
         env:
-          STAGING_BASE_URL: https://bingo-server-staging.fly.dev
-        run: npm run smoke:staging
+          SMOKE_BASE_URL: https://bingo-server-staging.fly.dev
+        run: npm run smoke:host-flow
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-playwright-artifacts
+          path: |
+            web-client/test-results
+            web-client/playwright-report
+          if-no-files-found: ignore
 
       - name: Open staging hotfix issue on smoke failure
         if: failure()

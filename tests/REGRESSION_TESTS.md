@@ -4,6 +4,21 @@
 > `tests/container_regression_test.go` and `tests/container_e2e_test.go`.
 > Run them with: `go test -tags=container -timeout=10m ./tests -v`
 
+## Agentic Regression Policy (Phase 15)
+
+This file is now treated as a legacy checklist and migration source.
+
+Default execution path moving forward:
+- PRs: `.github/workflows/dev-smoke.yml` runs Playwright smoke tests against a local ephemeral server.
+- Staging deploys: `.github/workflows/ci.yml` runs browser smoke tests plus load tests after deploy.
+- Production: `.github/workflows/prod-synthetic.yml` runs read-only synthetic browser checks every 30 minutes.
+
+Hotfix handling:
+- Staging/prod smoke failures auto-create GitHub issues with links to failing runs.
+- Fixes are proposed via branch/PR flow; direct automated merges to `main` are intentionally avoided.
+
+Manual checks should be reserved for UX judgment and rare disaster drills.
+
 ## Test Setup
 
 **Prerequisites:**
@@ -455,13 +470,3 @@ Three terminals, same as Section 15 setup. Add a third player:
 | 17.19 | Help shows betting command | Type `help` | Output includes `bet: <player> wins\|loses` with AND description | [ ] |
 | 17.20 | Help shows suggestion commands | Type `help` | Output includes `add_new_phrase`, `approve`, `reject` commands | [ ] |
 | 17.21 | Help shows leaderboard/stats | Type `help` | Output includes `leaderboard` and `stats` commands | [ ] |
-
----
-
-## Section 15 — Web Client Embedded Assets (automated: `TestRegressionWebClientEmbedded`)
-
-| Test # | Scenario | Steps | Expected Result | Status |
-|--------|----------|-------|-----------------|--------|
-| 15.1 | Root serves SPA | `GET /` on running container | 200, Content-Type: text/html | ✅ automated |
-| 15.2 | manifest.json is embedded | `GET /manifest.json` on running container | 200, valid JSON, `name = "binGO"` | ✅ automated |
-| 15.3 | icon.svg is embedded | `GET /icon.svg` on running container | 200 | ✅ automated |

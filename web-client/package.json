@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke:staging": "playwright test e2e/staging-smoke.spec.js --config=playwright.config.cjs"
+    "smoke:host-flow": "playwright test e2e/host-flow-smoke.spec.js --config=playwright.config.cjs",
+    "smoke:staging": "STAGING_BASE_URL=https://bingo-server-staging.fly.dev playwright test e2e/host-flow-smoke.spec.js --config=playwright.config.cjs",
+    "smoke:dev": "SMOKE_BASE_URL=http://localhost:8080 playwright test e2e/host-flow-smoke.spec.js --config=playwright.config.cjs",
+    "smoke:prod": "PROD_BASE_URL=https://bingo-server.fly.dev playwright test e2e/prod-readonly-smoke.spec.js --config=playwright.config.cjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
