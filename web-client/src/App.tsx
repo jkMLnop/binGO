@@ -21,6 +21,15 @@ const HELP_ENTRIES: HelpEntry[] = [
   { cmd: "Leaderboard",              desc: "Top players by wins — visible in the Leaderboard panel" },
 ];
 
+async function refreshAllTimeLeaderboard(setLeaderboard: (rows: LeaderboardEntry[]) => void) {
+  try {
+    const rows = await fetchLeaderboard();
+    setLeaderboard(rows);
+  } catch {
+    // Leaderboard is optional for gameplay; keep UI usable even if DB is disabled.
+  }
+}
+
 function HelpPanel({ isHost, onClose }: { isHost: boolean; onClose: () => void }) {
   return (
     <section className="panel help-panel" role="dialog" aria-label="Help">
@@ -450,14 +459,11 @@ function GamePage() {
     }
 
     async function loadLeaderboard() {
-      try {
-        const rows = await fetchLeaderboard();
+      await refreshAllTimeLeaderboard((rows) => {
         if (mounted) {
           setLeaderboard(rows);
         }
-      } catch {
-        // Leaderboard is optional for gameplay; keep UI usable even if DB is disabled.
-      }
+      });
     }
 
     validateCode();
@@ -572,6 +578,7 @@ function GamePage() {
         const announcedWinner = message.winner || "";
         gameEndedRef.current = true;
         winSentRef.current = true;
+        refreshAllTimeLeaderboard(setLeaderboard);
         setWinner(announcedWinner);
         setWinPending(false);
         const hostGone = (message.message || "").includes("Host has disconnected");
@@ -588,6 +595,7 @@ function GamePage() {
       if (message.type === "game_restart") {
         gameEndedRef.current = false;
         winSentRef.current = false;
+        refreshAllTimeLeaderboard(setLeaderboard);
         setWinner("");
         setWinPending(false);
         setPlayers(message.players || []);
@@ -901,7 +909,10 @@ function GamePage() {
               <button
                 type="button"
                 className={`tab-btn${leaderboardTab === "all" ? " active" : ""}`}
-                onClick={() => setLeaderboardTab("all")}
+                onClick={() => {
+                  setLeaderboardTab("all");
+                  refreshAllTimeLeaderboard(setLeaderboard);
+                }}
               >All Time</button>
               <button
                 type="button"

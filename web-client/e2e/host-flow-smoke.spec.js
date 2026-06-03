@@ -36,3 +36,50 @@ test("host flow does not produce room validation error", async ({ page }) => {
   await expect(page.getByText(/game code BINGO-[A-Z0-9]{5} not found/)).toHaveCount(0);
   expect(badGameLookups).toEqual([]);
 });
+
+test("all-time leaderboard is refreshed after a room win", async ({ page }) => {
+  const leaderboardRequests = [];
+
+  page.on("request", (request) => {
+    if (request.url().includes("/api/leaderboard?")) {
+      leaderboardRequests.push(request.url());
+    }
+  });
+
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "1) Host a new game" }).click();
+
+  const username = `smoke-${Date.now().toString().slice(-6)}`;
+  await page.getByLabel("Username").fill(username);
+  await page.getByRole("button", { name: "Join Game" }).click();
+
+  await expect(page.getByText(new RegExp(`You are: ${username}`))).toBeVisible();
+
+  for (const cell of ["A1", "A2", "A3"]) {
+    await page.getByRole("button", { name: new RegExp(`^${cell}\\b`) }).click();
+  }
+
+  await expect(page.getByText(new RegExp(`${username} won this round\\.`))).toBeVisible();
+  const beforeAllTimeRefresh = leaderboardRequests.length;
+
+  await page.getByRole("button", { name: "This Room" }).click();
+  await page.getByRole("button", { name: "All Time" }).click();
+
+  await expect.poll(() => leaderboardRequests.length).toBeGreaterThan(beforeAllTimeRefresh);
+
+  const apiEntries = await page.evaluate(async () => {
+    const response = await fetch("/api/leaderboard?limit=10&sort=wins");
+    const payload = await response.json();
+    return payload.data ?? [];
+  });
+
+  const apiPlayerEntry = apiEntries.find((entry) => entry.username === username);
+
+  expect(apiPlayerEntry).toBeTruthy();
+  expect(apiPlayerEntry.wins).toBeGreaterThanOrEqual(1);
+
+  const leaderboardItems = page.locator("article").filter({ has: page.getByRole("heading", { name: "Leaderboard" }) }).locator("li");
+  const matchingItem = leaderboardItems.filter({ hasText: username }).first();
+  await expect(matchingItem).toContainText(username);
+  await expect(matchingItem).toContainText(`${apiPlayerEntry.wins} wins`);
+});
