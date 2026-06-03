@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { createGame, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords } from "./lib/api";
+import { createRoom, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
@@ -259,8 +259,8 @@ function HomePage() {
     setCreateError("");
     setCreating(true);
     try {
-      const game = await createGame();
-      navigate(`/game/${game.code}`);
+      const room = await createRoom();
+      navigate(`/game/BINGO-${room.code}`);
     } catch (err) {
       setCreateError(
         err instanceof Error
