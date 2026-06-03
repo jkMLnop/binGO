@@ -93,6 +93,64 @@ jobs:
           MAX_CONNS_PER_IP: '20'
         run: go test -tags=e2e -timeout=10m -v ./tests -run TestFullSystemLoadWithPlayers
 
+  # Browser-level smoke test after staging deploy.
+  # Catches UI/route regressions that API-only checks miss.
+  smoke-test-staging-ui:
+    name: Smoke Test Staging UI
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web-client/package-lock.json
+
+      - name: Install web client dependencies
+        working-directory: web-client
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: web-client
+        run: npx playwright install --with-deps chromium
+
+      - name: Run staging smoke tests
+        working-directory: web-client
+        env:
+          STAGING_BASE_URL: https://bingo-server-staging.fly.dev
+        run: npm run smoke:staging
+
+      - name: Open staging hotfix issue on smoke failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.sha.substring(0, 7);
+            const title = `Staging smoke failed after deploy (${sha})`;
+            const body = [
+              `Automated staging browser smoke checks failed for commit ${context.sha}.`,
+              ``,
+              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `Environment: https://bingo-server-staging.fly.dev`,
+              ``,
+              `Suggested response:`,
+              `1. Reproduce with Playwright on staging`,
+              `2. Create a hotfix branch from main`,
+              `3. Submit PR referencing this issue`,
+            ].join("\n");
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["bug", "staging", "hotfix"],
+            });
+
   # Deploy to production + create GitHub Release on version tags
   deploy-production:
     name: Deploy to Production
