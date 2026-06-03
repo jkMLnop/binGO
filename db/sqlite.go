@@ -93,6 +93,7 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		player_username TEXT NOT NULL,
 		game_code TEXT NOT NULL,
 		room_code TEXT,
+		counted_in_global INTEGER NOT NULL DEFAULT 1,
 		won_at INTEGER NOT NULL,
 		FOREIGN KEY (room_code) REFERENCES rooms(code)
 	);
@@ -137,6 +138,9 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	}
 	if err := s.addColumnIfNotExists(ctx, "wins_history", "room_code", "TEXT"); err != nil {
 		return fmt.Errorf("failed to migrate wins_history.room_code: %w", err)
+	}
+	if err := s.addColumnIfNotExists(ctx, "wins_history", "counted_in_global", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("failed to migrate wins_history.counted_in_global: %w", err)
 	}
 
 	// Phase 3: indexes that depend on migrated columns.
@@ -554,15 +558,25 @@ func (s *SQLiteStore) RecordWin(ctx context.Context, playerUsername string, game
 	now := time.Now().Unix()
 
 	var roomCodeVal interface{}
+	countedInGlobal := 1
 	if roomCode != "" {
 		roomCodeVal = roomCode
+		var customCount int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM room_buzzwords WHERE room_code = ?`, roomCode,
+		).Scan(&customCount); err != nil {
+			return fmt.Errorf("failed to determine room board type: %w", err)
+		}
+		if customCount > 0 {
+			countedInGlobal = 0
+		}
 	}
 
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO wins_history (id, player_username, game_code, room_code, won_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		winID, playerUsername, gameCode, roomCodeVal, now,
+		`INSERT INTO wins_history (id, player_username, game_code, room_code, counted_in_global, won_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		winID, playerUsername, gameCode, roomCodeVal, countedInGlobal, now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record win: %w", err)
@@ -590,7 +604,7 @@ func (s *SQLiteStore) GetPlayerWins(ctx context.Context, playerUsername string) 
 	return count, nil
 }
 
-// GetLeaderboard retrieves top players by win count for standalone (non-room) games only.
+// GetLeaderboard retrieves top players by win count across all games.
 func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*LeaderboardEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -598,7 +612,7 @@ func (s *SQLiteStore) GetLeaderboard(ctx context.Context, limit int) ([]*Leaderb
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT player_username, COUNT(*) as wins FROM wins_history
-		 WHERE room_code IS NULL
+		 WHERE COALESCE(counted_in_global, 1) = 1
 		 GROUP BY player_username ORDER BY wins DESC LIMIT ?`,
 		limit,
 	)

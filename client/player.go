@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/jkMLnop/binGO-CLI/shared"
@@ -56,24 +58,26 @@ func (p *Player) getLocalIP() string {
 // If token is provided, uses it for reconnection. Otherwise requires username.
 // code parameter is for Phase 7.3 remote player joining (optional for localhost/LAN)
 func (p *Player) Connect(username string, token string, code string) (ServerMessage, error) {
-	origin := "http://localhost"
-
 	// Construct WS URL from server address
-	wsURL := p.ServerURL
+	rawURL := p.ServerURL
+	host := strings.TrimPrefix(rawURL, "ws://")
+	host = strings.TrimPrefix(host, "wss://")
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimSuffix(host, "/ws")
+	host = strings.TrimSuffix(host, "/")
 
-	// Strip any existing protocol and /ws path
-	wsURL = strings.TrimPrefix(wsURL, "ws://")
-	wsURL = strings.TrimPrefix(wsURL, "wss://")
-	wsURL = strings.TrimSuffix(wsURL, "/ws")
+	secure := strings.HasPrefix(rawURL, "https://") || strings.HasPrefix(rawURL, "wss://") || strings.Contains(host, "ngrok") || strings.Contains(host, "fly.dev")
 
-	// Auto-detect protocol based on server URL
-	if strings.Contains(wsURL, "ngrok") || strings.Contains(wsURL, "fly.dev") {
-		// ngrok and Fly.io use HTTPS, so use wss:// (WebSocket Secure)
-		wsURL = "wss://" + wsURL + "/ws"
-	} else {
-		// Local/LAN connections use plain ws://
-		wsURL = "ws://" + wsURL + "/ws"
+	wsScheme := "ws://"
+	originScheme := "http://"
+	if secure {
+		wsScheme = "wss://"
+		originScheme = "https://"
 	}
+
+	wsURL := wsScheme + host + "/ws"
+	origin := originScheme + host
 
 	log.Printf("Attempting to connect to: %s", wsURL)
 
@@ -130,6 +134,10 @@ func (p *Player) Connect(username string, token string, code string) (ServerMess
 // This is the main entry point for client connections
 // code parameter is for Phase 7.3 remote player joining (optional for localhost/LAN)
 func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
+	return p.ConnectWithAuthWithReader(code, bufio.NewReader(os.Stdin))
+}
+
+func (p *Player) ConnectWithAuthWithReader(code string, reader *bufio.Reader) (ServerMessage, error) {
 	// Initialize auth manager
 	authMgr := NewAuthManager()
 
@@ -143,7 +151,7 @@ func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
 
 	if lastToken != "" && lastUsername != "" {
 		// Ask if they want to reconnect
-		reuse, err := authMgr.PromptForReconnect(lastUsername)
+		reuse, err := authMgr.PromptForReconnectWithReader(lastUsername, reader)
 		if err != nil {
 			return ServerMessage{}, err
 		}
@@ -154,7 +162,7 @@ func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
 			log.Printf("Reconnecting as %s with saved token", username)
 		} else {
 			// User wants new username
-			newUsername, err := authMgr.PromptForUsername("")
+			newUsername, err := authMgr.PromptForUsernameWithReader("", reader)
 			if err != nil {
 				return ServerMessage{}, err
 			}
@@ -163,7 +171,7 @@ func (p *Player) ConnectWithAuth(code string) (ServerMessage, error) {
 		}
 	} else {
 		// No saved session, prompt for username
-		newUsername, err := authMgr.PromptForUsername(lastUsername)
+		newUsername, err := authMgr.PromptForUsernameWithReader(lastUsername, reader)
 		if err != nil {
 			return ServerMessage{}, err
 		}

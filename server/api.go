@@ -303,6 +303,7 @@ type RoomInfo struct {
 	HostID      string `json:"host_id"`
 	PlayerCount int    `json:"player_count"`
 	GameStatus  string `json:"game_status"` // "pending", "active", "ended"
+	CustomBoard bool   `json:"custom_board_used"`
 }
 
 // handleCreateRoom creates a new room.
@@ -337,6 +338,12 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		HostID:      room.HostID,
 		PlayerCount: 0,
 		GameStatus:  "pending",
+		CustomBoard: false,
+	}
+	if s.DB != nil {
+		if words, getErr := s.DB.GetRoomBuzzwords(r.Context(), room.Code); getErr == nil && len(words) > 0 {
+			info.CustomBoard = true
+		}
 	}
 	if g := room.GetGame(); g != nil {
 		info.GameCode = g.Code
@@ -390,6 +397,12 @@ func (s *Server) handleGetRoom(w http.ResponseWriter, r *http.Request, code stri
 		HostID:      room.HostID,
 		PlayerCount: 0,
 		GameStatus:  "pending",
+		CustomBoard: false,
+	}
+	if s.DB != nil {
+		if words, getErr := s.DB.GetRoomBuzzwords(r.Context(), room.Code); getErr == nil && len(words) > 0 {
+			info.CustomBoard = true
+		}
 	}
 	if g := room.GetGame(); g != nil {
 		info.GameCode = g.Code
@@ -414,6 +427,7 @@ func (s *Server) handleGetRoomBuzzwords(w http.ResponseWriter, r *http.Request, 
 		writeAPIError(w, http.StatusInternalServerError, "failed to fetch buzzwords")
 		return
 	}
+	custom := len(words) > 0
 
 	if words == nil {
 		// Fall back to built-in list
@@ -424,7 +438,7 @@ func (s *Server) handleGetRoomBuzzwords(w http.ResponseWriter, r *http.Request, 
 		words = flat
 	}
 
-	writeAPISuccess(w, map[string]interface{}{"words": words, "custom": words != nil})
+	writeAPISuccess(w, map[string]interface{}{"words": words, "custom": custom})
 }
 
 // BuzzwordUploadRequest is the body for POST /api/room/:code/buzzwords.

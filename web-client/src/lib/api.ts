@@ -63,6 +63,7 @@ export type RoomInfo = {
   host_id: string;
   player_count: number;
   game_status: string;
+  custom_board_used: boolean;
 };
 
 export async function createRoom(): Promise<RoomInfo> {

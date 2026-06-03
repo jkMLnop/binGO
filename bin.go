@@ -165,10 +165,11 @@ func runClient(serverAddr string, code string) {
 	// === Setup Client Connection ===
 	// Pass raw server address; player.Connect() will add ws:// or wss:// protocol and /ws path
 	player := client.NewPlayer(serverAddr)
+	inputReader := bufio.NewReader(os.Stdin)
 
 	// Show menu when no code was provided on the command line
 	if code == "" {
-		choice, menuCode, buzzwords, menuErr := client.ShowMainMenu(serverAddr)
+		choice, menuCode, buzzwords, menuErr := client.ShowMainMenuWithReader(serverAddr, inputReader)
 		if menuErr != nil {
 			log.Fatalf("Menu error: %v", menuErr)
 		}
@@ -180,7 +181,7 @@ func runClient(serverAddr string, code string) {
 	}
 
 	// Use the full auth flow with token/username prompts and local storage
-	welcomeMsg, err := player.ConnectWithAuth(code)
+	welcomeMsg, err := player.ConnectWithAuthWithReader(code, inputReader)
 	if err != nil {
 		log.Fatalf("Connection failed: %v", err)
 	}
@@ -240,7 +241,7 @@ func runClient(serverAddr string, code string) {
 	// === Setup Input Listener ===
 	// Spawn goroutine to read user input (non-blocking)
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(inputReader)
 		for scanner.Scan() {
 			input := strings.TrimSpace(scanner.Text())
 			if input == "" {

@@ -46,6 +46,14 @@ jobs:
           tail -100 /tmp/bingo-dev-smoke.log || true
           exit 1
 
+      - name: Build CLI binary
+        run: go build -o binGO-CLI .
+
+      - name: Run local CLI smoke (host flow)
+        run: |
+          chmod +x scripts/cli-smoke.sh
+          scripts/cli-smoke.sh rw http://localhost:8080
+
       - name: Install Playwright browser
         working-directory: web-client
         run: npx playwright install --with-deps chromium

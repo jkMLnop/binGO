@@ -355,6 +355,7 @@ function GamePage() {
   const [roomCode, setRoomCode] = useState("");
   const [roomLeaderboard, setRoomLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardTab, setLeaderboardTab] = useState<"all" | "room">("all");
+  const [roomUsesCustomBoard, setRoomUsesCustomBoard] = useState(false);
   const [showBuzzwordUpload, setShowBuzzwordUpload] = useState(false);
   const [buzzwordUploadError, setBuzzwordUploadError] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
@@ -376,6 +377,7 @@ function GamePage() {
           }
 
           setRoomCode(roomInfo.code);
+          setRoomUsesCustomBoard(!!roomInfo.custom_board_used);
           fetchRoomLeaderboard(roomInfo.code).then(setRoomLeaderboard).catch(() => {});
 
           if (!roomInfo.game_code) {
@@ -554,6 +556,9 @@ function GamePage() {
         // Phase 11.0: capture room code from welcome message
         if (message.room_code) {
           setRoomCode(message.room_code);
+          fetchRoom(message.room_code)
+            .then((info) => setRoomUsesCustomBoard(!!info.custom_board_used))
+            .catch(() => {});
           fetchRoomLeaderboard(message.room_code).then(setRoomLeaderboard).catch(() => {});
         }
         // If existingWinner is set, keep the status from validateCode (already informative).
@@ -901,9 +906,18 @@ function GamePage() {
               <button
                 type="button"
                 className={`tab-btn${leaderboardTab === "room" ? " active" : ""}`}
-                onClick={() => { setLeaderboardTab("room"); fetchRoomLeaderboard(roomCode).then(setRoomLeaderboard).catch(() => {}); }}
+                onClick={() => {
+                  setLeaderboardTab("room");
+                  fetchRoom(roomCode)
+                    .then((info) => setRoomUsesCustomBoard(!!info.custom_board_used))
+                    .catch(() => {});
+                  fetchRoomLeaderboard(roomCode).then(setRoomLeaderboard).catch(() => {});
+                }}
               >This Room</button>
             </div>
+          )}
+          {leaderboardTab === "room" && roomCode && roomUsesCustomBoard && (
+            <p className="muted-note">Custom board used: this room leaderboard is separate from all-time rankings.</p>
           )}
           <ul className="list">
             {(leaderboardTab === "room" && roomCode ? roomLeaderboard : leaderboard).map((entry) => (

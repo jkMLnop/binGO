@@ -12,7 +12,9 @@
     "smoke:host-flow": "playwright test e2e/host-flow-smoke.spec.js --config=playwright.config.cjs",
     "smoke:staging": "STAGING_BASE_URL=https://bingo-server-staging.fly.dev playwright test e2e/host-flow-smoke.spec.js --config=playwright.config.cjs",
     "smoke:dev": "SMOKE_BASE_URL=http://localhost:8080 playwright test e2e/host-flow-smoke.spec.js --config=playwright.config.cjs",
-    "smoke:prod": "PROD_BASE_URL=https://bingo-server.fly.dev playwright test e2e/prod-readonly-smoke.spec.js --config=playwright.config.cjs"
+    "smoke:prod": "PROD_BASE_URL=https://bingo-server.fly.dev playwright test e2e/prod-readonly-smoke.spec.js --config=playwright.config.cjs",
+    "smoke:all": "sh -c 'set +e; npm run smoke:dev; dev=$?; npm run smoke:staging; staging=$?; npm run smoke:prod; prod=$?; echo \"smoke summary: dev=$dev staging=$staging prod=$prod\"; if [ $dev -ne 0 ] || [ $staging -ne 0 ] || [ $prod -ne 0 ]; then exit 1; fi'",
+    "smoke:all:remote": "sh -c 'set +e; npm run smoke:staging; staging=$?; npm run smoke:prod; prod=$?; echo \"smoke summary: staging=$staging prod=$prod\"; if [ $staging -ne 0 ] || [ $prod -ne 0 ]; then exit 1; fi'"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

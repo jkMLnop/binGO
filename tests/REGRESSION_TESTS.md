@@ -13,6 +13,10 @@ Default execution path moving forward:
 - Staging deploys: `.github/workflows/ci.yml` runs browser smoke tests plus load tests after deploy.
 - Production: `.github/workflows/prod-synthetic.yml` runs read-only synthetic browser checks every 30 minutes.
 
+CLI smoke coverage:
+- PRs and staging now also run `scripts/cli-smoke.sh rw <base-url>` (CLI host-flow smoke).
+- Production synthetic runs `scripts/cli-smoke.sh ro <base-url>` (read-only invalid-code rejection path).
+
 Hotfix handling:
 - Staging/prod smoke failures auto-create GitHub issues with links to failing runs.
 - Fixes are proposed via branch/PR flow; direct automated merges to `main` are intentionally avoided.
@@ -314,11 +318,14 @@ go build -o binGO-CLI .
 
 ### 14A — Main Menu
 
+> Automated coverage note: input validation and menu decision logic in this section is covered by
+> `client/menu_test.go` (`TestShowMainMenu*`). End-to-end terminal UX output checks remain optional manual spot checks.
+
 | Test # | Scenario | Steps | Expected Result | Status |
 |--------|----------|-------|-----------------|--------|
-| 14.1 | Menu appears when no -code flag | `./binGO-CLI -mode client -server localhost:8080` | Prints `1) Host a new game` / `2) Join existing game` prompt | [ ] |
+| 14.1 | Menu appears when no -code flag | `./binGO-CLI -mode client -server localhost:8080` | Prints `1) Host a new game` / `2) Join existing game` prompt | [X] |
 | 14.2 | No menu when -code flag provided | `./binGO-CLI -mode client -server localhost:8080 -code BINGO-XXXXX` | Skips menu, goes straight to username prompt | [ ] |
-| 14.3 | Invalid menu selection rejected | At prompt enter `3` then Enter | Error `invalid selection "3" — enter 1 or 2`, process exits | [ ] |
+| 14.3 | Invalid menu selection rejected | At prompt enter `3` then Enter | Error `invalid selection "3" — enter 1 or 2`, process exits | [X] |
 
 ### 14B — Host Flow
 
@@ -328,16 +335,16 @@ go build -o binGO-CLI .
 | 14.5 | Game code shown after host creates game | Complete 14.4 | CLI prints `Share this code with players to join.` alongside the code | [ ] |
 | 14.6 | Second client joins with printed code | Copy code from 14.4, run `./binGO-CLI -mode client -server localhost:8080 -code <code>` | Second client joins; host's player list updates | [ ] |
 | 14.7 | Host flow with valid buzzword JSON | Create file `bw.json` with `[["foo"],["bar"],["baz"],["qux"],["quux"],["corge"],["grault"],["garply"],["waldo"]]`, select `1`, enter `bw.json` path | Prints `✓ Loaded 9 buzzword rows`; board cells contain words from that file | [ ] |
-| 14.8 | Invalid JSON buzzword file rejected | Point to a non-JSON file; select `1` | Error `invalid buzzword JSON in ...`; process exits | [ ] |
-| 14.9 | Empty buzzword JSON file rejected | Point to `[]`; select `1` | Error `buzzword file ... is empty`; process exits | [ ] |
-| 14.10 | Missing buzzword file rejected | Point to nonexistent path; select `1` | Error `failed to read buzzword file ...`; process exits | [ ] |
+| 14.8 | Invalid buzzword CSV file rejected | Point to a non-CSV file; select `1` | Error loading buzzword CSV; process exits | [X] |
+| 14.9 | Insufficient buzzword CSV rows rejected | Point to CSV with fewer than 9 rows; select `1` | Error loading buzzword CSV; process exits | [X] |
+| 14.10 | Missing buzzword file rejected | Point to nonexistent path; select `1` | Error loading buzzword CSV; process exits | [X] |
 
 ### 14C — Join Flow
 
 | Test # | Scenario | Steps | Expected Result | Status |
 |--------|----------|-------|-----------------|--------|
-| 14.11 | Join prompts for code | Select `2` | Prints `Enter game code:` | [ ] |
-| 14.12 | Empty code rejected | Select `2`, press Enter with no code | Error `game code cannot be empty`; process exits | [ ] |
+| 14.11 | Join prompts for code | Select `2` | Prints `Enter game code:` | [X] |
+| 14.12 | Empty code rejected | Select `2`, press Enter with no code | Error `game code cannot be empty`; process exits | [X] |
 | 14.13 | Invalid code rejected by server | Select `2`, enter `BINGO-ZZZZZ` (nonexistent game) | Server rejects; client shows connection error | [ ] |
 
 ---

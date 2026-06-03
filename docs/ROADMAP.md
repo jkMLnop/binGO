@@ -469,6 +469,50 @@ Agent workflow:
 
 ---
 
+#### Phase 16: Grafana Reliability + Playwright Dashboard Smoke Tests
+**Goal:** Make Grafana consistently usable in local/staging/prod and add browser-level Playwright smoke tests so dashboard regressions are detected automatically.
+
+**Motivation:** We currently smoke-test gameplay and API flows, but monitoring UI can still silently break (datasource disconnects, missing panels, broken provisioning, login drift). This phase adds the same agentic guardrail for observability UX.
+
+**Scope decisions:**
+- Dashboard smoke tests are read-only (no panel edits, no alert mutation).
+- Run against local compose and staging first; production dashboard smoke can be scheduled once auth/secrets are stable.
+- Reuse the existing Playwright setup in `web-client/` with a dedicated spec folder for ops smoke.
+
+##### Phase 16.0: Grafana Baseline Hardening
+**Goal:** Eliminate known provisioning/auth drift before automating browser checks.
+
+- [ ] Ensure datasource provisioning is deterministic on fresh and reused volumes (`grafana-provisioning/datasources/datasources.yml`).
+- [ ] Ensure dashboard provisioning always loads the expected board (`grafana-provisioning/dashboards/dashboards.yml`, `grafana-dashboards/bingo-dashboard.json`).
+- [ ] Add a lightweight health endpoint check in docs/scripts: Grafana up, Prometheus datasource connected, dashboard present.
+- [ ] Document required env vars and test credentials for CI in `docs/MONITORING_SETUP.md`.
+
+##### Phase 16.1: Playwright Dashboard Smoke (Local + Staging)
+**Goal:** Add browser smoke tests that prove Grafana is usable end-to-end.
+
+- [ ] Add Playwright spec file(s), e.g. `web-client/e2e/grafana-smoke.spec.js`.
+- [ ] Test flow: open Grafana login, authenticate, load dashboard, assert key panels/titles render, assert no datasource error banners.
+- [ ] Add script(s) in `web-client/package.json`:
+  - `smoke:grafana:local`
+  - `smoke:grafana:staging`
+- [ ] Add artifact retention for trace/screenshot on failure.
+
+##### Phase 16.2: CI Wiring + Incident Hooks
+**Goal:** Run Grafana smoke where web smoke already runs and auto-open issues on failures.
+
+- [ ] Extend `.github/workflows/dev-smoke.yml` to run local Grafana smoke after stack readiness.
+- [ ] Extend staging smoke path in `.github/workflows/ci.yml` with Grafana smoke and failure artifacts.
+- [ ] Optional: add scheduled prod synthetic workflow for read-only Grafana checks.
+- [ ] On failure, auto-create issue with run link + screenshot/trace pointers (same pattern as current staging/prod smoke failures).
+
+##### Phase 16.3: Regression Mapping
+**Goal:** Track observability UI checks in the same regression framework as game flows.
+
+- [ ] Add a "Grafana dashboard smoke" section to `tests/REGRESSION_TESTS.md` and mark automated ownership.
+- [ ] Keep only manual UX judgment items in the checklist; migrate deterministic checks to Playwright.
+
+---
+
 ## Deferred / Maybe Never
 
 #### Phase 9.6: In-Game Chat

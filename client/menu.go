@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -13,7 +14,17 @@ import (
 // mode, an optional game code (for join), and an optional custom buzzword list (for host).
 // It reads from stdin, so it is called before the WebSocket connection is established.
 func ShowMainMenu(serverAddr string) (choice string, code string, buzzwords [][]string, err error) {
-	reader := bufio.NewReader(os.Stdin)
+	return showMainMenuFromReader(serverAddr, os.Stdin, shared.LoadBuzzwords)
+}
+
+// ShowMainMenuWithReader is used by callers that need deterministic input handling
+// across multiple prompts (for example automation and tests).
+func ShowMainMenuWithReader(serverAddr string, reader *bufio.Reader) (choice string, code string, buzzwords [][]string, err error) {
+	return showMainMenuFromReader(serverAddr, reader, shared.LoadBuzzwords)
+}
+
+func showMainMenuFromReader(serverAddr string, input io.Reader, loadBuzzwords func(string) ([][]string, error)) (choice string, code string, buzzwords [][]string, err error) {
+	reader := bufio.NewReader(input)
 
 	fmt.Printf("\n🎲 Connect to %s\n", serverAddr)
 	fmt.Println("   1) Host a new game")
@@ -28,7 +39,7 @@ func ShowMainMenu(serverAddr string) (choice string, code string, buzzwords [][]
 
 	switch selection {
 	case "1":
-		bw, loadErr := promptForBuzzwords(reader)
+		bw, loadErr := promptForBuzzwords(reader, loadBuzzwords)
 		if loadErr != nil {
 			return "", "", nil, loadErr
 		}
@@ -53,7 +64,7 @@ func ShowMainMenu(serverAddr string) (choice string, code string, buzzwords [][]
 
 // promptForBuzzwords asks for an optional CSV buzzword file path.
 // Returns nil buzzwords when the user skips (uses server defaults).
-func promptForBuzzwords(reader *bufio.Reader) ([][]string, error) {
+func promptForBuzzwords(reader *bufio.Reader, loadBuzzwords func(string) ([][]string, error)) ([][]string, error) {
 	fmt.Print("Enter path to buzzword CSV file (or press Enter to skip): ")
 	line, err := reader.ReadString('\n')
 	if err != nil {
@@ -64,7 +75,7 @@ func promptForBuzzwords(reader *bufio.Reader) ([][]string, error) {
 		return nil, nil // use server defaults
 	}
 
-	buzzwords, err := shared.LoadBuzzwords(path)
+	buzzwords, err := loadBuzzwords(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load buzzword CSV %q: %w", path, err)
 	}

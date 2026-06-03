@@ -156,6 +156,96 @@ func TestGameExpiration(t *testing.T) {
 	t.Log("✓ Game expiration validation passed")
 }
 
+func TestGetLeaderboardIncludesRoomWins(t *testing.T) {
+	tmpFile := "/tmp/test_leaderboard_includes_room_wins.db"
+	defer os.Remove(tmpFile)
+
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init: %v", err)
+	}
+
+	// 3 room-scoped wins for CalmOtter74
+	for i := 0; i < 3; i++ {
+		if err := store.RecordWin(ctx, "CalmOtter74", "BINGO-ROOM1", "ARB32"); err != nil {
+			t.Fatalf("failed to record room win %d: %v", i+1, err)
+		}
+	}
+
+	// 1 standalone win for OtherPlayer
+	if err := store.RecordWin(ctx, "OtherPlayer", "BINGO-AAAAA", ""); err != nil {
+		t.Fatalf("failed to record standalone win: %v", err)
+	}
+
+	leaderboard, err := store.GetLeaderboard(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to get leaderboard: %v", err)
+	}
+
+	if len(leaderboard) < 2 {
+		t.Fatalf("expected at least 2 leaderboard entries, got %d", len(leaderboard))
+	}
+
+	if leaderboard[0].Username != "CalmOtter74" || leaderboard[0].Wins != 3 {
+		t.Fatalf("unexpected top entry: %+v", leaderboard[0])
+	}
+}
+
+func TestGetLeaderboardExcludesCustomRoomWins(t *testing.T) {
+	tmpFile := "/tmp/test_leaderboard_excludes_custom_room_wins.db"
+	defer os.Remove(tmpFile)
+
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init: %v", err)
+	}
+
+	words := make([]string, 24)
+	for i := range words {
+		words[i] = "custom-word-" + string(rune('a'+(i%26)))
+	}
+	if err := store.SetRoomBuzzwords(ctx, "ARB32", words, "host"); err != nil {
+		t.Fatalf("failed to set room buzzwords: %v", err)
+	}
+
+	// 3 wins in a custom-board room should stay room-only.
+	for i := 0; i < 3; i++ {
+		if err := store.RecordWin(ctx, "CalmOtter74", "BINGO-ROOM1", "ARB32"); err != nil {
+			t.Fatalf("failed to record room win %d: %v", i+1, err)
+		}
+	}
+
+	// 1 standalone win should be visible in all-time leaderboard.
+	if err := store.RecordWin(ctx, "OtherPlayer", "BINGO-AAAAA", ""); err != nil {
+		t.Fatalf("failed to record standalone win: %v", err)
+	}
+
+	leaderboard, err := store.GetLeaderboard(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to get leaderboard: %v", err)
+	}
+
+	if len(leaderboard) != 1 {
+		t.Fatalf("expected 1 global leaderboard entry, got %d", len(leaderboard))
+	}
+
+	if leaderboard[0].Username != "OtherPlayer" || leaderboard[0].Wins != 1 {
+		t.Fatalf("unexpected top entry: %+v", leaderboard[0])
+	}
+}
+
 // TestArchiveGame validates persisting a completed game and querying it back
 func TestArchiveGame(t *testing.T) {
 	tmpFile := "/tmp/test_bingo_archive.db"

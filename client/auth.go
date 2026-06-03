@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -86,20 +88,24 @@ func (am *AuthManager) sessionFilePath(clientIP string) string {
 
 // PromptForUsername asks user for username or generates random one
 func (am *AuthManager) PromptForUsername(lastUsername string) (string, error) {
+	return am.PromptForUsernameWithReader(lastUsername, bufio.NewReader(os.Stdin))
+}
+
+func (am *AuthManager) PromptForUsernameWithReader(lastUsername string, reader *bufio.Reader) (string, error) {
 	if lastUsername != "" {
 		fmt.Printf("Username (default: %s): ", lastUsername)
 	} else {
 		fmt.Print("Username (press Enter for random): ")
 	}
 
-	var input string
-	_, err := fmt.Scanln(&input)
-	if err != nil && err.Error() != "unexpected newline" {
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
 		return "", err
 	}
+	input := strings.TrimSpace(line)
 
 	// If empty input
-	if strings.TrimSpace(input) == "" {
+	if input == "" {
 		// Use last username if available
 		if lastUsername != "" {
 			return lastUsername, nil
@@ -113,15 +119,18 @@ func (am *AuthManager) PromptForUsername(lastUsername string) (string, error) {
 
 // PromptForReconnect asks user if they want to use last username
 func (am *AuthManager) PromptForReconnect(lastUsername string) (useLastUsername bool, err error) {
+	return am.PromptForReconnectWithReader(lastUsername, bufio.NewReader(os.Stdin))
+}
+
+func (am *AuthManager) PromptForReconnectWithReader(lastUsername string, reader *bufio.Reader) (useLastUsername bool, err error) {
 	fmt.Printf("Reconnect as %s? (y/n, default=y): ", lastUsername)
 
-	var input string
-	_, err = fmt.Scanln(&input)
-	if err != nil && err.Error() != "unexpected newline" {
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
 		return false, err
 	}
+	input := strings.TrimSpace(strings.ToLower(line))
 
-	input = strings.TrimSpace(strings.ToLower(input))
 	if input == "" || input == "y" || input == "yes" {
 		return true, nil
 	}
