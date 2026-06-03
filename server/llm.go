@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -47,6 +48,10 @@ type LLMClient interface {
 	StreamGenerate(ctx context.Context, messages []ChatMessage, w http.ResponseWriter) error
 	Healthy(ctx context.Context) bool
 }
+
+var (
+	ErrLLMUnavailable = errors.New("llm unavailable")
+)
 
 // ── Ollama implementation ─────────────────────────────────────────────────────
 
@@ -124,12 +129,12 @@ func (c *OllamaClient) StreamGenerate(ctx context.Context, messages []ChatMessag
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("ollama request failed: %w", err)
+		return fmt.Errorf("%w: ollama request failed: %v", ErrLLMUnavailable, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama returned HTTP %d", resp.StatusCode)
+		return fmt.Errorf("%w: ollama returned HTTP %d", ErrLLMUnavailable, resp.StatusCode)
 	}
 
 	// Write SSE headers before the first byte
@@ -191,8 +196,8 @@ func writeSSE(w http.ResponseWriter, event SSEEvent) {
 // ── Structured output extraction ──────────────────────────────────────────────
 
 // extractGeneratedSets finds the first {...} JSON object in text and validates
-// it conforms to GeneratedSets: ≥1 set, each set ≥24 words, each word ≤60 chars,
-// and no word appears in more than one set.
+// it conforms to GeneratedSets: exactly 3 sets, exactly 25 words per set,
+// each word non-empty and <=60 chars, and no word reused across sets.
 func extractGeneratedSets(text string) (*GeneratedSets, error) {
 	start := strings.Index(text, "{")
 	end := strings.LastIndex(text, "}")
@@ -205,22 +210,29 @@ func extractGeneratedSets(text string) (*GeneratedSets, error) {
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal generated sets: %w", err)
 	}
-	if len(result.Sets) == 0 {
-		return nil, fmt.Errorf("LLM returned no word sets")
+	if len(result.Sets) != 3 {
+		return nil, fmt.Errorf("LLM must return exactly 3 sets, got %d", len(result.Sets))
 	}
 
 	seen := make(map[string]bool)
 	for i, set := range result.Sets {
-		if len(set.Words) < 24 {
-			return nil, fmt.Errorf("set %d (%q) has only %d words — need at least 24", i+1, set.Label, len(set.Words))
+		if strings.TrimSpace(set.Label) == "" {
+			return nil, fmt.Errorf("set %d has an empty label", i+1)
+		}
+		if len(set.Words) != 25 {
+			return nil, fmt.Errorf("set %d (%q) must contain exactly 25 words, got %d", i+1, set.Label, len(set.Words))
 		}
 		for _, word := range set.Words {
-			if len(word) > 60 {
+			trimmed := strings.TrimSpace(word)
+			if trimmed == "" {
+				return nil, fmt.Errorf("set %d (%q) contains an empty word", i+1, set.Label)
+			}
+			if len(trimmed) > 60 {
 				return nil, fmt.Errorf("word too long (max 60 chars): %q", word)
 			}
-			key := strings.ToLower(strings.TrimSpace(word))
+			key := strings.ToLower(trimmed)
 			if seen[key] {
-				return nil, fmt.Errorf("duplicate word across sets: %q", word)
+				return nil, fmt.Errorf("duplicate word across sets: %q", trimmed)
 			}
 			seen[key] = true
 		}

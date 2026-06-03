@@ -179,17 +179,25 @@ export async function streamBuzzwords(
   topic: string,
   url: string | undefined,
   messages: Array<{ role: string; content: string }>,
-  hostId: string,
+  authToken: string,
   onToken: (chunk: string) => void,
   onDone: (sets: WordSet[]) => void,
   onError: (err: string) => void,
 ): Promise<void> {
+  if (!authToken.trim()) {
+    onError("Missing session token. Reconnect to the room and try again.");
+    return;
+  }
+
   let response: Response;
   try {
     response = await fetch(`/api/room/${encodeURIComponent(roomCode)}/generate-buzzwords`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, url, messages, host_id: hostId }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ topic, url, messages }),
     });
   } catch (err) {
     onError(err instanceof Error ? err.message : "Network error");

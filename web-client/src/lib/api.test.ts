@@ -180,7 +180,7 @@ describe("streamBuzzwords", () => {
 
     const tokens: string[] = [];
     let doneSets: WordSet[] | null = null;
-    await streamBuzzwords("AB3K7", "anime", undefined, [], "host-1",
+    await streamBuzzwords("AB3K7", "anime", undefined, [], "session-token",
       (c) => tokens.push(c),
       (s) => { doneSets = s; },
       () => {},
@@ -197,7 +197,7 @@ describe("streamBuzzwords", () => {
     mockSSEFetch(200, lines);
 
     let doneSets: WordSet[] | null = null;
-    await streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "session-token",
       () => {},
       (s) => { doneSets = s; },
       () => {},
@@ -216,7 +216,7 @@ describe("streamBuzzwords", () => {
     } as unknown as Response);
 
     let errorMsg = "";
-    await streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "session-token",
       () => {},
       () => {},
       (e) => { errorMsg = e; },
@@ -232,7 +232,7 @@ describe("streamBuzzwords", () => {
     mockSSEFetch(200, lines);
 
     let errorMsg = "";
-    await streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "session-token",
       () => {},
       () => {},
       (e) => { errorMsg = e; },
@@ -243,17 +243,27 @@ describe("streamBuzzwords", () => {
 
   it("URL-encodes the room code", async () => {
     mockSSEFetch(200, [`data: ${JSON.stringify({ type: "done", sets: validSets })}`]);
-    await streamBuzzwords("AB 3K7", "topic", undefined, [], "host-1", () => {}, () => {}, () => {});
+    await streamBuzzwords("AB 3K7", "topic", undefined, [], "session-token", () => {}, () => {}, () => {});
     const calledUrl = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(calledUrl).toContain(encodeURIComponent("AB 3K7"));
   });
 
-  it("includes host_id in the request body", async () => {
+  it("sends Authorization bearer token header", async () => {
     mockSSEFetch(200, [`data: ${JSON.stringify({ type: "done", sets: validSets })}`]);
-    await streamBuzzwords("AB3K7", "topic", undefined, [], "the-host", () => {}, () => {}, () => {});
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "the-token", () => {}, () => {}, () => {});
     const calledInit = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
-    const body = JSON.parse(calledInit.body as string) as { host_id: string };
-    expect(body.host_id).toBe("the-host");
+    const headers = calledInit.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer the-token");
+  });
+
+  it("returns a clear error when auth token is missing", async () => {
+    global.fetch = vi.fn();
+    let errorMsg = "";
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "", () => {}, () => {}, (e) => {
+      errorMsg = e;
+    });
+    expect(errorMsg).toContain("Missing session token");
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("skips malformed SSE lines without throwing", async () => {
@@ -265,7 +275,7 @@ describe("streamBuzzwords", () => {
 
     let doneSets: WordSet[] | null = null;
     await expect(
-      streamBuzzwords("AB3K7", "topic", undefined, [], "host-1",
+      streamBuzzwords("AB3K7", "topic", undefined, [], "session-token",
         () => {},
         (s) => { doneSets = s; },
         () => {},

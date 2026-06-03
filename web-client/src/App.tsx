@@ -898,7 +898,7 @@ function GamePage() {
         {showGenerate && roomCode && (
           <GenerateModal
             roomCode={roomCode}
-            hostId={hostIdRef.current}
+            authToken={tokenRef.current}
             onApply={async (words) => {
               await setRoomBuzzwords(roomCode, words, currentUser);
               setShowGenerate(false);
@@ -939,12 +939,12 @@ function FollowUpInput({ onSubmit, disabled }: { onSubmit: (msg: string) => void
 
 function GenerateModal({
   roomCode,
-  hostId,
+  authToken,
   onApply,
   onClose,
 }: {
   roomCode: string;
-  hostId: string;
+  authToken: string;
   onApply: (words: string[]) => Promise<void>;
   onClose: () => void;
 }) {
@@ -968,7 +968,7 @@ function GenerateModal({
       topic,
       url || undefined,
       msgs,
-      hostId,
+      authToken,
       (chunk) => {
         setStreamText((t) => t + chunk);
         if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;

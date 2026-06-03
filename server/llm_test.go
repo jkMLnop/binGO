@@ -25,10 +25,18 @@ func TestExtractGeneratedSetsValid(t *testing.T) {
 }
 
 func TestExtractGeneratedSetsTooFewWords(t *testing.T) {
-	sets := buildValidSetsJSON(1, 10) // only 10 words per set
+	sets := buildValidSetsJSON(3, 10) // wrong word count per set
 	_, err := extractGeneratedSets(sets)
 	if err == nil {
-		t.Error("expected error for <24 words, got nil")
+		t.Error("expected error for wrong word count, got nil")
+	}
+}
+
+func TestExtractGeneratedSetsWrongSetCount(t *testing.T) {
+	sets := buildValidSetsJSON(2, 25)
+	_, err := extractGeneratedSets(sets)
+	if err == nil {
+		t.Error("expected error for wrong number of sets, got nil")
 	}
 }
 
@@ -52,7 +60,7 @@ func TestExtractGeneratedSetsWordTooLong(t *testing.T) {
 	}
 	words[0] = longWord
 	wordsJSON, _ := json.Marshal(words)
-	raw := fmt.Sprintf(`{"sets":[{"label":"Set A","words":%s}]}`, string(wordsJSON))
+	raw := fmt.Sprintf(`{"sets":[{"label":"Set A","words":%s},{"label":"Set B","words":%s},{"label":"Set C","words":%s}]}`, string(wordsJSON), string(wordsJSON), string(wordsJSON))
 	_, err := extractGeneratedSets(raw)
 	if err == nil {
 		t.Error("expected error for word >60 chars, got nil")
@@ -210,13 +218,19 @@ func TestHandleGenerateBuzzwordsNoLLM(t *testing.T) {
 func TestHandleGenerateBuzzwordsHostAuth(t *testing.T) {
 	ResetMetrics()
 	s := NewServer([][]string{{"foo"}}, 5, 5, "9999")
-	s.LLMClient = &stubLLMClient{}
+	s.LLMClient = &stubLLMClient{healthy: true}
 
-	room, _ := s.createRoom(context.Background(), "real-host")
+	room, _ := s.createRoom(context.Background(), "host-123")
+	guestToken, err := s.TokenManager.IssueToken("guest-1", "203.0.113.1", 1)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
 
-	body := bytes.NewBufferString(`{"host_id":"wrong-host","topic":"test"}`)
+	body := bytes.NewBufferString(`{"topic":"test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/room/"+room.Code+"/generate-buzzwords", body)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+guestToken)
+	req.RemoteAddr = "203.0.113.1:12345"
 	rec := httptest.NewRecorder()
 
 	s.handleGenerateBuzzwords(rec, req, room.Code)
@@ -230,14 +244,20 @@ func TestHandleGenerateBuzzwordsHostAuth(t *testing.T) {
 func TestHandleGenerateBuzzwordsSuccess(t *testing.T) {
 	ResetMetrics()
 	s := NewServer([][]string{{"foo"}}, 5, 5, "9999")
-	stub := &stubLLMClient{}
+	stub := &stubLLMClient{healthy: true}
 	s.LLMClient = stub
 
 	room, _ := s.createRoom(context.Background(), "host-42")
+	hostToken, err := s.TokenManager.IssueToken(room.HostID, "203.0.113.7", 1)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
 
-	body := bytes.NewBufferString(fmt.Sprintf(`{"host_id":%q,"topic":"anime convention"}`, room.HostID))
+	body := bytes.NewBufferString(`{"topic":"anime convention"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/room/"+room.Code+"/generate-buzzwords", body)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+hostToken)
+	req.RemoteAddr = "203.0.113.7:54321"
 	rec := httptest.NewRecorder()
 
 	s.handleGenerateBuzzwords(rec, req, room.Code)
@@ -247,11 +267,54 @@ func TestHandleGenerateBuzzwordsSuccess(t *testing.T) {
 	}
 }
 
+func TestHandleGenerateBuzzwordsMissingBearerToken(t *testing.T) {
+	ResetMetrics()
+	s := NewServer([][]string{{"foo"}}, 5, 5, "9999")
+	s.LLMClient = &stubLLMClient{healthy: true}
+
+	room, _ := s.createRoom(context.Background(), "host-1")
+	body := bytes.NewBufferString(`{"topic":"test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/room/"+room.Code+"/generate-buzzwords", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	s.handleGenerateBuzzwords(rec, req, room.Code)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestHandleGenerateBuzzwordsLLMUnhealthy(t *testing.T) {
+	ResetMetrics()
+	s := NewServer([][]string{{"foo"}}, 5, 5, "9999")
+	s.LLMClient = &stubLLMClient{healthy: false}
+
+	room, _ := s.createRoom(context.Background(), "host-77")
+	hostToken, err := s.TokenManager.IssueToken(room.HostID, "203.0.113.20", 1)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+	body := bytes.NewBufferString(`{"topic":"test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/room/"+room.Code+"/generate-buzzwords", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+hostToken)
+	req.RemoteAddr = "203.0.113.20:80"
+	rec := httptest.NewRecorder()
+
+	s.handleGenerateBuzzwords(rec, req, room.Code)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rec.Code)
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // stubLLMClient is a no-op LLMClient for testing.
 type stubLLMClient struct {
-	called bool
+	called  bool
+	healthy bool
 }
 
 func (s *stubLLMClient) StreamGenerate(_ context.Context, _ []ChatMessage, _ http.ResponseWriter) error {
@@ -259,7 +322,7 @@ func (s *stubLLMClient) StreamGenerate(_ context.Context, _ []ChatMessage, _ htt
 	return nil
 }
 
-func (s *stubLLMClient) Healthy(_ context.Context) bool { return true }
+func (s *stubLLMClient) Healthy(_ context.Context) bool { return s.healthy }
 
 // buildValidSetsJSON builds a GeneratedSets JSON string with n sets of wordsPerSet words.
 func buildValidSetsJSON(n, wordsPerSet int) string {

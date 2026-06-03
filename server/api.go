@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // APIResponse is a standard API response format
@@ -539,9 +542,17 @@ type generateBuzzwordsRequest struct {
 	Messages []ChatMessage `json:"messages,omitempty"`
 }
 
+func bearerTokenFromAuthHeader(header string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
 // handleGenerateBuzzwords streams AI-generated buzzword sets as SSE.
 // POST /api/room/:code/generate-buzzwords
-// Requires host_id matching the room's HostID.
+// Requires a bearer token belonging to the room host.
 // Returns HTTP 503 when Ollama is not configured or not reachable.
 func (s *Server) handleGenerateBuzzwords(w http.ResponseWriter, r *http.Request, code string) {
 	if s.LLMClient == nil {
@@ -561,9 +572,28 @@ func (s *Server) handleGenerateBuzzwords(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// Host-only auth: require host_id matching the room
-	if body.HostID == "" || body.HostID != room.HostID {
+	// Host-only auth: require a valid bearer token bound to the room host.
+	token := bearerTokenFromAuthHeader(r.Header.Get("Authorization"))
+	if token == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing bearer token")
+		return
+	}
+
+	clientIP := s.extractClientIP(r)
+	tokenUsername, verifyErr := s.TokenManager.VerifyToken(token, clientIP)
+	if verifyErr != nil {
+		writeAPIError(w, http.StatusUnauthorized, "invalid or expired bearer token")
+		return
+	}
+
+	if tokenUsername != room.HostID {
 		writeAPIError(w, http.StatusForbidden, "only the room host can generate buzzwords")
+		return
+	}
+
+	// Keep host_id as an optional backward-compatible field; if provided, enforce consistency.
+	if body.HostID != "" && body.HostID != room.HostID {
+		writeAPIError(w, http.StatusForbidden, "host_id does not match this room")
 		return
 	}
 
@@ -604,8 +634,19 @@ func (s *Server) handleGenerateBuzzwords(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if !s.LLMClient.Healthy(ctx) {
+		writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — Ollama is not reachable")
+		return
+	}
+
 	if err := s.LLMClient.StreamGenerate(r.Context(), messages, w); err != nil {
 		log.Printf("LLM generation error for room %s: %v", code, err)
+		if errors.Is(err, ErrLLMUnavailable) {
+			writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — Ollama is not reachable")
+			return
+		}
 		// If streaming has started (headers already sent) we cannot write a JSON error —
 		// the SSE "error" event was already written inside StreamGenerate.
 	}
