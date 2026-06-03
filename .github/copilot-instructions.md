@@ -39,6 +39,11 @@ If you are running inside a worktree directory (not the main repo), this is expe
   - `-tags=e2e` → requires `docker-compose up`
 - Call `ResetMetrics()` at the start of any test that instantiates `NewServer()` to avoid Prometheus duplicate-registration panics.
 - Do not write tests that require external infrastructure unless using the correct build tag to isolate them.
+- Extend regression coverage whenever functionality changes:
+  - Add or update automated tests in the same PR (unit/integration/container/Playwright as applicable).
+  - Update `tests/REGRESSION_TESTS.md` to reflect coverage and remaining manual checks.
+  - Prefer converting manual checks to automated checks over time; include a brief reason for any manual-only scenario.
+  - For user-facing deploy-critical flows, update smoke tests under `web-client/e2e/` and CI workflows in `.github/workflows/`.
 
 ## Code Quality
 

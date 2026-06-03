@@ -166,6 +166,13 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 - `tests/container_e2e_test.go`, `tests/container_regression_test.go` → `container`
 - `tests/full_system_load_test.go` → `e2e`
 
+**Regression policy for future changes:**
+- Every new feature or behavior change must extend regression coverage in the same PR.
+- Prefer automation first: unit/integration/container tests and Playwright smoke tests over manual-only steps.
+- Keep `tests/REGRESSION_TESTS.md` current as the human-readable source of intent and coverage status.
+- If a test scenario remains manual, add a short note explaining why it cannot be automated yet.
+- When adding deploy-critical user flows, update browser smoke checks under `web-client/e2e/` and relevant CI workflows.
+
 ## Conventions & Patterns
 
 - **Error wrapping**: Use `fmt.Errorf("context: %w", err)` at all boundaries
