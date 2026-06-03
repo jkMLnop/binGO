@@ -25,6 +25,7 @@ export type ClientMessage = {
   username?: string;
   token?: string;
   code?: string;
+  room_code?: string;
   phrase?: string;
 };
 

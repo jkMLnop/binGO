@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { createRoom, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords } from "./lib/api";
+import { createRoom, fetchGameByCode, fetchLeaderboard, fetchRoom, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
@@ -316,6 +316,18 @@ function HomePage() {
 function GamePage() {
   const { code = "" } = useParams();
   const normalizedCode = code.toUpperCase();
+  const roomCodeFromRoute = useMemo(() => {
+    if (normalizedCode.startsWith("BINGO-")) {
+      const suffix = normalizedCode.slice(6);
+      if (/^[A-Z0-9]{5}$/.test(suffix)) {
+        return suffix;
+      }
+    }
+    if (/^[A-Z0-9]{5}$/.test(normalizedCode)) {
+      return normalizedCode;
+    }
+    return "";
+  }, [normalizedCode]);
   const [username, setUsername] = useState("");
   const [currentUser, setCurrentUser] = useState("");
   const [gameStatus, setGameStatus] = useState("Checking room code...");
@@ -357,8 +369,26 @@ function GamePage() {
 
     async function validateCode() {
       try {
-        const gameInfo = await fetchGameByCode(normalizedCode);
-        if (mounted) {
+        if (roomCodeFromRoute) {
+          const roomInfo = await fetchRoom(roomCodeFromRoute);
+          if (!mounted) {
+            return;
+          }
+
+          setRoomCode(roomInfo.code);
+          fetchRoomLeaderboard(roomInfo.code).then(setRoomLeaderboard).catch(() => {});
+
+          if (!roomInfo.game_code) {
+            setGameStatus(`Room ${roomInfo.code} is ready. Join to start game.`);
+            setError("");
+            return;
+          }
+
+          const gameInfo = await fetchGameByCode(roomInfo.game_code);
+          if (!mounted) {
+            return;
+          }
+
           const GAME_TTL_SECONDS = 60 * 60; // 60 minutes
           const ageSeconds = Math.floor(Date.now() / 1000) - gameInfo.created_at;
           if (ageSeconds > GAME_TTL_SECONDS) {
@@ -378,8 +408,36 @@ function GamePage() {
             setWinner(gameInfo.winner);
             setGameStatus(`Game already ended — winner: ${gameInfo.winner}`);
           } else {
-            setGameStatus(`Game ${normalizedCode} is active`);
+            setGameStatus(`Room ${roomInfo.code} is active`);
           }
+          return;
+        }
+
+        const gameInfo = await fetchGameByCode(normalizedCode);
+        if (!mounted) {
+          return;
+        }
+
+        const GAME_TTL_SECONDS = 60 * 60; // 60 minutes
+        const ageSeconds = Math.floor(Date.now() / 1000) - gameInfo.created_at;
+        if (ageSeconds > GAME_TTL_SECONDS) {
+          setGameDead(true);
+          setGameDeadReason("This room code has expired. Room codes are valid for 60 minutes.");
+          setGameStatus("Room code expired");
+        } else if (gameInfo.status === "ended" && !gameInfo.winner) {
+          // Orphaned — host left before anyone won
+          setGameDead(true);
+          setGameDeadReason("The host has left and this game is no longer active.");
+          setGameStatus("Game unavailable");
+        } else if (gameInfo.winner) {
+          // Game already has a winner — pre-set the ended state immediately from
+          // the HTTP API so the UI is correct before the WebSocket even connects.
+          gameEndedRef.current = true;
+          winSentRef.current = true;
+          setWinner(gameInfo.winner);
+          setGameStatus(`Game already ended — winner: ${gameInfo.winner}`);
+        } else {
+          setGameStatus(`Game ${normalizedCode} is active`);
         }
       } catch (err) {
         if (mounted) {
@@ -407,7 +465,7 @@ function GamePage() {
       mounted = false;
       socketRef.current?.close();
     };
-  }, [normalizedCode]);
+  }, [normalizedCode, roomCodeFromRoute]);
 
   const gameLink = useMemo(() => `${window.location.origin}/game/${normalizedCode}`, [normalizedCode]);
 
@@ -442,9 +500,11 @@ function GamePage() {
     socketRef.current = socket;
 
     socket.onopen = () => {
-      const authMessage: ClientMessage = tokenRef.current
-        ? { action: "login", token: tokenRef.current, code: normalizedCode }
-        : { action: "login", username: name, code: normalizedCode };
+      const authMessage: ClientMessage = roomCodeFromRoute
+        ? { action: "room_login", username: name, room_code: roomCodeFromRoute }
+        : tokenRef.current
+          ? { action: "login", token: tokenRef.current, code: normalizedCode }
+          : { action: "login", username: name, code: normalizedCode };
       socket.send(JSON.stringify(authMessage));
     };
 
