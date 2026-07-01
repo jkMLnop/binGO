@@ -105,12 +105,29 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		FOREIGN KEY (room_code) REFERENCES rooms(code)
 	);
 
+	CREATE TABLE IF NOT EXISTS llm_feedback (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		game_code TEXT,
+		topic TEXT,
+		source_url TEXT,
+		set_label TEXT,
+		generation_mode TEXT,
+		total_words INTEGER NOT NULL DEFAULT 0,
+		included_words JSON,
+		excluded_words JSON,
+		submitted_by TEXT,
+		submitted_at INTEGER NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_games_code ON games(code);
 	CREATE INDEX IF NOT EXISTS idx_games_host_id ON games(host_id);
 	CREATE INDEX IF NOT EXISTS idx_games_expires_at ON games(expires_at);
 	CREATE INDEX IF NOT EXISTS idx_players_game_id ON players(game_id);
 	CREATE INDEX IF NOT EXISTS idx_hosts_username ON hosts(username);
 	CREATE INDEX IF NOT EXISTS idx_wins_player_username ON wins_history(player_username);
+	CREATE INDEX IF NOT EXISTS idx_llm_feedback_game_code ON llm_feedback(game_code);
+	CREATE INDEX IF NOT EXISTS idx_llm_feedback_topic ON llm_feedback(topic);
+	CREATE INDEX IF NOT EXISTS idx_llm_feedback_submitted_at ON llm_feedback(submitted_at);
 
 	CREATE TABLE IF NOT EXISTS game_archives (
 		id TEXT PRIMARY KEY,
@@ -137,6 +154,9 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 	}
 	if err := s.addColumnIfNotExists(ctx, "wins_history", "room_code", "TEXT"); err != nil {
 		return fmt.Errorf("failed to migrate wins_history.room_code: %w", err)
+	}
+	if err := s.addColumnIfNotExists(ctx, "llm_feedback", "generation_mode", "TEXT"); err != nil {
+		return fmt.Errorf("failed to migrate llm_feedback.generation_mode: %w", err)
 	}
 
 	// Phase 3: indexes that depend on migrated columns.
@@ -854,6 +874,129 @@ func (s *SQLiteStore) GetRoomBuzzwords(ctx context.Context, roomCode string) ([]
 		return nil, fmt.Errorf("failed to unmarshal room buzzwords: %w", err)
 	}
 	return words, nil
+}
+
+// SaveLLMFeedback persists one feedback submission.
+func (s *SQLiteStore) SaveLLMFeedback(ctx context.Context, entry LLMFeedbackEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	includedData, err := json.Marshal(entry.IncludedWords)
+	if err != nil {
+		return fmt.Errorf("failed to marshal included words: %w", err)
+	}
+
+	excludedData, err := json.Marshal(entry.Excluded)
+	if err != nil {
+		return fmt.Errorf("failed to marshal excluded words: %w", err)
+	}
+
+	submittedAt := entry.SubmittedAt.Unix()
+	if submittedAt <= 0 {
+		submittedAt = time.Now().Unix()
+	}
+
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO llm_feedback
+		 (game_code, topic, source_url, set_label, generation_mode, total_words, included_words, excluded_words, submitted_by, submitted_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.GameCode,
+		entry.Topic,
+		entry.SourceURL,
+		entry.SetLabel,
+		entry.GenerationMode,
+		entry.TotalWords,
+		includedData,
+		excludedData,
+		entry.SubmittedBy,
+		submittedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to save llm feedback: %w", err)
+	}
+
+	return nil
+}
+
+// GetRecentLLMFeedback retrieves recent feedback entries filtered by game code and/or topic.
+func (s *SQLiteStore) GetRecentLLMFeedback(ctx context.Context, gameCode, topic string, limit int) ([]LLMFeedbackEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 120
+	}
+
+	query := `SELECT game_code, topic, source_url, set_label, generation_mode, total_words, included_words, excluded_words, submitted_by, submitted_at
+		FROM llm_feedback`
+	args := make([]interface{}, 0, 3)
+	conditions := make([]string, 0, 2)
+
+	if gameCode != "" {
+		conditions = append(conditions, "LOWER(game_code) = LOWER(?)")
+		args = append(args, gameCode)
+	}
+	if topic != "" {
+		conditions = append(conditions, "LOWER(topic) = LOWER(?)")
+		args = append(args, topic)
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY submitted_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query llm feedback: %w", err)
+	}
+	defer rows.Close()
+
+	entries := make([]LLMFeedbackEntry, 0, limit)
+	for rows.Next() {
+		var entry LLMFeedbackEntry
+		var includedData []byte
+		var excludedData []byte
+		var submittedAt int64
+
+		err := rows.Scan(
+			&entry.GameCode,
+			&entry.Topic,
+			&entry.SourceURL,
+			&entry.SetLabel,
+			&entry.GenerationMode,
+			&entry.TotalWords,
+			&includedData,
+			&excludedData,
+			&entry.SubmittedBy,
+			&submittedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan llm feedback row: %w", err)
+		}
+
+		entry.SubmittedAt = time.Unix(submittedAt, 0)
+
+		if len(includedData) > 0 {
+			if err := json.Unmarshal(includedData, &entry.IncludedWords); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal included words: %w", err)
+			}
+		}
+
+		if len(excludedData) > 0 {
+			if err := json.Unmarshal(excludedData, &entry.Excluded); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal excluded words: %w", err)
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating llm feedback rows: %w", err)
+	}
+
+	return entries, nil
 }
 
 // generateID generates a unique ID (simple UUID-like string)

@@ -268,6 +268,75 @@ button:hover {
     transform: translateY(0);
   }
 
+  /* ── Lobby panel (host setup) ──────────────────────────────────── */
+  .lobby-panel {
+    text-align: center;
+    padding: 1.5rem 0.5rem;
+  }
+
+  .lobby-panel h2 {
+    margin-bottom: 0.5rem;
+    font-size: 1.3rem;
+  }
+
+  .lobby-hint {
+    color: #555;
+    font-size: 0.9rem;
+    margin: 0 0 1.5rem;
+  }
+
+  .lobby-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-width: 440px;
+    margin: 0 auto;
+  }
+
+  .lobby-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+    padding: 1.2rem 1.2rem;
+    background: var(--paper);
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+    text-align: left;
+  }
+
+  .lobby-action-btn:hover {
+    background: var(--sky);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px var(--shadow);
+  }
+
+  .lobby-action-btn:active {
+    transform: translateY(0);
+  }
+
+  .lobby-action-icon {
+    font-size: 1.8rem;
+    flex-shrink: 0;
+  }
+
+  .lobby-action-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .lobby-action-text strong {
+    font-size: 1rem;
+  }
+
+  .lobby-action-desc {
+    font-size: 0.82rem;
+    color: #555;
+  }
+
   /* ── Modal overlay ───────────────────────────────────────────── */
   .modal-backdrop {
     position: fixed;
@@ -801,4 +870,267 @@ button:hover {
   font-size: 0.9rem;
   font-weight: 500;
   letter-spacing: 0.01em;
+}
+
+/* AI generate modal review controls */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(21, 37, 56, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+}
+
+.modal-panel.generate-modal {
+  width: min(900px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 8px 32px var(--shadow);
+}
+
+.generate-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.generate-output {
+  max-height: 180px;
+  overflow: auto;
+  background: #fff;
+  border: 1.5px solid #d9e5f0;
+  border-radius: 8px;
+  padding: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.stream-text {
+  white-space: pre-wrap;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.word-sets {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.word-set-card {
+  border: 1.5px solid #d9e5f0;
+  border-radius: 10px;
+  padding: 0.7rem;
+  background: #fff;
+}
+
+.word-set-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.word-count {
+  font-size: 0.78rem;
+  color: #5f6f82;
+}
+
+.word-review-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.6rem;
+}
+
+.word-review-item {
+  border: 1px solid #d9e5f0;
+  border-radius: 8px;
+  padding: 0.45rem;
+  background: #fafcff;
+}
+
+.word-review-item.excluded {
+  border-color: #d9b8b8;
+  background: #fff7f7;
+}
+
+.word-toggle {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-weight: 500;
+}
+
+.word-toggle input {
+  margin-top: 0.2rem;
+}
+
+.exclude-feedback {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed #e6c6c6;
+}
+
+.reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.reason-chip {
+  border: 1px solid #c5d6e8;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  background: #f6fbff;
+}
+
+.reason-chip.active {
+  background: #ffe6d4;
+  border-color: #f0b07a;
+  color: #7a3f17;
+}
+
+.other-reason-input {
+  margin-top: 0.45rem;
+  width: 100%;
+}
+
+.duplicate-target-field {
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b3d1a;
+}
+
+.too-generic-fields {
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.duplicate-target-field select {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d8b99f;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.modal-form input[type="radio"],
+.modal-form input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.follow-up-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.follow-up-form input {
+  flex: 1;
+}
+
+/* Generate modal — advanced settings */
+.gen-advanced {
+  border: 1px solid #d0dce8;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.gen-advanced-summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--copper);
+  user-select: none;
+  list-style: none;
+}
+
+.gen-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.gen-advanced-summary::before {
+  content: "▶ ";
+  font-size: 0.65rem;
+}
+
+details[open] .gen-advanced-summary::before {
+  content: "▼ ";
+}
+
+.gen-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-top: 0.6rem;
+}
+
+.gen-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gen-fieldset legend {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #556;
+  margin-bottom: 0.2rem;
+}
+
+.gen-fieldset.is-disabled .gen-radio-label {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.gen-radio-label,
+.gen-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.83rem;
+  font-weight: 500;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.gen-radio-label input,
+.gen-toggle-label input {
+  margin: 0;
+}
+
+.gen-toggle-hint {
+  font-size: 0.74rem;
+  color: #888;
+  font-weight: 400;
+}
+
+.gen-runtime-warning {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: #7a4a00;
+  background: #fff8e6;
+  border: 1px solid #f0c040;
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
 }

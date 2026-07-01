@@ -145,3 +145,67 @@ func TestScrapeURLTruncation(t *testing.T) {
 		t.Errorf("expected output ≤ %d bytes, got %d", scrapeMaxBytes, len(text))
 	}
 }
+
+func TestScrapeURLSemanticExtraction(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html>
+<head>
+  <title>Anime North 2026 Schedule</title>
+  <meta name="description" content="Panels, concerts, and cosplay events for Anime North." />
+</head>
+<body>
+  <main>
+    <h1>Featured Events</h1>
+    <p>Late-night AMV showdown and cosplay masquerade.</p>
+  </main>
+</body>
+</html>`))
+	}))
+	defer srv.Close()
+
+	text, err := scrapeWithClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(text, "Title: Anime North 2026 Schedule") {
+		t.Errorf("expected title in scraped text, got: %q", text)
+	}
+	if !strings.Contains(text, "Description: Panels, concerts, and cosplay events for Anime North.") {
+		t.Errorf("expected description in scraped text, got: %q", text)
+	}
+	if !strings.Contains(text, "Content: Featured Events") {
+		t.Errorf("expected content section in scraped text, got: %q", text)
+	}
+}
+
+func TestScrapeURLSkipsLayoutNoise(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html>
+<body>
+  <nav>Home Tickets Merch Contact</nav>
+  <header>Festival Navigation</header>
+  <main>
+    <p>Registration opens Friday at 8AM.</p>
+  </main>
+  <footer>Copyright Example Org</footer>
+</body>
+</html>`))
+	}))
+	defer srv.Close()
+
+	text, err := scrapeWithClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(text, "Home Tickets Merch Contact") || strings.Contains(text, "Festival Navigation") {
+		t.Errorf("expected navigation/header noise to be removed, got: %q", text)
+	}
+	if strings.Contains(text, "Copyright Example Org") {
+		t.Errorf("expected footer noise to be removed, got: %q", text)
+	}
+	if !strings.Contains(text, "Registration opens Friday at 8AM") {
+		t.Errorf("expected core content in scraped text, got: %q", text)
+	}
+}

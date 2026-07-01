@@ -47,7 +47,9 @@ type Server struct {
 	CodeLimiters   map[string]*rate.Limiter // per-IP token-bucket for code guesses
 	CodeLimitersMu sync.Mutex               // protects CodeLimiters
 	// AI buzzword generation (Phase 12)
-	LLMClient LLMClient // nil when Ollama is unreachable or not configured
+	LLMClient   LLMClient // nil when DeepSeek is unreachable or not configured
+	FeedbackMu  sync.RWMutex
+	LLMFeedback []LLMFeedbackEntry
 }
 
 // ClientSession tracks an authenticated client by IP
@@ -79,6 +81,7 @@ func NewServer(buzzwords [][]string, rows, cols int, port string) *Server {
 		Tracer:       trace.NewNoopTracerProvider().Tracer("bingo-server"),
 		cleanupStop:  make(chan struct{}),
 		LLMClient:    nil, // set by InitLLMClient after health probe
+		LLMFeedback:  make([]LLMFeedbackEntry, 0, 128),
 	}
 	return srv
 }
@@ -93,18 +96,27 @@ func (s *Server) SetTracer(t trace.Tracer) {
 	s.Tracer = t
 }
 
-// InitLLMClient probes the Ollama health endpoint and, if reachable, stores a
-// configured OllamaClient. When Ollama is not reachable the LLMClient field
-// stays nil and the generate-buzzwords endpoint returns HTTP 503.
-func (s *Server) InitLLMClient(baseURL, model string) {
-	client := NewOllamaClient(baseURL, model)
+// InitLLMClient probes the DeepSeek health endpoint and, if reachable, stores a
+// configured DeepSeekClient with a background health check loop. When the API
+// key is empty or DeepSeek is not reachable the LLMClient field stays nil and
+// the generate-buzzwords endpoint returns HTTP 503.
+func (s *Server) InitLLMClient(baseURL, apiKey, model string) {
+	if strings.TrimSpace(apiKey) == "" {
+		log.Printf("Warning: DEEPSEEK_API_KEY not set — AI buzzword generation disabled")
+		return
+	}
+	client := NewDeepSeekClient(baseURL, apiKey, model)
+	client.Metrics = s.Metrics
+	// Start background health check loop (30s interval) so /api/status can
+	// report llm_healthy without hitting the DeepSeek API on every request.
+	client.StartHealthCheckLoop(context.Background())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if client.Healthy(ctx) {
 		s.LLMClient = client
-		log.Printf("Ollama LLM client ready (model: %s, base: %s)", model, baseURL)
+		log.Printf("DeepSeek LLM client ready (model: %s, base: %s)", model, baseURL)
 	} else {
-		log.Printf("Warning: Ollama not reachable at %s — AI buzzword generation disabled", baseURL)
+		log.Printf("Warning: DeepSeek not reachable at %s — AI buzzword generation disabled", baseURL)
 	}
 }
 
@@ -124,7 +136,7 @@ func (s *Server) registerHandlers() {
 
 	// API handlers (Phase 7.5)
 	s.Mux.HandleFunc("/api/status", s.handleAPIStatus)
-	s.Mux.HandleFunc("/api/game/", s.handleGetGameByCode)
+	s.Mux.HandleFunc("/api/game/", s.handleGameRoutes)
 	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
 	s.Mux.HandleFunc("/api/player/", s.handleGetPlayerStats) // Phase 9: player stats
 

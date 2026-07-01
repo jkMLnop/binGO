@@ -125,7 +125,7 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 | `bingo_game_archived_total` | Counter | |
 | `bingo_game_restarted_total` | Counter | |
 | `bingo_admin_api_requests_total` | Counter | |
-| `bingo_errors_total` | CounterVec | Labels: `error_type` = `auth\|game\|db\|ws\|input` |
+| `bingo_errors_total` | CounterVec | Labels: `error_type` = `auth\|game\|db\|ws\|input\|llm` |
 | `bingo_rate_limited_total` | CounterVec | Labels: `endpoint` = `ws\|code_guess` |
 | `bingo_game_creation_duration_ms` | Histogram | |
 | `bingo_database_query_duration_ms` | Histogram | |
@@ -169,7 +169,7 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 ## Conventions & Patterns
 
 - **Error wrapping**: Use `fmt.Errorf("context: %w", err)` at all boundaries
-- **Error metrics**: Call `s.Metrics.RecordError("type")` on every error path in server.go; valid types: `auth`, `game`, `db`, `ws`, `input`
+- **Error metrics**: Call `s.Metrics.RecordError("type")` on every error path in server.go; valid types: `auth`, `game`, `db`, `ws`, `input`, `llm`
 - **DB nil-safety**: All `server/db.go` helpers check `if store == nil { return nil }` — DB is optional
 - **HostID immutability**: `game.HostID` is set once on first player connect, never mutated
 - **Mutex discipline**: `Game.PlayersMu` protects `Players` map; `Player.wsMu` protects `ws` conn; `Server.GamesMu` protects `Games`/`CodeToGame` maps
@@ -183,6 +183,9 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 |---|---|---|
 | `ADMIN_API_KEY` | `dev-admin-key-local-only` | `server/admin.go` — admin API auth |
 | `LOG_LEVEL` | `info` | Server log verbosity |
+| `DEEPSEEK_API_KEY` | (none) | `server/deepseek.go` — DeepSeek API auth (required) |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | `server/deepseek.go` — DeepSeek API base URL |
+| `DEEPSEEK_MODEL` | `deepseek-v4-pro` | `server/deepseek.go` — model name |
 | `GRAFANA_USER` | `admin` | `docker-compose.yml` — Grafana UI |
 | `GRAFANA_PASSWORD` | `change_me_in_production` | `docker-compose.yml` — Grafana UI |
 
@@ -218,21 +221,24 @@ All CI/CD logic lives in `dagger/main.go` (separate Go module: `dagger/go.mod`).
 
 **Version injection:** `var version = "dev"` in `bin.go`, set via `-ldflags "-X main.version=<tag>"` in Dockerfile + Dagger. Deployed containers are traceable to exact commit/tag.
 
-## Current State (v8.1.0)
+## Current State (v8.2.0)
 
-Completed through Phase 8.8:
-- Security hardening: per-IP WebSocket connection limit (5/IP, HTTP 429), game-code brute-force protection (5 failures/60 s token bucket), `RateLimitExceeded` structured log, `bingo_rate_limited_total` Prometheus metric, sanitized `X-Forwarded-For` parsing
+Completed AI provider migration: Ollama → DeepSeek API.
+- New `server/deepseek.go` — `DeepSeekClient` implementing `LLMClient` interface, OpenAI-compatible `/chat/completions`, SSE streaming, think on/off, temperature/top_p, JSON mode, auto-refill for fixed word count
+- `server/llm.go` — trimmed of all Ollama code; kept `LLMClient` interface, prompts, extraction helpers, `ChatMessage`/`WordSet`/`GeneratedSets`/`SSEEvent` types
+- `server/api.go` — handlers use `DeepSeekClient`; removed `NumPredict`, `Think`, `InputOrder` fields
+- `server/metrics.go` — `bingo_errors_total` includes `llm` label
+- `tools/llm_experiments/` — retargeted to DeepSeek API; removed Ollama-specific axes (numPredict, inputOrder, scrapeMode); added thinking, temperature, top_p, max_tokens
 
-Remaining Phase 8 work:
-- Context propagation & error wrapping audit
-
-See `docs/ROADMAP.md` for Phase 9+ plans (client menu, buzzword suggestions, leaderboards, K8s, web client).
+See `docs/ROADMAP.md` for upcoming plans.
 
 ## Files Worth Knowing
 
 | File | Why |
 |---|---|
 | `server/server.go` | Core server — all WebSocket handling, game flow, shutdown |
+| `server/deepseek.go` | DeepSeek API client — OpenAI-compatible `/chat/completions`, SSE streaming, think/JSON mode |
+| `server/llm.go` | Shared LLM types (`LLMClient` interface), prompts, extraction logic |
 | `server/ratelimit.go` | Per-IP WS conn limiting, code-guess rate limiting, cleanup |
 | `server/metrics.go` | All Prometheus metric definitions + `ResetMetrics()` |
 | `server/admin.go` | Admin API CRUD + auth middleware |

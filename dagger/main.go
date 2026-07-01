@@ -67,6 +67,8 @@ func main() {
 	switch cmd {
 	case "test":
 		err = runTest(ctx, client, source)
+	case "test-llm":
+		err = runTestLLM(ctx, client, source)
 	case "test-container":
 		err = runTestContainer(ctx, client, source)
 	case "build":
@@ -95,6 +97,7 @@ func printUsage() {
 
 Commands:
   test             Run unit + integration tests (~30s)
+  test-llm         Run LLM pipeline integration test (needs DEEPSEEK_API_KEY)
   test-container   Run container regression suite (~10min, needs Docker)
   build            Build Docker image
   publish          Push image to ghcr.io
@@ -121,6 +124,26 @@ func runTest(ctx context.Context, client *dagger.Client, source *dagger.Director
 		return fmt.Errorf("integration tests: %w", err)
 	}
 	fmt.Println("=== All tests passed ===")
+	return nil
+}
+
+// runTestLLM runs the DeepSeek happy-path pipeline test against the live API.
+// Requires DEEPSEEK_API_KEY env var.
+func runTestLLM(ctx context.Context, client *dagger.Client, source *dagger.Directory) error {
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("DEEPSEEK_API_KEY environment variable is required")
+	}
+	secret := client.SetSecret("deepseek-api-key", apiKey)
+	fmt.Println("=== Running LLM pipeline integration test ===")
+	_, err := goBase(client, source).
+		WithSecretVariable("DEEPSEEK_API_KEY", secret).
+		WithExec([]string{"go", "test", "-tags=integration_llm", "-timeout=5m", "./tests", "-v", "-run", "TestDeepSeekServerPipelineHappyPath"}).
+		Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("llm pipeline tests: %w", err)
+	}
+	fmt.Println("=== LLM pipeline tests passed ===")
 	return nil
 }
 

@@ -110,16 +110,17 @@ func runServer(port string, dbPath string) {
 		log.Println("Running without database (use -db flag to enable)")
 	}
 
-	// Initialise Ollama LLM client for AI buzzword generation (Phase 12)
-	ollamaBaseURL := os.Getenv("OLLAMA_BASE_URL")
-	if ollamaBaseURL == "" {
-		ollamaBaseURL = "http://localhost:11434"
+	// Initialise DeepSeek LLM client for AI buzzword generation
+	deepSeekBaseURL := os.Getenv("DEEPSEEK_BASE_URL")
+	if deepSeekBaseURL == "" {
+		deepSeekBaseURL = "https://api.deepseek.com"
 	}
-	ollamaModel := os.Getenv("OLLAMA_MODEL")
-	if ollamaModel == "" {
-		ollamaModel = "qwen3:30b-a3b"
+	deepSeekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
+	deepSeekModel := os.Getenv("DEEPSEEK_MODEL")
+	if deepSeekModel == "" {
+		deepSeekModel = "deepseek-v4-pro"
 	}
-	srv.InitLLMClient(ollamaBaseURL, ollamaModel)
+	srv.InitLLMClient(deepSeekBaseURL, deepSeekAPIKey, deepSeekModel)
 
 	// Serve embedded web client (Phase 7.6)
 	if distFS, fsErr := fs.Sub(webClientDist, "web-client/dist"); fsErr == nil {

@@ -14,7 +14,7 @@ on:
     branches: [main]
 
 jobs:
-  # Fast tests on every push and PR — unit + integration (~30s)
+  # Run unit + integration tests on every push and PR (~30s)
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -30,10 +30,32 @@ jobs:
         working-directory: dagger
         run: go run . test
 
+  # Run LLM pipeline integration test on push to main (costs ~$0.0001/run).
+  # Validates the DeepSeek API key and end-to-end generation pipeline before
+  # deploying to staging. Skipped on PRs to avoid wasting API credits.
+  test-llm:
+    name: Test LLM Pipeline
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
+
+      - name: Run LLM pipeline test via Dagger
+        working-directory: dagger
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: go run . test-llm
+
   # Deploy to staging on push to main
   deploy-staging:
     name: Deploy to Staging
-    needs: test
+    needs: [test, test-llm]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
@@ -75,11 +97,16 @@ jobs:
         run: |
           echo "Waiting for staging server to be healthy..."
           for i in $(seq 1 12); do
-            if curl -sf https://bingo-server-staging.fly.dev/api/status > /dev/null; then
-              echo "✓ Staging is healthy"
-              exit 0
+            if RESP=$(curl -sf https://bingo-server-staging.fly.dev/api/status 2>/dev/null); then
+              LLM=$(echo "$RESP" | grep -o '"llm_healthy":[^,}]*' | grep -o 'true\|false')
+              if [ "$LLM" = "true" ]; then
+                echo "✓ Staging is healthy (llm_healthy=$LLM)"
+                exit 0
+              fi
+              echo "  attempt $i/12 — staging up but llm_healthy=$LLM, retrying in 10s"
+            else
+              echo "  attempt $i/12 — not reachable, retrying in 10s"
             fi
-            echo "  attempt $i/12 — retrying in 10s"
             sleep 10
           done
           echo "✗ Staging did not become healthy in 2 minutes"

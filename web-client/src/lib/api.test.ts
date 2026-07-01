@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGame, fetchGameByCode, fetchLeaderboard, streamBuzzwords } from "./api";
+import { createGame, fetchGameByCode, fetchLeaderboard, formatGenerationError, streamBuzzwords } from "./api";
 import type { WordSet } from "./api";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ describe("streamBuzzwords", () => {
       ok: false,
       status: 503,
       body: null,
-      text: async () => JSON.stringify({ success: false, error: "Ollama is not reachable" }),
+      text: async () => JSON.stringify({ success: false, error: "DeepSeek is not reachable" }),
     } as unknown as Response);
 
     let errorMsg = "";
@@ -222,7 +222,7 @@ describe("streamBuzzwords", () => {
       (e) => { errorMsg = e; },
     );
 
-    expect(errorMsg).toContain("Ollama");
+    expect(errorMsg).toContain("DeepSeek");
   });
 
   it("fires onError when an error SSE event arrives", async () => {
@@ -239,6 +239,24 @@ describe("streamBuzzwords", () => {
     );
 
     expect(errorMsg).toBe("LLM parse failed");
+  });
+
+  it("formats oversized generation errors", () => {
+    expect(formatGenerationError('fixed word count requested: got 54, expected 50')).toBe(
+      "Too many words: got 54, expected 50.",
+    );
+  });
+
+  it("formats undersized generation errors", () => {
+    expect(formatGenerationError('fixed word count requested: got 44, expected 50')).toBe(
+      "Too few words: got 44, expected 50.",
+    );
+  });
+
+  it("formats minimum word count errors", () => {
+    expect(formatGenerationError('minimum word count not met: got 12, expected at least 30')).toBe(
+      "Too few words: got 12, expected at least 30.",
+    );
   });
 
   it("URL-encodes the room code", async () => {
@@ -282,5 +300,21 @@ describe("streamBuzzwords", () => {
       )
     ).resolves.not.toThrow();
     expect(doneSets).not.toBeNull();
+  });
+
+  it("fires onError when stream closes without done/error event", async () => {
+    const lines = [
+      `data: ${JSON.stringify({ type: "token", content: "partial output" })}`,
+    ];
+    mockSSEFetch(200, lines);
+
+    let errorMsg = "";
+    await streamBuzzwords("AB3K7", "topic", undefined, [], "session-token",
+      () => {},
+      () => {},
+      (e) => { errorMsg = e; },
+    );
+
+    expect(errorMsg).toContain("ended before completion");
   });
 });

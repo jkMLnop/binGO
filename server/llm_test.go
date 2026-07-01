@@ -24,11 +24,28 @@ func TestExtractGeneratedSetsValid(t *testing.T) {
 	}
 }
 
-func TestExtractGeneratedSetsTooFewWords(t *testing.T) {
-	sets := buildValidSetsJSON(3, 10) // wrong word count per set
-	_, err := extractGeneratedSets(sets)
-	if err == nil {
-		t.Error("expected error for wrong word count, got nil")
+func TestExtractGeneratedSetsSingleSet50Valid(t *testing.T) {
+	sets := buildValidSetsJSON(1, 50)
+	result, err := extractGeneratedSets(sets)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Sets) != 1 {
+		t.Errorf("expected 1 set, got %d", len(result.Sets))
+	}
+	if len(result.Sets[0].Words) != 50 {
+		t.Errorf("expected 50 words, got %d", len(result.Sets[0].Words))
+	}
+}
+
+func TestExtractGeneratedSetsFlexibleWordCount(t *testing.T) {
+	sets := buildValidSetsJSON(1, 39)
+	result, err := extractGeneratedSets(sets)
+	if err != nil {
+		t.Fatalf("unexpected error for flexible word count: %v", err)
+	}
+	if len(result.Sets) != 1 || len(result.Sets[0].Words) != 39 {
+		t.Fatalf("expected 1 set with 39 words, got %+v", result.Sets)
 	}
 }
 
@@ -40,19 +57,24 @@ func TestExtractGeneratedSetsWrongSetCount(t *testing.T) {
 	}
 }
 
-func TestExtractGeneratedSetsDuplicateAcrossSets(t *testing.T) {
-	// Two sets that share a word
+func TestExtractGeneratedSetsDuplicateAcrossSetsAllowed(t *testing.T) {
+	// Three sets where two share a word
 	raw := `{"sets":[` +
 		buildSetJSON("Set A", 25, "shared") + "," +
 		buildSetJSON("Set B", 25, "shared") +
+		"," +
+		buildSetJSON("Set C", 25, "unique-c") +
 		`]}`
-	_, err := extractGeneratedSets(raw)
-	if err == nil {
-		t.Error("expected error for cross-set duplicate, got nil")
+	sets, err := extractGeneratedSets(raw)
+	if err != nil {
+		t.Fatalf("expected duplicates to pass parse stage, got error: %v", err)
+	}
+	if len(sets.Sets) != 3 {
+		t.Fatalf("expected 3 sets, got %d", len(sets.Sets))
 	}
 }
 
-func TestExtractGeneratedSetsWordTooLong(t *testing.T) {
+func TestExtractGeneratedSetsWordTooLongAllowedAtParseStage(t *testing.T) {
 	longWord := strings.Repeat("x", 61)
 	words := make([]string, 25)
 	for i := range words {
@@ -61,9 +83,12 @@ func TestExtractGeneratedSetsWordTooLong(t *testing.T) {
 	words[0] = longWord
 	wordsJSON, _ := json.Marshal(words)
 	raw := fmt.Sprintf(`{"sets":[{"label":"Set A","words":%s},{"label":"Set B","words":%s},{"label":"Set C","words":%s}]}`, string(wordsJSON), string(wordsJSON), string(wordsJSON))
-	_, err := extractGeneratedSets(raw)
-	if err == nil {
-		t.Error("expected error for word >60 chars, got nil")
+	sets, err := extractGeneratedSets(raw)
+	if err != nil {
+		t.Fatalf("expected parse success for long word (filtered later), got: %v", err)
+	}
+	if len(sets.Sets) != 3 {
+		t.Fatalf("expected 3 sets, got %d", len(sets.Sets))
 	}
 }
 
@@ -74,6 +99,98 @@ func TestExtractGeneratedSetsNoJSON(t *testing.T) {
 	}
 }
 
+func TestExtractGeneratedSetsMalformedJSONFallback(t *testing.T) {
+	raw := `{"sets":[{"label":"Set A","words":["Anime convention","Convention hall","Convention booth",` +
+		`"Anime merchandise"` // intentionally truncated/malformed JSON
+	sets, err := extractGeneratedSets(raw)
+	if err != nil {
+		t.Fatalf("expected fallback parse success, got error: %v", err)
+	}
+	if len(sets.Sets) != 1 {
+		t.Fatalf("expected 1 set from fallback, got %d", len(sets.Sets))
+	}
+	if len(sets.Sets[0].Words) < 4 {
+		t.Fatalf("expected fallback to recover words, got %v", sets.Sets[0].Words)
+	}
+}
+
+func TestIsLowQualityBuzzword(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{name: "placeholder phrase", in: "some word here", want: true},
+		{name: "numbered placeholder", in: "word 12", want: true},
+		{name: "meta joke phrase", in: "Just kidding, this is a real set of words but with some extra stuff", want: true},
+		{name: "metadata key value", in: "name: Anime North Convention", want: true},
+		{name: "normal buzzword", in: "Artist alley sketchbook", want: false},
+		{name: "specific sighting", in: "Cosplay armor prop", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isLowQualityBuzzword(tc.in)
+			if got != tc.want {
+				t.Fatalf("isLowQualityBuzzword(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeUniqueWordsWithStatsFiltersLowQuality(t *testing.T) {
+	input := []string{"Cosplay armor prop", "placeholder", "word 2", "Cosplay armor prop", "Panel room line"}
+	words, stats := normalizeUniqueWordsWithStats(input)
+
+	if len(words) != 2 {
+		t.Fatalf("expected 2 kept words, got %d (%v)", len(words), words)
+	}
+	if stats.DroppedLowQuality != 2 {
+		t.Fatalf("expected 2 low-quality drops, got %d", stats.DroppedLowQuality)
+	}
+	if stats.DroppedDuplicates != 1 {
+		t.Fatalf("expected 1 duplicate drop, got %d", stats.DroppedDuplicates)
+	}
+}
+
+func TestExtractGeneratedSetsQuotedListFallback(t *testing.T) {
+	raw := `"Anime North", "Convention booth", "Cosplay contest", "Convention booth"`
+	sets, err := extractGeneratedSets(raw)
+	if err != nil {
+		t.Fatalf("expected fallback parse success, got error: %v", err)
+	}
+	if len(sets.Sets) != 1 {
+		t.Fatalf("expected 1 set from fallback, got %d", len(sets.Sets))
+	}
+	if len(sets.Sets[0].Words) != 3 {
+		t.Fatalf("expected deduped 3 words, got %d (%v)", len(sets.Sets[0].Words), sets.Sets[0].Words)
+	}
+}
+
+func TestExtractGeneratedSetsQuotedListFallbackFiltersLowQuality(t *testing.T) {
+	raw := `"Anime North", "some word here", "placeholder", "Cosplay contest"`
+	sets, err := extractGeneratedSets(raw)
+	if err != nil {
+		t.Fatalf("expected fallback parse success, got error: %v", err)
+	}
+	if len(sets.Sets) != 1 {
+		t.Fatalf("expected 1 set from fallback, got %d", len(sets.Sets))
+	}
+	if len(sets.Sets[0].Words) != 2 {
+		t.Fatalf("expected low-quality phrases to be filtered, got %d (%v)", len(sets.Sets[0].Words), sets.Sets[0].Words)
+	}
+}
+
+func TestExtractGeneratedSetsAllowsEmptyWordsAtParseStage(t *testing.T) {
+	raw := `{"sets":[{"label":"Set A","words":["Anime North","", "Cosplay contest"]}]}`
+	sets, err := extractGeneratedSets(raw)
+	if err != nil {
+		t.Fatalf("expected parse success with empty words (filtered later), got: %v", err)
+	}
+	if len(sets.Sets) != 1 {
+		t.Fatalf("expected 1 set, got %d", len(sets.Sets))
+	}
+}
 func TestExtractGeneratedSetsProse(t *testing.T) {
 	// LLM may output prose before the JSON — we extract the first {...}
 	valid := buildValidSetsJSON(3, 25)
@@ -87,104 +204,28 @@ func TestExtractGeneratedSetsProse(t *testing.T) {
 	}
 }
 
-// ── OllamaClient.StreamGenerate ───────────────────────────────────────────────
-
-// TestOllamaClientStreamGenerate tests the full streaming pipeline against a
-// mock HTTP server that replays a valid Ollama NDJSON response.
-func TestOllamaClientStreamGenerate(t *testing.T) {
-	validJSON := buildValidSetsJSON(3, 25)
-
-	// Build an Ollama NDJSON fixture: emit tokens that together form the JSON,
-	// then a final done chunk.
-	var ndjson strings.Builder
-	tokens := splitTokens(validJSON, 10) // split into ~10-char chunks
-	for _, tok := range tokens {
-		chunk := ollamaChunk{Done: false}
-		chunk.Message.Content = tok
-		line, _ := json.Marshal(chunk)
-		ndjson.Write(line)
-		ndjson.WriteByte('\n')
+func TestDetectLowDiversity(t *testing.T) {
+	words := []string{
+		"Convention booth", "Convention hall", "Convention panel", "Convention app", "Convention map",
+		"Convention schedule", "Convention ticket", "Convention cosplay", "Convention stage", "Convention line",
 	}
-	doneChunk := ollamaChunk{Done: true}
-	doneLine, _ := json.Marshal(doneChunk)
-	ndjson.Write(doneLine)
-	ndjson.WriteByte('\n')
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/tags" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if r.URL.Path == "/api/chat" {
-			w.Header().Set("Content-Type", "application/x-ndjson")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(ndjson.String()))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer srv.Close()
-
-	client := NewOllamaClient(srv.URL, "test-model")
-	rec := httptest.NewRecorder()
-
-	messages := []ChatMessage{{Role: "user", Content: "anime convention"}}
-	err := client.StreamGenerate(context.Background(), messages, rec)
-	if err != nil {
-		t.Fatalf("StreamGenerate returned error: %v", err)
+	low, reason := detectLowDiversity(words)
+	if !low {
+		t.Fatalf("expected low diversity, got false")
 	}
-
-	body := rec.Body.String()
-
-	// Verify token events were emitted
-	if !strings.Contains(body, `"type":"token"`) {
-		t.Error("expected token SSE events in output")
-	}
-	// Verify done event with sets was emitted
-	if !strings.Contains(body, `"type":"done"`) {
-		t.Error("expected done SSE event in output")
-	}
-	if !strings.Contains(body, `"sets"`) {
-		t.Error("expected sets in done event")
+	if reason == "" {
+		t.Fatalf("expected low-diversity reason, got empty")
 	}
 }
 
-// TestOllamaClientStreamGenerateOllamaError verifies that a non-200 Ollama
-// response causes StreamGenerate to return an error without panicking.
-func TestOllamaClientStreamGenerateOllamaError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	client := NewOllamaClient(srv.URL, "test-model")
-	rec := httptest.NewRecorder()
-	err := client.StreamGenerate(context.Background(), []ChatMessage{{Role: "user", Content: "test"}}, rec)
-	if err == nil {
-		t.Error("expected error when Ollama returns 500, got nil")
+func TestDetectLowDiversityVariedList(t *testing.T) {
+	words := []string{
+		"Cosplay armor prop", "Artist alley sketch", "Food truck lineup", "Live AMV screening", "Manga haul tote",
+		"Panel room queue", "Convention badge lanyard", "Photo backdrop prop", "Voice actor autograph", "Arcade rhythm game",
 	}
-}
-
-// TestOllamaClientHealthy verifies the health probe.
-func TestOllamaClientHealthy(t *testing.T) {
-	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/tags" {
-			w.WriteHeader(http.StatusOK)
-		}
-	}))
-	defer healthy.Close()
-
-	client := NewOllamaClient(healthy.URL, "test-model")
-	if !client.Healthy(context.Background()) {
-		t.Error("expected Healthy to return true for running server")
-	}
-}
-
-func TestOllamaClientNotHealthy(t *testing.T) {
-	// Point at a port with nothing listening
-	client := NewOllamaClient("http://127.0.0.1:19999", "test-model")
-	if client.Healthy(context.Background()) {
-		t.Error("expected Healthy to return false for unreachable server")
+	low, _ := detectLowDiversity(words)
+	if low {
+		t.Fatalf("expected varied list to pass diversity check")
 	}
 }
 
@@ -209,8 +250,8 @@ func TestHandleGenerateBuzzwordsNoLLM(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("expected 503, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Ollama") {
-		t.Errorf("expected Ollama error message, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "DeepSeek") {
+		t.Errorf("expected DeepSeek error message, got: %s", rec.Body.String())
 	}
 }
 
@@ -309,16 +350,80 @@ func TestHandleGenerateBuzzwordsLLMUnhealthy(t *testing.T) {
 	}
 }
 
+func TestHandleSubmitGameBuzzwordFeedbackAndUseInPrompt(t *testing.T) {
+	ResetMetrics()
+	s := NewServer([][]string{{"foo"}}, 5, 5, "9999")
+	stub := &stubLLMClient{healthy: true}
+	s.LLMClient = stub
+
+	game := NewGame("game-1", s.Buzzwords, s.Rows, s.Cols)
+	game.HostID = "host-42"
+	s.GamesMu.Lock()
+	s.Games[game.ID] = game
+	s.CodeToGame[game.Code] = game
+	s.GamesMu.Unlock()
+
+	hostToken, err := s.TokenManager.IssueToken(game.HostID, "203.0.113.50", 1)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	feedbackBody := bytes.NewBufferString(`{
+		"topic":"anime north",
+		"set_label":"Set A",
+		"total_words":50,
+		"included_words":["Cosplay armor props","Dealer hall tote bag"],
+		"excluded":[{"word":"Innovation","reason":"too_generic"}]
+	}`)
+	feedbackReq := httptest.NewRequest(http.MethodPost, "/api/game/"+game.Code+"/feedback", feedbackBody)
+	feedbackReq.Header.Set("Content-Type", "application/json")
+	feedbackReq.Header.Set("Authorization", "Bearer "+hostToken)
+	feedbackReq.RemoteAddr = "203.0.113.50:1234"
+	feedbackRec := httptest.NewRecorder()
+
+	s.handleSubmitGameBuzzwordFeedback(feedbackRec, feedbackReq, game.Code)
+
+	if feedbackRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from feedback submit, got %d: %s", feedbackRec.Code, feedbackRec.Body.String())
+	}
+
+	genBody := bytes.NewBufferString(`{"topic":"anime north"}`)
+	genReq := httptest.NewRequest(http.MethodPost, "/api/game/"+game.Code+"/generate-buzzwords", genBody)
+	genReq.Header.Set("Content-Type", "application/json")
+	genReq.Header.Set("Authorization", "Bearer "+hostToken)
+	genReq.RemoteAddr = "203.0.113.50:9876"
+	genRec := httptest.NewRecorder()
+
+	s.handleGenerateBuzzwordsForGame(genRec, genReq, game.Code)
+
+	if !stub.called {
+		t.Fatal("expected StreamGenerate to be called")
+	}
+
+	joined := ""
+	for _, msg := range stub.messages {
+		joined += msg.Content + "\n"
+	}
+	if !strings.Contains(joined, "User scoring guidance from prior rounds") {
+		t.Fatalf("expected prompt to include scoring guidance, got: %s", joined)
+	}
+	if !strings.Contains(joined, "too_generic") {
+		t.Fatalf("expected prompt guidance to include exclusion reason, got: %s", joined)
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // stubLLMClient is a no-op LLMClient for testing.
 type stubLLMClient struct {
-	called  bool
-	healthy bool
+	called   bool
+	healthy  bool
+	messages []ChatMessage
 }
 
-func (s *stubLLMClient) StreamGenerate(_ context.Context, _ []ChatMessage, _ http.ResponseWriter) error {
+func (s *stubLLMClient) StreamGenerate(_ context.Context, messages []ChatMessage, _ GenerationOptions, _ http.ResponseWriter) error {
 	s.called = true
+	s.messages = append([]ChatMessage(nil), messages...)
 	return nil
 }
 

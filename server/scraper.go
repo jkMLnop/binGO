@@ -14,7 +14,8 @@ import (
 
 const (
 	scrapeTimeout   = 5 * time.Second
-	scrapeMaxBytes  = 8 * 1024 // 8 KB
+	scrapeMaxBytes  = 64 * 1024 // 64 KB
+	scrapeMaxChars  = 1800
 	scrapeUserAgent = "binGO-buzzword-agent/1.0"
 )
 
@@ -147,23 +148,184 @@ func scrapeWithClient(rawURL string, httpClient *http.Client) (string, error) {
 		return "", fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	var sb strings.Builder
-	extractVisibleText(doc, &sb)
+	root := findPreferredContentRoot(doc)
 
-	return strings.TrimSpace(sb.String()), nil
+	var sections []string
+	if title := extractTitle(doc); title != "" {
+		sections = append(sections, "Title: "+title)
+	}
+	if desc := extractMetaContent(doc, "description"); desc != "" {
+		sections = append(sections, "Description: "+desc)
+	}
+
+	var sb strings.Builder
+	extractVisibleText(root, &sb)
+	content := normalizeWhitespace(sb.String())
+	if content == "" && root != doc {
+		sb.Reset()
+		extractVisibleText(doc, &sb)
+		content = normalizeWhitespace(sb.String())
+	}
+	if content != "" {
+		sections = append(sections, "Content: "+content)
+	}
+
+	combined := strings.TrimSpace(strings.Join(sections, "\n"))
+	if combined == "" {
+		return "", nil
+	}
+	if len(combined) > scrapeMaxChars {
+		combined = truncateAtWordBoundary(combined, scrapeMaxChars)
+	}
+
+	return combined, nil
+
+}
+
+func findPreferredContentRoot(doc *html.Node) *html.Node {
+	if node := findFirstElement(doc, map[string]bool{"main": true, "article": true}); node != nil {
+		return node
+	}
+	if node := findFirstSemanticContentNode(doc); node != nil {
+		return node
+	}
+	if node := findFirstElement(doc, map[string]bool{"body": true}); node != nil {
+		return node
+	}
+	return doc
+}
+
+func findFirstSemanticContentNode(n *html.Node) *html.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Type == html.ElementNode {
+		tag := strings.ToLower(n.Data)
+		if tag == "section" || tag == "div" {
+			id := strings.ToLower(getAttr(n, "id"))
+			class := strings.ToLower(getAttr(n, "class"))
+			if looksLikeMainContent(id + " " + class) {
+				return n
+			}
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if node := findFirstSemanticContentNode(c); node != nil {
+			return node
+		}
+	}
+	return nil
+}
+
+func looksLikeMainContent(value string) bool {
+	positive := []string{"content", "article", "main", "post", "entry", "story", "read"}
+	negative := []string{"nav", "menu", "footer", "header", "sidebar", "comment", "cookie", "banner", "ad"}
+
+	for _, bad := range negative {
+		if strings.Contains(value, bad) {
+			return false
+		}
+	}
+	for _, good := range positive {
+		if strings.Contains(value, good) {
+			return true
+		}
+	}
+	return false
+}
+
+func findFirstElement(n *html.Node, allowed map[string]bool) *html.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Type == html.ElementNode && allowed[strings.ToLower(n.Data)] {
+		return n
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if node := findFirstElement(c, allowed); node != nil {
+			return node
+		}
+	}
+	return nil
+}
+
+func extractTitle(doc *html.Node) string {
+	node := findFirstElement(doc, map[string]bool{"title": true})
+	if node == nil || node.FirstChild == nil {
+		return ""
+	}
+	return normalizeWhitespace(node.FirstChild.Data)
+}
+
+func extractMetaContent(doc *html.Node, name string) string {
+	var walk func(*html.Node) string
+	walk = func(n *html.Node) string {
+		if n == nil {
+			return ""
+		}
+		if n.Type == html.ElementNode && strings.EqualFold(n.Data, "meta") {
+			metaName := strings.ToLower(getAttr(n, "name"))
+			if metaName == strings.ToLower(name) {
+				return normalizeWhitespace(getAttr(n, "content"))
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if found := walk(c); found != "" {
+				return found
+			}
+		}
+		return ""
+	}
+	return walk(doc)
+}
+
+func getAttr(n *html.Node, key string) string {
+	for _, attr := range n.Attr {
+		if strings.EqualFold(attr.Key, key) {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+func truncateAtWordBoundary(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+	trimmed := strings.TrimSpace(text[:max])
+	if idx := strings.LastIndex(trimmed, " "); idx > max/2 {
+		trimmed = strings.TrimSpace(trimmed[:idx])
+	}
+	return trimmed
+}
+
+func normalizeWhitespace(text string) string {
+	if text == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // extractVisibleText recursively walks an HTML node tree and collects visible text,
-// skipping script, style, head, and noscript elements.
+// skipping structural/noise nodes that rarely contain useful topical signals.
 func extractVisibleText(n *html.Node, sb *strings.Builder) {
 	if n.Type == html.ElementNode {
 		tag := strings.ToLower(n.Data)
-		if tag == "script" || tag == "style" || tag == "head" || tag == "noscript" {
+		skipTag := tag == "script" || tag == "style" || tag == "head" || tag == "noscript" ||
+			tag == "nav" || tag == "header" || tag == "footer" || tag == "aside" ||
+			tag == "svg" || tag == "canvas" || tag == "form"
+		if skipTag {
+			return
+		}
+		if strings.EqualFold(getAttr(n, "hidden"), "true") || getAttr(n, "hidden") != "" {
+			return
+		}
+		if strings.EqualFold(getAttr(n, "aria-hidden"), "true") {
 			return
 		}
 	}
 	if n.Type == html.TextNode {
-		text := strings.TrimSpace(n.Data)
+		text := normalizeWhitespace(n.Data)
 		if text != "" {
 			sb.WriteString(text)
 			sb.WriteByte(' ')

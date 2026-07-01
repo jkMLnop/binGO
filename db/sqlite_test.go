@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -329,4 +330,82 @@ func TestGetPlayerStatsWithWins(t *testing.T) {
 		t.Errorf("expected win rate ~%.3f, got %.3f", expectedRate, stats.WinRate)
 	}
 	t.Logf("✓ GetPlayerStats: wins=%d games=%d rate=%.3f", stats.Wins, stats.GamesPlayed, stats.WinRate)
+}
+
+func TestLLMFeedbackPersistence(t *testing.T) {
+	tmpFile := "/tmp/test_bingo_llm_feedback.db"
+	defer os.Remove(tmpFile)
+
+	ctx := context.Background()
+
+	store, err := NewSQLiteStore(ctx, tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init: %v", err)
+	}
+
+	entry := LLMFeedbackEntry{
+		GameCode:       "BINGO-ABCDE",
+		Topic:          "anime conventions",
+		SourceURL:      "https://example.com",
+		SetLabel:       "set-1",
+		GenerationMode: "agentic-retrieval",
+		TotalWords:     25,
+		IncludedWords:  []string{"cosplay", "artist alley"},
+		Excluded: []LLMFeedbackExcludedWord{
+			{Word: "fandom", Reason: "too_generic"},
+			{Word: "unsafe word", Reason: "safety_accessibility"},
+		},
+		SubmittedBy: "host-1",
+		SubmittedAt: time.Now().UTC().Truncate(time.Second),
+	}
+
+	if err := store.SaveLLMFeedback(ctx, entry); err != nil {
+		t.Fatalf("SaveLLMFeedback failed: %v", err)
+	}
+
+	entries, err := store.GetRecentLLMFeedback(ctx, "BINGO-ABCDE", "anime conventions", 10)
+	if err != nil {
+		t.Fatalf("GetRecentLLMFeedback failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 feedback entry, got %d", len(entries))
+	}
+	if entries[0].IncludedWords[0] != "cosplay" {
+		t.Fatalf("expected included word 'cosplay', got %q", entries[0].IncludedWords[0])
+	}
+	if len(entries[0].Excluded) != 2 {
+		t.Fatalf("expected 2 excluded words, got %d", len(entries[0].Excluded))
+	}
+	if entries[0].GenerationMode != "agentic-retrieval" {
+		t.Fatalf("expected generation mode agentic-retrieval, got %q", entries[0].GenerationMode)
+	}
+
+	if err := store.Close(ctx); err != nil {
+		t.Fatalf("failed to close store: %v", err)
+	}
+
+	reopened, err := NewSQLiteStore(ctx, tmpFile)
+	if err != nil {
+		t.Fatalf("failed to reopen store: %v", err)
+	}
+	defer reopened.Close(ctx)
+	if err := reopened.Init(ctx); err != nil {
+		t.Fatalf("failed to init reopened store: %v", err)
+	}
+
+	reopenedEntries, err := reopened.GetRecentLLMFeedback(ctx, "bingo-abcde", "ANIME CONVENTIONS", 10)
+	if err != nil {
+		t.Fatalf("GetRecentLLMFeedback on reopened store failed: %v", err)
+	}
+	if len(reopenedEntries) != 1 {
+		t.Fatalf("expected 1 persisted entry after reopen, got %d", len(reopenedEntries))
+	}
+	if !strings.EqualFold(reopenedEntries[0].GameCode, "BINGO-ABCDE") {
+		t.Fatalf("expected persisted game code BINGO-ABCDE, got %q", reopenedEntries[0].GameCode)
+	}
+
+	t.Log("✓ LLM feedback persists in SQLite and survives store reopen")
 }

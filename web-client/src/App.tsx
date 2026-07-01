@@ -1,7 +1,21 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import QRCode from "qrcode";
-import { createGame, fetchGameByCode, fetchLeaderboard, fetchRoomLeaderboard, getRoomBuzzwords, setRoomBuzzwords, streamBuzzwords } from "./lib/api";
+import {
+  createGame,
+  fetchAPIStatus,
+  fetchGameByCode,
+  fetchLeaderboard,
+  fetchRoomLeaderboard,
+  getRoomBuzzwords,
+  setGameBuzzwords,
+  setRoomBuzzwords,
+  streamGameBuzzwords,
+  submitGameBuzzwordFeedback,
+  DEFAULT_GENERATION_OPTIONS,
+} from "./lib/api";
+import { formatGenerationError } from "./lib/api";
+import type { GenerationOptions } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
@@ -291,7 +305,7 @@ function HomePage() {
           </button>
 
           <form className="join-form cli-join" onSubmit={handleJoin}>
-            <label htmlFor="join-code">2) Join existing game (with room code)</label>
+            <label htmlFor="join-code">2) Join existing game</label>
             <input
               id="join-code"
               value={code}
@@ -316,7 +330,15 @@ function HomePage() {
 
 function GamePage() {
   const { code = "" } = useParams();
-  const normalizedCode = code.toUpperCase();
+  return <GamePageContent rawCode={code} />;
+}
+
+function GamePageContent({
+  rawCode,
+}: {
+  rawCode: string;
+}) {
+  const normalizedCode = rawCode.toUpperCase();
   const [username, setUsername] = useState("");
   const [currentUser, setCurrentUser] = useState("");
   const [gameStatus, setGameStatus] = useState("Checking room code...");
@@ -347,6 +369,7 @@ function GamePage() {
   const [showBuzzwordUpload, setShowBuzzwordUpload] = useState(false);
   const [buzzwordUploadError, setBuzzwordUploadError] = useState("");
   const [showGenerate, setShowGenerate] = useState(false);
+  const [lobbyReady, setLobbyReady] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const tokenRef = useRef<string>("");
   const hostIdRef = useRef<string>("");
@@ -360,13 +383,18 @@ function GamePage() {
 
     async function validateCode() {
       try {
-        const gameInfo = await fetchGameByCode(normalizedCode);
+        const [statusInfo, gameInfo] = await Promise.all([
+          fetchAPIStatus().catch(() => null),
+          fetchGameByCode(normalizedCode),
+        ]);
         if (mounted) {
-          const GAME_TTL_SECONDS = 60 * 60; // 60 minutes
+          const fallbackTTLSeconds = 6 * 60 * 60;
+          const roomTTLSeconds = statusInfo?.room_code_ttl_seconds ?? fallbackTTLSeconds;
+          const roomTTLHours = Math.round((roomTTLSeconds / 3600) * 10) / 10;
           const ageSeconds = Math.floor(Date.now() / 1000) - gameInfo.created_at;
-          if (ageSeconds > GAME_TTL_SECONDS) {
+          if (ageSeconds > roomTTLSeconds) {
             setGameDead(true);
-            setGameDeadReason("This room code has expired. Room codes are valid for 60 minutes.");
+            setGameDeadReason(`This room code has expired. Room codes are valid for ${roomTTLHours} hours.`);
             setGameStatus("Room code expired");
           } else if (gameInfo.status === "ended" && !gameInfo.winner) {
             // Orphaned — host left before anyone won
@@ -493,6 +521,8 @@ function GamePage() {
         }
 
         setBoard({ rows: message.rows, cols: message.cols, cells });
+        // Lobby flow: host sees setup lobby, non-hosts go straight to board
+        setLobbyReady(!hostMatch || !!existingWinner);
         if (!existingWinner) {
           setGameStatus(`Connected to ${message.game_id}`);
         }
@@ -537,6 +567,7 @@ function GamePage() {
         setBuzzwordPool([]);
         setRejectedSuggestions([]);
         setShowBuzzwords(false);
+        setLobbyReady(true); // host goes back to lobby on restart (unless they restart while non-host)
         const cells: BoardCell[] = [];
         const words = shuffleArray(message.buzzwords.flat());
         for (let i = 0; i < message.rows * message.cols; i += 1) {
@@ -755,80 +786,109 @@ function GamePage() {
 
       <section className="layout-grid">
         <article className="panel">
-          <h2>Board</h2>
-          {winner !== "" && (
-            <div className="game-ended-banner">
-              <strong>Round over</strong>
-              {winner ? (
-                <span> — Winner: <em>{winner}</em></span>
-              ) : null}
-              {isHost ? (
-                <span className="banner-hint"> — you can restart below</span>
-              ) : hostConnected ? (
-                <span className="banner-hint"> — waiting for host to restart</span>
-              ) : (
-                <span className="banner-hint"> — host disconnected, game over</span>
-              )}
-            </div>
-          )}
-          {winner === "" && (
-            <div className="board" role="grid" aria-label="Bingo board">
-              {board?.cells.map((cell) => (
+          {isHost && !lobbyReady && !winner ? (
+            /* ── Host lobby: setup panel instead of board ── */
+            <div className="lobby-panel">
+              <h2>🎯 Set up your bingo board</h2>
+              <p className="lobby-hint">Choose how to generate the word list for this game.</p>
+              <div className="lobby-actions">
                 <button
-                  key={cell.id}
                   type="button"
-                  className={`board-cell ${cell.marked ? "marked" : ""}`}
-                  onClick={() => toggleCell(cell.id)}
-                  disabled={winPending}
+                  className="action-btn lobby-action-btn"
+                  onClick={() => setShowGenerate(true)}
                 >
-                  <span className="cell-id">{cell.id}</span>
-                  <span>{cell.text}</span>
+                  <span className="lobby-action-icon">✨</span>
+                  <span className="lobby-action-text">
+                    <strong>Generate word list with AI</strong>
+                    <span className="lobby-action-desc">Describe a topic and let AI create custom buzzwords</span>
+                  </span>
                 </button>
-              ))}
-            </div>
-          )}
-          {winner !== "" && (
-            <div className="post-game-actions">
-              {isHost && hostConnected && (
-                <button type="button" className="action-btn restart-btn" onClick={handleRestart}>
-                  Restart Game
+                <button
+                  type="button"
+                  className="action-btn lobby-action-btn"
+                  onClick={() => setLobbyReady(true)}
+                >
+                  <span className="lobby-action-icon">🎲</span>
+                  <span className="lobby-action-text">
+                    <strong>Play with default words</strong>
+                    <span className="lobby-action-desc">Use the included buzzword list to start immediately</span>
+                  </span>
                 </button>
-              )}
-              {!isHost && !hostConnected && (
-                <p className="host-gone">Host has disconnected — game cannot be restarted.</p>
-              )}
-              {!isHost && hostConnected && (
-                <p className="waiting-restart">Waiting for host to restart…</p>
-              )}
-              <button type="button" className="action-btn leave-btn" onClick={handleLeave}>
-                Leave Game
-              </button>
-            </div>
-          )}
-            {connected && !winner && (
-              <div className="action-toolbar">
-                <button type="button" className="toolbar-btn" onClick={() => setShowSuggestModal(true)}>
-                  + Suggest Buzzword
-                </button>
-                <button type="button" className="toolbar-btn" onClick={() => setShowBetModal(true)}>
-                  🎲 Place Bet
-                </button>
-                <button type="button" className="toolbar-btn" onClick={handleListBuzzwords}>
-                  📋 Buzzwords
-                </button>
-                {isHost && roomCode && (
-                  <button type="button" className="toolbar-btn" onClick={() => { setBuzzwordUploadError(""); setShowBuzzwordUpload(true); }}>
-                    📤 Upload Word List
-                  </button>
-                )}
-                {isHost && roomCode && (
-                  <button type="button" className="toolbar-btn" onClick={() => setShowGenerate(true)}>
-                    ✨ Generate with AI
-                  </button>
-                )}
               </div>
-            )}
-          </article>
+            </div>
+          ) : (
+            <>
+              <h2>Board</h2>
+              {winner !== "" && (
+                <div className="game-ended-banner">
+                  <strong>Round over</strong>
+                  {winner ? (
+                    <span> — Winner: <em>{winner}</em></span>
+                  ) : null}
+                  {isHost ? (
+                    <span className="banner-hint"> — you can restart below</span>
+                  ) : hostConnected ? (
+                    <span className="banner-hint"> — waiting for host to restart</span>
+                  ) : (
+                    <span className="banner-hint"> — host disconnected, game over</span>
+                  )}
+                </div>
+              )}
+              {winner === "" && (
+                <div className="board" role="grid" aria-label="Bingo board">
+                  {board?.cells.map((cell) => (
+                    <button
+                      key={cell.id}
+                      type="button"
+                      className={`board-cell ${cell.marked ? "marked" : ""}`}
+                      onClick={() => toggleCell(cell.id)}
+                      disabled={winPending}
+                    >
+                      <span className="cell-id">{cell.id}</span>
+                      <span>{cell.text}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {winner !== "" && (
+                <div className="post-game-actions">
+                  {isHost && hostConnected && (
+                    <button type="button" className="action-btn restart-btn" onClick={handleRestart}>
+                      Restart Game
+                    </button>
+                  )}
+                  {!isHost && !hostConnected && (
+                    <p className="host-gone">Host has disconnected — game cannot be restarted.</p>
+                  )}
+                  {!isHost && hostConnected && (
+                    <p className="waiting-restart">Waiting for host to restart…</p>
+                  )}
+                  <button type="button" className="action-btn leave-btn" onClick={handleLeave}>
+                    Leave Game
+                  </button>
+                </div>
+              )}
+              {connected && !winner && (
+                <div className="action-toolbar">
+                  <button type="button" className="toolbar-btn" onClick={() => setShowSuggestModal(true)}>
+                    + Suggest Buzzword
+                  </button>
+                  <button type="button" className="toolbar-btn" onClick={() => setShowBetModal(true)}>
+                    🎲 Place Bet
+                  </button>
+                  <button type="button" className="toolbar-btn" onClick={handleListBuzzwords}>
+                    📋 Buzzwords
+                  </button>
+                  {isHost && roomCode && (
+                    <button type="button" className="toolbar-btn" onClick={() => { setBuzzwordUploadError(""); setShowBuzzwordUpload(true); }}>
+                      📤 Upload Word List
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </article>
 
         <article className="panel">
           <h2>Players</h2>
@@ -895,14 +955,25 @@ function GamePage() {
             }}
           />
         )}
-        {showGenerate && roomCode && (
+        {showGenerate && (
           <GenerateModal
-            roomCode={roomCode}
+            gameCode={normalizedCode}
             authToken={tokenRef.current}
             onApply={async (words) => {
-              await setRoomBuzzwords(roomCode, words, currentUser);
+              await setGameBuzzwords(normalizedCode, words, tokenRef.current);
               setShowGenerate(false);
-              setGameStatus("AI-generated word list saved for next round.");
+              // Update board immediately with AI-generated words
+              if (board) {
+                const shuffled = shuffleArray(words).slice(0, board.rows * board.cols);
+                const newCells = shuffled.map((text, i) => ({
+                  id: toCellId(Math.floor(i / board.cols), i % board.cols),
+                  text,
+                  marked: false,
+                }));
+                setBoard({ ...board, cells: newCells });
+              }
+              setLobbyReady(true);
+              setGameStatus("AI word list applied! Ready to play.");
             }}
             onClose={() => setShowGenerate(false)}
           />
@@ -938,37 +1009,178 @@ function FollowUpInput({ onSubmit, disabled }: { onSubmit: (msg: string) => void
 }
 
 function GenerateModal({
-  roomCode,
+  gameCode,
   authToken,
   onApply,
   onClose,
 }: {
-  roomCode: string;
+  gameCode: string;
   authToken: string;
   onApply: (words: string[]) => Promise<void>;
   onClose: () => void;
 }) {
+  type ExclusionReason =
+    | "not_observable"
+    | "too_generic"
+    | "duplicate"
+    | "not_relevant"
+    | "too_hard"
+    | "safety_accessibility"
+    | "other";
+
+  type WordFeedbackState = {
+    included: boolean;
+    reason: ExclusionReason | "";
+    otherText: string;
+    duplicateOf: string;
+    specificityNote: string;
+    retrievalURL: string;
+  };
+
+  const exclusionReasonLabels: Record<ExclusionReason, string> = {
+    not_observable: "Not observable",
+    too_generic: "Too generic",
+    duplicate: "Duplicate/similar",
+    not_relevant: "Not relevant",
+    too_hard: "Too hard to verify",
+    safety_accessibility: "Safety/accessibility",
+    other: "Other",
+  };
+
+  const generationModeLabels: Record<GenerationOptions["generationMode"], string> = {
+    "guided-prompt": "Guided Prompt (default)",
+    "agentic-retrieval": "Agentic Retrieval",
+  };
+
   const [topic, setTopic] = useState("");
   const [url, setUrl] = useState("");
   const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
+  const [genOpts, setGenOpts] = useState<GenerationOptions>(DEFAULT_GENERATION_OPTIONS);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [sets, setSets] = useState<WordSet[] | null>(null);
+  const [wordFeedback, setWordFeedback] = useState<Record<string, WordFeedbackState>>({});
   const [genError, setGenError] = useState("");
   const [applying, setApplying] = useState(false);
   const outputRef = useRef<HTMLDivElement>(null);
+
+  function feedbackKey(setIndex: number, wordIndex: number): string {
+    return `${setIndex}:${wordIndex}`;
+  }
+
+  function getWordState(setIndex: number, wordIndex: number): WordFeedbackState {
+    return wordFeedback[feedbackKey(setIndex, wordIndex)] || {
+      included: true,
+      reason: "",
+      otherText: "",
+      duplicateOf: "",
+      specificityNote: "",
+      retrievalURL: "",
+    };
+  }
+
+  function setWordState(setIndex: number, wordIndex: number, next: Partial<WordFeedbackState>) {
+    const key = feedbackKey(setIndex, wordIndex);
+    setWordFeedback((prev) => {
+      const current = prev[key] || { included: true, reason: "", otherText: "", duplicateOf: "", specificityNote: "", retrievalURL: "" };
+      return {
+        ...prev,
+        [key]: {
+          ...current,
+          ...next,
+        },
+      };
+    });
+  }
+
+  function setDuplicatePair(setIndex: number, set: WordSet, sourceIndex: number, targetIndex: number) {
+    const sourceWord = set.words[sourceIndex];
+    const targetWord = set.words[targetIndex];
+    if (!sourceWord || !targetWord || sourceIndex === targetIndex) {
+      return;
+    }
+
+    const sourceKey = feedbackKey(setIndex, sourceIndex);
+    const targetKey = feedbackKey(setIndex, targetIndex);
+    setWordFeedback((prev) => {
+      const sourceCurrent = prev[sourceKey] || { included: true, reason: "", otherText: "", duplicateOf: "", specificityNote: "", retrievalURL: "" };
+      const targetCurrent = prev[targetKey] || { included: true, reason: "", otherText: "", duplicateOf: "", specificityNote: "", retrievalURL: "" };
+      return {
+        ...prev,
+        [sourceKey]: {
+          ...sourceCurrent,
+          included: false,
+          reason: "duplicate",
+          otherText: "",
+          duplicateOf: targetWord,
+          specificityNote: "",
+          retrievalURL: "",
+        },
+        [targetKey]: {
+          ...targetCurrent,
+          included: false,
+          reason: "duplicate",
+          otherText: "",
+          duplicateOf: sourceWord,
+          specificityNote: "",
+          retrievalURL: "",
+        },
+      };
+    });
+  }
+
+  function persistSelectionFeedback(setIndex: number, set: WordSet, includedWords: string[]) {
+    const excluded = set.words
+      .map((word, wordIndex) => ({
+        word,
+        state: getWordState(setIndex, wordIndex),
+      }))
+      .filter(({ state }) => !state.included)
+      .map(({ word, state }) => ({
+        word,
+        reason: state.reason,
+        otherText: state.reason === "other" ? state.otherText.trim() : "",
+        duplicateOf: state.reason === "duplicate" ? state.duplicateOf.trim() : "",
+        specificityNote: state.reason === "too_generic" ? state.specificityNote.trim() : "",
+        retrievalURL: state.reason === "too_generic" ? state.retrievalURL.trim() : "",
+      }));
+
+    const entry = {
+      timestamp: new Date().toISOString(),
+      gameCode,
+      topic: topic.trim(),
+      url: url.trim(),
+      generationMode: genOpts.generationMode,
+      setLabel: set.label,
+      totalWords: set.words.length,
+      includedWords,
+      excluded,
+    };
+
+    try {
+      const raw = localStorage.getItem("bingo-ai-word-feedback");
+      const existing = raw ? (JSON.parse(raw) as unknown[]) : [];
+      const trimmed = [...existing, entry].slice(-200);
+      localStorage.setItem("bingo-ai-word-feedback", JSON.stringify(trimmed));
+    } catch {
+      // Ignore local feedback persistence errors.
+    }
+  }
 
   async function generate(msgs: Array<{ role: string; content: string }>) {
     setStreaming(true);
     setStreamText("");
     setSets(null);
+    setWordFeedback({});
     setGenError("");
-    await streamBuzzwords(
-      roomCode,
+    await streamGameBuzzwords(
+      gameCode,
       topic,
       url || undefined,
       msgs,
       authToken,
+      genOpts,
       (chunk) => {
         setStreamText((t) => t + chunk);
         if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
@@ -978,7 +1190,7 @@ function GenerateModal({
         setStreaming(false);
       },
       (err) => {
-        setGenError(err);
+        setGenError(formatGenerationError(err));
         setStreaming(false);
       },
     );
@@ -993,10 +1205,81 @@ function GenerateModal({
     generate(newMessages);
   }
 
-  async function handleApply(words: string[]) {
+  function handleRegenerateSameSettings() {
+    if (streaming || (!topic.trim() && !url.trim())) {
+      return;
+    }
+    if (messages.length > 0) {
+      generate(messages);
+      return;
+    }
+    const userMsg = { role: "user", content: topic.trim() || url.trim() };
+    const newMessages = [userMsg];
+    setMessages(newMessages);
+    generate(newMessages);
+  }
+
+  async function handleApply(setIndex: number, set: WordSet) {
+    const includedWords = set.words.filter((_, wordIndex) => getWordState(setIndex, wordIndex).included);
+    const missingOtherReason = set.words.some((_, wordIndex) => {
+      const state = getWordState(setIndex, wordIndex);
+      return !state.included && state.reason === "other" && !state.otherText.trim();
+    });
+
+    if (missingOtherReason) {
+      setGenError("Please enter a short reason for each excluded word marked as Other.");
+      return;
+    }
+
+    const missingDuplicateTarget = set.words.some((_, wordIndex) => {
+      const state = getWordState(setIndex, wordIndex);
+      return !state.included && state.reason === "duplicate" && !state.duplicateOf.trim();
+    });
+
+    if (missingDuplicateTarget) {
+      setGenError("Please choose which word each duplicate/similar item overlaps with.");
+      return;
+    }
+
+    if (includedWords.length === 0) {
+      setGenError("At least one buzzword must be included.");
+      return;
+    }
+
+    persistSelectionFeedback(setIndex, set, includedWords);
+
+    const excludedPayload = set.words
+      .map((word, wordIndex) => ({
+        word,
+        state: getWordState(setIndex, wordIndex),
+      }))
+      .filter(({ state }) => !state.included)
+      .map(({ word, state }) => ({
+        word,
+        reason: state.reason,
+        other_text: state.reason === "other" ? state.otherText.trim() : undefined,
+        duplicate_of: state.reason === "duplicate" ? state.duplicateOf.trim() : undefined,
+        specificity_note: state.reason === "too_generic" ? state.specificityNote.trim() : undefined,
+        retrieval_url: state.reason === "too_generic" ? state.retrievalURL.trim() : undefined,
+      }));
+
+    try {
+      await submitGameBuzzwordFeedback(gameCode, authToken, {
+        topic: topic.trim(),
+        url: url.trim() || undefined,
+        generation_mode: genOpts.generationMode,
+        set_label: set.label,
+        total_words: set.words.length,
+        included_words: includedWords,
+        excluded: excludedPayload,
+      });
+    } catch {
+      // Non-blocking: keep gameplay smooth even if feedback submission fails.
+    }
+
     setApplying(true);
     try {
-      await onApply(words);
+      await onApply(includedWords);
     } catch (err) {
       setGenError(err instanceof Error ? err.message : "Apply failed");
     } finally {
@@ -1010,8 +1293,26 @@ function GenerateModal({
     setMessages([]);
     setStreamText("");
     setSets(null);
+    setWordFeedback({});
     setGenError("");
+    setGenOpts(DEFAULT_GENERATION_OPTIONS);
+    setShowAdvanced(false);
   }
+
+  // Compute a runtime estimate and whether to show a warning banner.
+  const runtimeWarning = (() => {
+    const { fixedWordCount } = genOpts;
+    const hasUrl = url.trim().length > 0;
+    const parts: string[] = [];
+    let danger = false;
+
+    if (fixedWordCount > 0) {
+      parts.push(`fixed size ${fixedWordCount} words (auto-fill enabled)`);
+    }
+    if (hasUrl) parts.push("+~10s for URL scrape");
+
+    return danger ? parts.join(" · ") : null;
+  })();
 
   const hasOutput = streamText || sets || genError;
 
@@ -1044,6 +1345,66 @@ function GenerateModal({
                 placeholder="https://example.com/event-page"
               />
             </label>
+            <details className="gen-advanced" open={showAdvanced} onToggle={(e) => setShowAdvanced((e.currentTarget as HTMLDetailsElement).open)}>
+              <summary className="gen-advanced-summary">Advanced settings</summary>
+              <div className="gen-advanced-body">
+                <fieldset className="gen-fieldset">
+                  <legend>Generation mode</legend>
+                  {(["guided-prompt", "agentic-retrieval"] as const).map((mode) => (
+                    <label key={mode} className="gen-radio-label">
+                      <input
+                        type="radio"
+                        name="generationMode"
+                        value={mode}
+                        checked={genOpts.generationMode === mode}
+                        onChange={() => setGenOpts((o) => ({ ...o, generationMode: mode }))}
+                      />
+                      {generationModeLabels[mode]}
+                    </label>
+                  ))}
+                </fieldset>
+
+                <fieldset className="gen-fieldset">
+                  <legend>List size</legend>
+                  <label className="gen-toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={genOpts.fixedWordCount > 0}
+                      onChange={(e) =>
+                        setGenOpts((o) => ({
+                          ...o,
+                          fixedWordCount: e.target.checked ? (o.fixedWordCount > 0 ? Math.max(30, o.fixedWordCount) : 50) : 0,
+                        }))
+                      }
+                    />
+                    Use fixed list size
+                  </label>
+                  {genOpts.fixedWordCount > 0 && (
+                    <label className="gen-radio-label">
+                      Exact word count
+                      <input
+                        type="number"
+                        min={30}
+                        max={200}
+                        step={1}
+                        value={genOpts.fixedWordCount}
+                        onChange={(e) => {
+                          const parsed = Number.parseInt(e.target.value, 10);
+                          setGenOpts((o) => ({
+                            ...o,
+                            fixedWordCount: Number.isFinite(parsed) ? Math.max(30, Math.min(200, parsed)) : 50,
+                          }));
+                        }}
+                      />
+                    </label>
+                  )}
+                </fieldset>
+              </div>
+            </details>
+            {runtimeWarning && (
+              <p className="gen-runtime-warning">⏱ {runtimeWarning}</p>
+            )}
+
             <div className="modal-actions">
               <button
                 type="submit"
@@ -1065,23 +1426,132 @@ function GenerateModal({
 
             {sets && (
               <div className="word-sets">
-                {sets.map((set) => (
+                {sets.map((set, setIndex) => {
+                  const includedCount = set.words.filter((_, wordIndex) => getWordState(setIndex, wordIndex).included).length;
+                  return (
                   <div key={set.label} className="word-set-card">
                     <div className="word-set-header">
                       <strong>{set.label}</strong>
-                      <span className="word-count">{set.words.length} words</span>
+                      <span className="word-count">{includedCount}/{set.words.length} included</span>
                     </div>
-                    <p className="word-set-preview">{set.words.slice(0, 5).join(", ")}…</p>
+                    <div className="word-review-list">
+                      {set.words.map((word, wordIndex) => {
+                        const state = getWordState(setIndex, wordIndex);
+                        const duplicateCandidates = set.words
+                          .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+                          .filter(({ candidateIndex }) => candidateIndex !== wordIndex);
+                        return (
+                          <div key={`${set.label}-${wordIndex}`} className={`word-review-item ${state.included ? "included" : "excluded"}`}>
+                            <label className="word-toggle">
+                              <input
+                                type="checkbox"
+                                checked={state.included}
+                                onChange={(e) => {
+                                  const include = e.target.checked;
+                                  setWordState(setIndex, wordIndex, {
+                                    included: include,
+                                    reason: include ? "" : state.reason,
+                                    otherText: include ? "" : state.otherText,
+                                    duplicateOf: include ? "" : state.duplicateOf,
+                                    specificityNote: include ? "" : state.specificityNote,
+                                    retrievalURL: include ? "" : state.retrievalURL,
+                                  });
+                                }}
+                              />
+                              <span>{word}</span>
+                            </label>
+                            {!state.included && (
+                              <div className="exclude-feedback">
+                                <div className="reason-chips">
+                                  {(Object.keys(exclusionReasonLabels) as ExclusionReason[]).map((reason) => (
+                                    <button
+                                      key={reason}
+                                      type="button"
+                                      className={`reason-chip ${state.reason === reason ? "active" : ""}`}
+                                      onClick={() => setWordState(setIndex, wordIndex, {
+                                        reason,
+                                        duplicateOf: reason === "duplicate" ? state.duplicateOf : "",
+                                        otherText: reason === "other" ? state.otherText : "",
+                                        specificityNote: reason === "too_generic" ? state.specificityNote : "",
+                                        retrievalURL: reason === "too_generic" ? state.retrievalURL : "",
+                                      })}
+                                    >
+                                      {exclusionReasonLabels[reason]}
+                                    </button>
+                                  ))}
+                                </div>
+                                {state.reason === "too_generic" && (
+                                  <div className="too-generic-fields">
+                                    <input
+                                      type="text"
+                                      value={state.specificityNote}
+                                      onChange={(e) => setWordState(setIndex, wordIndex, { specificityNote: e.target.value })}
+                                      placeholder="What specific detail should replace this?"
+                                      maxLength={180}
+                                      className="other-reason-input"
+                                    />
+                                    <input
+                                      type="url"
+                                      value={state.retrievalURL}
+                                      onChange={(e) => setWordState(setIndex, wordIndex, { retrievalURL: e.target.value })}
+                                      placeholder="Specific page URL to scrape (optional)"
+                                      maxLength={300}
+                                      className="other-reason-input"
+                                    />
+                                  </div>
+                                )}
+                                {state.reason === "duplicate" && (
+                                  <label className="duplicate-target-field">
+                                    Duplicates with
+                                    <select
+                                      value={state.duplicateOf}
+                                      onChange={(e) => {
+                                        const selectedWord = e.target.value;
+                                        const selectedIndexAttr = e.target.selectedOptions[0]?.getAttribute("data-word-index");
+                                        const selectedIndex = selectedIndexAttr === null ? NaN : Number(selectedIndexAttr);
+
+                                        if (Number.isInteger(selectedIndex) && selectedIndex >= 0) {
+                                          setDuplicatePair(setIndex, set, wordIndex, selectedIndex);
+                                        } else {
+                                          setWordState(setIndex, wordIndex, { duplicateOf: selectedWord });
+                                        }
+                                      }}
+                                      required
+                                    >
+                                      <option value="">Select another word…</option>
+                                      {duplicateCandidates.map(({ candidate, candidateIndex }) => (
+                                        <option key={`${candidate}-${candidateIndex}`} value={candidate} data-word-index={candidateIndex}>{candidate}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                )}
+                                {state.reason === "other" && (
+                                  <input
+                                    type="text"
+                                    value={state.otherText}
+                                    onChange={(e) => setWordState(setIndex, wordIndex, { otherText: e.target.value })}
+                                    placeholder="Why is this a bad fit?"
+                                    maxLength={180}
+                                    className="other-reason-input"
+                                    required
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                     <button
                       type="button"
                       className="action-btn"
-                      onClick={() => handleApply(set.words)}
-                      disabled={applying}
+                      onClick={() => handleApply(setIndex, set)}
+                      disabled={applying || includedCount === 0}
                     >
-                      {applying ? "Saving…" : "Use this set"}
+                      {applying ? "Saving…" : `Use included words (${includedCount})`}
                     </button>
                   </div>
-                ))}
+                );})}
               </div>
             )}
 
@@ -1100,6 +1570,16 @@ function GenerateModal({
             )}
 
             <div className="modal-actions">
+              {(genError || !sets) && (
+                <button
+                  type="button"
+                  className="action-btn"
+                  onClick={handleRegenerateSameSettings}
+                  disabled={streaming || (!topic.trim() && !url.trim())}
+                >
+                  {streaming ? "Regenerating…" : "Regenerate with same settings"}
+                </button>
+              )}
               <button type="button" className="ghost-btn" onClick={handleStartOver}>Start Over</button>
               <button type="button" className="ghost-btn" onClick={onClose}>Close</button>
             </div>
