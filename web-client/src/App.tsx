@@ -16,7 +16,6 @@ import {
 } from "./lib/api";
 import { formatGenerationError } from "./lib/api";
 import type { GenerationOptions } from "./lib/api";
->>>>>>> phase-12
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
@@ -36,15 +35,6 @@ const HELP_ENTRIES: HelpEntry[] = [
   { cmd: "Place Bet",                desc: "Bet on who wins — format: player wins|loses (AND to chain)" },
   { cmd: "Leaderboard",              desc: "Top players by wins — visible in the Leaderboard panel" },
 ];
-
-async function refreshAllTimeLeaderboard(setLeaderboard: (rows: LeaderboardEntry[]) => void) {
-  try {
-    const rows = await fetchLeaderboard();
-    setLeaderboard(rows);
-  } catch {
-    // Leaderboard is optional for gameplay; keep UI usable even if DB is disabled.
-  }
-}
 
 function HelpPanel({ isHost, onClose }: { isHost: boolean; onClose: () => void }) {
   return (
@@ -284,8 +274,8 @@ function HomePage() {
     setCreateError("");
     setCreating(true);
     try {
-      const room = await createRoom();
-      navigate(`/game/BINGO-${room.code}`);
+      const game = await createGame();
+      navigate(`/game/${game.code}`);
     } catch (err) {
       setCreateError(
         err instanceof Error
@@ -376,7 +366,6 @@ function GamePageContent({
   const [roomCode, setRoomCode] = useState("");
   const [roomLeaderboard, setRoomLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardTab, setLeaderboardTab] = useState<"all" | "room">("all");
-  const [roomUsesCustomBoard, setRoomUsesCustomBoard] = useState(false);
   const [showBuzzwordUpload, setShowBuzzwordUpload] = useState(false);
   const [buzzwordUploadError, setBuzzwordUploadError] = useState("");
   const [showGenerate, setShowGenerate] = useState(false);
@@ -420,7 +409,7 @@ function GamePageContent({
             setWinner(gameInfo.winner);
             setGameStatus(`Game already ended — winner: ${gameInfo.winner}`);
           } else {
-            setGameStatus(`Room code is active`);
+            setGameStatus(`Game ${normalizedCode} is active`);
           }
         }
       } catch (err) {
@@ -432,11 +421,14 @@ function GamePageContent({
     }
 
     async function loadLeaderboard() {
-      await refreshAllTimeLeaderboard((rows) => {
+      try {
+        const rows = await fetchLeaderboard();
         if (mounted) {
           setLeaderboard(rows);
         }
-      });
+      } catch {
+        // Leaderboard is optional for gameplay; keep UI usable even if DB is disabled.
+      }
     }
 
     validateCode();
@@ -481,11 +473,9 @@ function GamePageContent({
     socketRef.current = socket;
 
     socket.onopen = () => {
-      const authMessage: ClientMessage = roomCodeFromRoute
-        ? { action: "room_login", username: name, room_code: roomCodeFromRoute }
-        : tokenRef.current
-          ? { action: "login", token: tokenRef.current, code: normalizedCode }
-          : { action: "login", username: name, code: normalizedCode };
+      const authMessage: ClientMessage = tokenRef.current
+        ? { action: "login", token: tokenRef.current, code: normalizedCode }
+        : { action: "login", username: name, code: normalizedCode };
       socket.send(JSON.stringify(authMessage));
     };
 
@@ -539,9 +529,6 @@ function GamePageContent({
         // Phase 11.0: capture room code from welcome message
         if (message.room_code) {
           setRoomCode(message.room_code);
-          fetchRoom(message.room_code)
-            .then((info) => setRoomUsesCustomBoard(!!info.custom_board_used))
-            .catch(() => {});
           fetchRoomLeaderboard(message.room_code).then(setRoomLeaderboard).catch(() => {});
         }
         // If existingWinner is set, keep the status from validateCode (already informative).
@@ -555,7 +542,6 @@ function GamePageContent({
         const announcedWinner = message.winner || "";
         gameEndedRef.current = true;
         winSentRef.current = true;
-        refreshAllTimeLeaderboard(setLeaderboard);
         setWinner(announcedWinner);
         setWinPending(false);
         const hostGone = (message.message || "").includes("Host has disconnected");
@@ -572,7 +558,6 @@ function GamePageContent({
       if (message.type === "game_restart") {
         gameEndedRef.current = false;
         winSentRef.current = false;
-        refreshAllTimeLeaderboard(setLeaderboard);
         setWinner("");
         setWinPending(false);
         setPlayers(message.players || []);
@@ -921,26 +906,14 @@ function GamePageContent({
               <button
                 type="button"
                 className={`tab-btn${leaderboardTab === "all" ? " active" : ""}`}
-                onClick={() => {
-                  setLeaderboardTab("all");
-                  refreshAllTimeLeaderboard(setLeaderboard);
-                }}
+                onClick={() => setLeaderboardTab("all")}
               >All Time</button>
               <button
                 type="button"
                 className={`tab-btn${leaderboardTab === "room" ? " active" : ""}`}
-                onClick={() => {
-                  setLeaderboardTab("room");
-                  fetchRoom(roomCode)
-                    .then((info) => setRoomUsesCustomBoard(!!info.custom_board_used))
-                    .catch(() => {});
-                  fetchRoomLeaderboard(roomCode).then(setRoomLeaderboard).catch(() => {});
-                }}
+                onClick={() => { setLeaderboardTab("room"); fetchRoomLeaderboard(roomCode).then(setRoomLeaderboard).catch(() => {}); }}
               >This Room</button>
             </div>
-          )}
-          {leaderboardTab === "room" && roomCode && roomUsesCustomBoard && (
-            <p className="muted-note">Custom board used: this room leaderboard is separate from all-time rankings.</p>
           )}
           <ul className="list">
             {(leaderboardTab === "room" && roomCode ? roomLeaderboard : leaderboard).map((entry) => (
