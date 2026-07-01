@@ -217,17 +217,33 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 	if flyToken == "" {
 		return fmt.Errorf("FLY_API_TOKEN environment variable is required")
 	}
-	secret := client.SetSecret("fly-token", flyToken)
+	ghcrToken := os.Getenv("GHCR_TOKEN")
+	if ghcrToken == "" {
+		return fmt.Errorf("GHCR_TOKEN environment variable is required")
+	}
+	flySecret := client.SetSecret("fly-token", flyToken)
+	ghcrSecret := client.SetSecret("ghcr-token", ghcrToken)
 	imageRef := fmt.Sprintf("%s:%s", registryBase, version)
 	fmt.Printf("=== Deploying %s to %s (%s) ===\n", imageRef, env, appName)
+	// Write Docker config for GHCR auth so flyctl can pull the private image,
+	// then deploy. The Docker config base64-encodes "username:password" for
+	// the registry — GHCR accepts any non-empty username with a PAT token.
+	setupCmd := `mkdir -p /root/.docker && ` +
+		`printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' ` +
+		`"$(printf 'x:%s' "$GHCR_TOKEN" | base64 | tr -d '\n')" > /root/.docker/config.json`
+	deployCmd := fmt.Sprintf(
+		"flyctl deploy --app %s --config %s --image %s --yes",
+		appName, configFile, imageRef,
+	)
 	_, err = client.Container().From("alpine:latest").
 		WithExec([]string{"sh", "-c", "apk add --no-cache curl bash && curl -L https://fly.io/install.sh | sh"}).
 		WithEnvVariable("FLYCTL_INSTALL", "/root/.fly").
 		WithEnvVariable("PATH", "/root/.fly/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").
-		WithSecretVariable("FLY_API_TOKEN", secret).
+		WithSecretVariable("FLY_API_TOKEN", flySecret).
+		WithSecretVariable("GHCR_TOKEN", ghcrSecret).
 		WithMountedDirectory("/app", source).
 		WithWorkdir("/app").
-		WithExec([]string{"flyctl", "deploy", "--app", appName, "--config", configFile, "--image", imageRef, "--yes"}).
+		WithExec([]string{"sh", "-c", setupCmd + " && " + deployCmd}).
 		Sync(ctx)
 	if err != nil {
 		var execErr *dagger.ExecError
