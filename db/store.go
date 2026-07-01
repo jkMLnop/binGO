@@ -55,6 +55,34 @@ type GameStore interface {
 	// Game archive operations
 	ArchiveGame(ctx context.Context, gameID, code, hostID, winnerID string, playerCount int, createdAt, endedAt time.Time) error
 	CleanupOldArchives(ctx context.Context) (deletedCount int, err error)
+
+	// LLM feedback operations (Phase 12)
+	SaveLLMFeedback(ctx context.Context, entry LLMFeedbackEntry) error
+	GetRecentLLMFeedback(ctx context.Context, gameCode, topic string, limit int) ([]LLMFeedbackEntry, error)
+}
+
+// LLMFeedbackExcludedWord captures one excluded buzzword and why it was rejected.
+type LLMFeedbackExcludedWord struct {
+	Word            string `json:"word"`
+	Reason          string `json:"reason"`
+	OtherText       string `json:"other_text,omitempty"`
+	DuplicateOf     string `json:"duplicate_of,omitempty"`
+	SpecificityNote string `json:"specificity_note,omitempty"`
+	RetrievalURL    string `json:"retrieval_url,omitempty"`
+}
+
+// LLMFeedbackEntry is a persisted feedback payload sent from the web UI.
+type LLMFeedbackEntry struct {
+	GameCode       string                    `json:"game_code"`
+	Topic          string                    `json:"topic"`
+	SourceURL      string                    `json:"url,omitempty"`
+	SetLabel       string                    `json:"set_label,omitempty"`
+	GenerationMode string                    `json:"generation_mode,omitempty"`
+	TotalWords     int                       `json:"total_words"`
+	IncludedWords  []string                  `json:"included_words"`
+	Excluded       []LLMFeedbackExcludedWord `json:"excluded"`
+	SubmittedBy    string                    `json:"submitted_by,omitempty"`
+	SubmittedAt    time.Time                 `json:"submitted_at"`
 }
 
 // Room represents a bingo room (Phase 11.0)

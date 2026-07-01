@@ -110,6 +110,18 @@ func runServer(port string, dbPath string) {
 		log.Println("Running without database (use -db flag to enable)")
 	}
 
+	// Initialise DeepSeek LLM client for AI buzzword generation
+	deepSeekBaseURL := os.Getenv("DEEPSEEK_BASE_URL")
+	if deepSeekBaseURL == "" {
+		deepSeekBaseURL = "https://api.deepseek.com"
+	}
+	deepSeekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
+	deepSeekModel := os.Getenv("DEEPSEEK_MODEL")
+	if deepSeekModel == "" {
+		deepSeekModel = "deepseek-v4-pro"
+	}
+	srv.InitLLMClient(deepSeekBaseURL, deepSeekAPIKey, deepSeekModel)
+
 	// Serve embedded web client (Phase 7.6)
 	if distFS, fsErr := fs.Sub(webClientDist, "web-client/dist"); fsErr == nil {
 		srv.StaticHandler = spaFileServer(distFS)

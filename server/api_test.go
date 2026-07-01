@@ -125,6 +125,24 @@ func TestAPIStatus(t *testing.T) {
 		t.Errorf("expected status=running, got %v", statusData["status"])
 	}
 
+	llmTimeout, ok := statusData["llm_timeout_seconds"].(float64)
+	if !ok {
+		t.Fatalf("expected llm_timeout_seconds in status payload")
+	}
+
+	roomTTL, ok := statusData["room_code_ttl_seconds"].(float64)
+	if !ok {
+		t.Fatalf("expected room_code_ttl_seconds in status payload")
+	}
+
+	if llmTimeout != float64((4 * 60 * 60)) {
+		t.Errorf("expected llm_timeout_seconds=14400, got %v", llmTimeout)
+	}
+
+	if roomTTL != llmTimeout+float64((2*60*60)) {
+		t.Errorf("expected room_code_ttl_seconds to equal llm_timeout_seconds+7200, got room=%v llm=%v", roomTTL, llmTimeout)
+	}
+
 	t.Log("✓ GET /api/status passed")
 }
 

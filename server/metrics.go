@@ -141,7 +141,7 @@ func ResetMetrics() {
 }
 
 // RecordError increments the bingo_errors_total counter for the given error type.
-// Valid types: "auth", "game", "db", "ws", "input"
+// Valid types: "auth", "game", "db", "ws", "input", "llm"
 func (m *Metrics) RecordError(errorType string) {
 	m.ErrorsTotal.WithLabelValues(errorType).Inc()
 }

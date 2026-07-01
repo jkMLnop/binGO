@@ -477,3 +477,92 @@ Three terminals, same as Section 15 setup. Add a third player:
 | 17.19 | Help shows betting command | Type `help` | Output includes `bet: <player> wins\|loses` with AND description | [ ] |
 | 17.20 | Help shows suggestion commands | Type `help` | Output includes `add_new_phrase`, `approve`, `reject` commands | [ ] |
 | 17.21 | Help shows leaderboard/stats | Type `help` | Output includes `leaderboard` and `stats` commands | [ ] |
+
+---
+
+## Section 15 — Web Client Embedded Assets (automated: `TestRegressionWebClientEmbedded`)
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 15.1 | Root serves SPA | `GET /` on running container | 200, Content-Type: text/html | ✅ automated |
+| 15.2 | manifest.json is embedded | `GET /manifest.json` on running container | 200, valid JSON, `name = "binGO"` | ✅ automated |
+| 15.3 | icon.svg is embedded | `GET /icon.svg` on running container | 200 | ✅ automated |
+
+---
+
+## 18. Phase 12 — AI Buzzword Generation (Local Full E2E)
+
+This section is for first-time manual validation of the web AI workflow from local machine setup through applying an AI-generated set in a real room.
+
+### Setup
+
+Open 2 terminals.
+
+Terminal A (Go server with DeepSeek AI enabled):
+```bash
+cd /path/to/binGO-CLI
+export DEEPSEEK_API_KEY="sk-your-key-here"
+export DEEPSEEK_MODEL="deepseek-v4-flash"   # fast for manual testing; omit for v4-pro
+go run . -mode server -port 8080 -db ./bingo.db
+```
+
+Terminal B (web client):
+```bash
+cd /path/to/binGO-CLI/web-client
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` in browser.
+
+> **Note:** Unlike the old Ollama setup, there is no local model server to start.
+> DeepSeek API is cloud-hosted — just set `DEEPSEEK_API_KEY` and go.
+> Use `deepseek-v4-flash` for faster interactive testing; `deepseek-v4-pro` (default)
+> is slower but higher quality.
+
+### Quick Run Order (Recommended)
+
+Use this sequence for a first-pass full E2E run:
+
+1. Run setup terminals and verify the web app loads.
+2. Execute 18.1 through 18.7 (happy path) in order.
+3. Execute 18.8 through 18.10 (auth and availability guards).
+4. Execute 18.11 through 18.13 (input safety and SSRF checks).
+5. Execute 18.14 through 18.15 (post-apply gameplay continuity).
+6. Mark each row status as you go so reruns are incremental.
+
+### 18A — Happy Path
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 18.1 | Host creates game and connects | Open /, click `Host a new game`, then join from the resulting `/game/BINGO-XXXXX` URL | Game page loads, board appears, host controls visible | [ ] |
+| 18.2 | AI modal opens | Click `Generate with AI` in host lobby | Generate modal opens with topic and URL inputs | [ ] |
+| 18.3 | Topic-only generation works | Enter topic (no URL), click `Generate` | Streaming text appears, then set cards appear | [ ] |
+| 18.4 | Output contract visible in UI | Inspect generated set card | At least 1 card is shown with word count | [ ] |
+| 18.5 | Apply generated set | Click `Use this set` on any card | Success message shown; modal closes; next round uses selected words | [ ] |
+| 18.6 | Follow-up refinement works | Re-open AI modal, generate once, then send refinement in follow-up input | New stream appears and a replacement set card is returned | [ ] |
+| 18.7 | URL-enhanced generation works | Enter topic + valid public URL, click `Generate` | Stream completes and returns a valid word set (no crash / no blank modal) | [ ] |
+
+### 18B — Auth and Availability Guards
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 18.8 | Non-host is blocked | Join same game from second browser as non-host and attempt `Generate with AI` flow | Request rejected (403 or equivalent host-only error) | [ ] |
+| 18.9 | Missing session token is handled | Disconnect/reload so host session token is invalid, then try generate | UI shows token/session error and does not silently fail | [ ] |
+| 18.10 | DeepSeek API unavailable returns 503 | Unset `DEEPSEEK_API_KEY`, restart server, retry generate | UI shows `AI generation not available — DeepSeek is not configured` (HTTP 503 behavior) | [ ] |
+
+### 18C — Input Safety / Scraper Guards
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 18.11 | Invalid URL scheme rejected safely | Use URL like `file:///etc/passwd` and generate | Request fails safely; no server crash; helpful error path in logs/UI | [ ] |
+| 18.12 | Private/loopback URL blocked (SSRF) | Use URL like `http://127.0.0.1:8080` and generate | Scrape is blocked or ignored safely; server remains healthy | [ ] |
+| 18.13 | Long topic validation | Enter topic >500 chars and generate | Request rejected with validation error; modal remains usable | [ ] |
+
+### 18D — Post-Apply Gameplay Continuity
+
+| Test # | Scenario | Steps | Expected Result | Status |
+|--------|----------|-------|-----------------|--------|
+| 18.14 | Applied set survives restart flow | Apply AI set, finish a round, host restarts game | New board uses applied custom game list for next round | [ ] |
+| 18.15 | Leaderboard/game loop unaffected | Play to a win after AI set is applied | Win announcement, restart, and leaderboard still function normally | [ ] |
+>>>>>>> phase-12

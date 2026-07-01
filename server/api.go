@@ -1,12 +1,16 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // APIResponse is a standard API response format
@@ -32,6 +36,39 @@ type LeaderboardEntryResponse struct {
 	Username string `json:"username"`
 	Wins     int    `json:"wins"`
 	Rank     int    `json:"rank"`
+}
+
+// handleGameRoutes dispatches sub-routes under /api/game/:code/*.
+func (s *Server) handleGameRoutes(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/game/")
+	parts := strings.SplitN(trimmed, "/", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing game code")
+		return
+	}
+
+	code := strings.ToUpper(parts[0])
+	sub := ""
+	if len(parts) == 2 {
+		sub = parts[1]
+	}
+	if sub == "" && r.Method != http.MethodGet {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	switch {
+	case sub == "" && r.Method == http.MethodGet:
+		s.handleGetGameByCode(w, r)
+	case sub == "buzzwords" && r.Method == http.MethodPost:
+		s.handleSetGameBuzzwords(w, r, code)
+	case sub == "feedback" && r.Method == http.MethodPost:
+		s.handleSubmitGameBuzzwordFeedback(w, r, code)
+	case sub == "generate-buzzwords" && r.Method == http.MethodPost:
+		s.handleGenerateBuzzwordsForGame(w, r, code)
+	default:
+		writeAPIError(w, http.StatusNotFound, "not found")
+	}
 }
 
 // handleGetGameByCode retrieves game information by code
@@ -244,11 +281,18 @@ func (s *Server) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	activeGames := len(s.Games)
 	s.GamesMu.RUnlock()
 
+	llmHealthy := false
+	if s.LLMClient != nil {
+		llmHealthy = s.LLMClient.Healthy(r.Context())
+	}
 	status := map[string]interface{}{
-		"status":       "running",
-		"port":         s.Port,
-		"active_games": activeGames,
-		"db_enabled":   s.DB != nil,
+		"status":                "running",
+		"port":                  s.Port,
+		"active_games":          activeGames,
+		"db_enabled":            s.DB != nil,
+		"llm_healthy":           llmHealthy,
+		"llm_timeout_seconds":   int(llmRequestTimeout.Seconds()),
+		"room_code_ttl_seconds": int(roomCodeTTL().Seconds()),
 	}
 
 	writeAPISuccess(w, status)
@@ -378,6 +422,8 @@ func (s *Server) handleRoomRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleSetRoomBuzzwords(w, r, code)
 	case sub == "leaderboard" && r.Method == http.MethodGet:
 		s.handleGetRoomLeaderboard(w, r, code)
+	case sub == "generate-buzzwords" && r.Method == http.MethodPost:
+		s.handleGenerateBuzzwords(w, r, code)
 	default:
 		writeAPIError(w, http.StatusNotFound, "not found")
 	}
@@ -508,6 +554,80 @@ func (s *Server) handleSetRoomBuzzwords(w http.ResponseWriter, r *http.Request, 
 	writeAPISuccess(w, map[string]interface{}{"words_saved": len(cleaned)})
 }
 
+// handleSetGameBuzzwords validates and stores a custom buzzword list for a game.
+// POST /api/game/:code/buzzwords
+func (s *Server) handleSetGameBuzzwords(w http.ResponseWriter, r *http.Request, code string) {
+	game, err := s.getOrCreateGame(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("game code %s not found", code))
+		return
+	}
+
+	// Host-only auth: require a valid bearer token bound to the game host.
+	token := bearerTokenFromAuthHeader(r.Header.Get("Authorization"))
+	if token == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing bearer token")
+		return
+	}
+
+	clientIP := s.extractClientIP(r)
+	tokenUsername, verifyErr := s.TokenManager.VerifyToken(token, clientIP)
+	if verifyErr != nil {
+		writeAPIError(w, http.StatusUnauthorized, "invalid or expired bearer token")
+		return
+	}
+	if tokenUsername != game.HostID {
+		writeAPIError(w, http.StatusForbidden, "only the game host can upload buzzwords")
+		return
+	}
+
+	var body BuzzwordUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(body.Words) < 24 {
+		writeAPIError(w, http.StatusBadRequest, "word list must contain at least 24 words")
+		return
+	}
+	if len(body.Words) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "word list must not exceed 500 words")
+		return
+	}
+
+	cleaned := make([]string, 0, len(body.Words))
+	for _, word := range body.Words {
+		word = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f {
+				return -1
+			}
+			return r
+		}, word)
+		word = strings.TrimSpace(word)
+		if word == "" {
+			continue
+		}
+		if len(word) > 60 {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("word too long (max 60 chars): %q", word))
+			return
+		}
+		cleaned = append(cleaned, word)
+	}
+	if len(cleaned) < 24 {
+		writeAPIError(w, http.StatusBadRequest, "word list must contain at least 24 non-empty words")
+		return
+	}
+
+	rows := make([][]string, 0, len(cleaned))
+	for _, w := range cleaned {
+		rows = append(rows, []string{w})
+	}
+	game.Buzzwords = rows
+
+	writeAPISuccess(w, map[string]interface{}{"words_saved": len(cleaned)})
+}
+
 // handleGetRoomLeaderboard returns per-room top players by win count.
 // GET /api/room/:code/leaderboard?limit=10
 func (s *Server) handleGetRoomLeaderboard(w http.ResponseWriter, r *http.Request, code string) {
@@ -539,4 +659,412 @@ func (s *Server) handleGetRoomLeaderboard(w http.ResponseWriter, r *http.Request
 		})
 	}
 	writeAPISuccess(w, result)
+}
+
+// ── Phase 12.1: AI Buzzword Generation ────────────────────────────────────────
+
+// generateBuzzwordsRequest is the body for POST /api/room/:code/generate-buzzwords
+// and POST /api/game/:code/generate-buzzwords.
+type generateBuzzwordsRequest struct {
+	HostID   string        `json:"host_id"`
+	Topic    string        `json:"topic"`
+	URL      string        `json:"url,omitempty"`
+	Messages []ChatMessage `json:"messages,omitempty"`
+	// Generation options — populated from UI controls.
+	// Zero/nil values fall back to experimentally-validated defaults.
+	GenerationMode string `json:"generation_mode,omitempty"` // "guided-prompt"|"agentic-retrieval"
+	FixedWordCount int    `json:"fixed_word_count,omitempty"`
+}
+
+type submitFeedbackRequest struct {
+	Topic          string                    `json:"topic"`
+	URL            string                    `json:"url,omitempty"`
+	SetLabel       string                    `json:"set_label,omitempty"`
+	GenerationMode string                    `json:"generation_mode,omitempty"`
+	TotalWords     int                       `json:"total_words"`
+	IncludedWords  []string                  `json:"included_words"`
+	Excluded       []LLMFeedbackExcludedWord `json:"excluded"`
+}
+
+func bearerTokenFromAuthHeader(header string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+// handleSubmitGameBuzzwordFeedback accepts curation feedback for generated words.
+// POST /api/game/:code/feedback
+// Requires a bearer token belonging to the game host.
+func (s *Server) handleSubmitGameBuzzwordFeedback(w http.ResponseWriter, r *http.Request, code string) {
+	game, err := s.getOrCreateGame(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("game code %s not found", code))
+		return
+	}
+
+	token := bearerTokenFromAuthHeader(r.Header.Get("Authorization"))
+	if token == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing bearer token")
+		return
+	}
+
+	clientIP := s.extractClientIP(r)
+	tokenUsername, verifyErr := s.TokenManager.VerifyToken(token, clientIP)
+	if verifyErr != nil {
+		writeAPIError(w, http.StatusUnauthorized, "invalid or expired bearer token")
+		return
+	}
+	if tokenUsername != game.HostID {
+		writeAPIError(w, http.StatusForbidden, "only the game host can submit AI feedback")
+		return
+	}
+
+	var body submitFeedbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(body.IncludedWords) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "at least one included word is required")
+		return
+	}
+	if len(body.IncludedWords) > 500 || len(body.Excluded) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "feedback payload exceeds limits")
+		return
+	}
+
+	included := make([]string, 0, len(body.IncludedWords))
+	for _, word := range body.IncludedWords {
+		clean := normalizeFeedbackWord(word)
+		if clean == "" {
+			continue
+		}
+		if len(clean) > 60 {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("word too long (max 60 chars): %q", clean))
+			return
+		}
+		included = append(included, clean)
+	}
+	if len(included) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "at least one valid included word is required")
+		return
+	}
+
+	excluded := make([]LLMFeedbackExcludedWord, 0, len(body.Excluded))
+	for _, item := range body.Excluded {
+		cleanWord := normalizeFeedbackWord(item.Word)
+		reason := strings.TrimSpace(item.Reason)
+		if cleanWord == "" {
+			continue
+		}
+		if len(cleanWord) > 60 {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("word too long (max 60 chars): %q", cleanWord))
+			return
+		}
+		if !isAllowedFeedbackReason(reason) {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("invalid exclusion reason: %q", reason))
+			return
+		}
+		otherText := strings.TrimSpace(item.OtherText)
+		if reason == "other" && otherText == "" {
+			writeAPIError(w, http.StatusBadRequest, "other reason requires explanation text")
+			return
+		}
+		if len(otherText) > 180 {
+			writeAPIError(w, http.StatusBadRequest, "other reason text must be 180 characters or fewer")
+			return
+		}
+		duplicateOf := normalizeFeedbackWord(item.DuplicateOf)
+		if reason == "duplicate" && duplicateOf == "" {
+			writeAPIError(w, http.StatusBadRequest, "duplicate reason requires duplicate_of target")
+			return
+		}
+		if len(duplicateOf) > 60 {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("duplicate_of too long (max 60 chars): %q", duplicateOf))
+			return
+		}
+		specificityNote := strings.TrimSpace(item.SpecificityNote)
+		if len(specificityNote) > 180 {
+			writeAPIError(w, http.StatusBadRequest, "specificity_note must be 180 characters or fewer")
+			return
+		}
+		retrievalURL := strings.TrimSpace(item.RetrievalURL)
+		if len(retrievalURL) > 300 {
+			writeAPIError(w, http.StatusBadRequest, "retrieval_url must be 300 characters or fewer")
+			return
+		}
+		if retrievalURL != "" {
+			parsedURL, parseErr := url.ParseRequestURI(retrievalURL)
+			if parseErr != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+				writeAPIError(w, http.StatusBadRequest, "retrieval_url must be a valid absolute URL")
+				return
+			}
+		}
+		if reason != "too_generic" {
+			specificityNote = ""
+			retrievalURL = ""
+		}
+		excluded = append(excluded, LLMFeedbackExcludedWord{
+			Word:            cleanWord,
+			Reason:          reason,
+			OtherText:       otherText,
+			DuplicateOf:     duplicateOf,
+			SpecificityNote: specificityNote,
+			RetrievalURL:    retrievalURL,
+		})
+	}
+
+	entry := LLMFeedbackEntry{
+		GameCode:       game.Code,
+		Topic:          strings.TrimSpace(body.Topic),
+		SourceURL:      strings.TrimSpace(body.URL),
+		SetLabel:       strings.TrimSpace(body.SetLabel),
+		GenerationMode: normalizeGenerationMode(body.GenerationMode),
+		TotalWords:     body.TotalWords,
+		IncludedWords:  included,
+		Excluded:       excluded,
+		SubmittedBy:    tokenUsername,
+		SubmittedAt:    time.Now().UTC(),
+	}
+	s.storeLLMFeedback(entry)
+
+	writeAPISuccess(w, map[string]interface{}{
+		"stored": true,
+	})
+}
+
+// handleGenerateBuzzwords streams AI-generated buzzword sets as SSE.
+// POST /api/room/:code/generate-buzzwords
+// Requires a bearer token belonging to the room host.
+// Returns HTTP 503 when DeepSeek is not configured or not reachable.
+func (s *Server) handleGenerateBuzzwords(w http.ResponseWriter, r *http.Request, code string) {
+	if s.LLMClient == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — DeepSeek is not reachable")
+		return
+	}
+
+	room, err := s.getOrCreateRoom(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("room %s not found", code))
+		return
+	}
+
+	var body generateBuzzwordsRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Host-only auth: require a valid bearer token bound to the room host.
+	token := bearerTokenFromAuthHeader(r.Header.Get("Authorization"))
+	if token == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing bearer token")
+		return
+	}
+
+	clientIP := s.extractClientIP(r)
+	tokenUsername, verifyErr := s.TokenManager.VerifyToken(token, clientIP)
+	if verifyErr != nil {
+		writeAPIError(w, http.StatusUnauthorized, "invalid or expired bearer token")
+		return
+	}
+
+	if tokenUsername != room.HostID {
+		writeAPIError(w, http.StatusForbidden, "only the room host can generate buzzwords")
+		return
+	}
+
+	// Keep host_id as an optional backward-compatible field; if provided, enforce consistency.
+	if body.HostID != "" && body.HostID != room.HostID {
+		writeAPIError(w, http.StatusForbidden, "host_id does not match this room")
+		return
+	}
+
+	// Validate topic length
+	topic := strings.TrimSpace(body.Topic)
+	if len(topic) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "topic must be 500 characters or fewer")
+		return
+	}
+
+	// Build generation options from request, falling back to validated defaults.
+	genOpts := DefaultGenerationOptions()
+	genOpts.GenerationMode = normalizeGenerationMode(body.GenerationMode)
+	if body.FixedWordCount < 0 || body.FixedWordCount > 200 {
+		writeAPIError(w, http.StatusBadRequest, "fixed_word_count must be between 0 and 200")
+		return
+	}
+	if body.FixedWordCount > 0 && body.FixedWordCount < 30 {
+		writeAPIError(w, http.StatusBadRequest, "fixed_word_count must be 0 or at least 30")
+		return
+	}
+	genOpts.FixedWordCount = body.FixedWordCount
+
+	// Build user content — scrape-first ordering is always used.
+	var urlExcerpt string
+	if body.URL != "" {
+		excerpt, scrapeErr := ScrapeURL(body.URL)
+		if scrapeErr != nil {
+			log.Printf("URL scrape failed for room %s: %v", code, scrapeErr)
+		} else {
+			urlExcerpt = excerpt
+		}
+	}
+
+	var userContent string
+	switch {
+	case urlExcerpt != "" && topic != "":
+		userContent = fmt.Sprintf("URL excerpt:\n%s\n\nTopic: %s", urlExcerpt, topic)
+	case urlExcerpt != "":
+		userContent = fmt.Sprintf("URL excerpt:\n%s", urlExcerpt)
+	default:
+		userContent = topic
+	}
+
+	// Merge conversation history with new user message
+	messages := make([]ChatMessage, 0, len(body.Messages)+1)
+	messages = append(messages, body.Messages...)
+	if guidance := s.llmFeedbackGuidance("", topic, genOpts.GenerationMode); guidance != "" {
+		messages = append(messages, ChatMessage{Role: "system", Content: guidance})
+	}
+	if userContent != "" {
+		messages = append(messages, ChatMessage{Role: "user", Content: userContent})
+	}
+
+	if len(messages) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "topic or messages required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if !s.LLMClient.Healthy(ctx) {
+		writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — DeepSeek is not reachable")
+		return
+	}
+
+	if err := s.LLMClient.StreamGenerate(r.Context(), messages, genOpts, w); err != nil {
+		log.Printf("LLM generation error for room %s: %v", code, err)
+		if errors.Is(err, ErrLLMUnavailable) {
+			writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — DeepSeek is not reachable")
+			return
+		}
+		// If streaming has started (headers already sent) we cannot write a JSON error —
+		// the SSE "error" event was already written inside StreamGenerate.
+	}
+}
+
+// handleGenerateBuzzwordsForGame streams AI-generated buzzword sets as SSE.
+// POST /api/game/:code/generate-buzzwords
+// Requires a bearer token belonging to the game host.
+func (s *Server) handleGenerateBuzzwordsForGame(w http.ResponseWriter, r *http.Request, code string) {
+	if s.LLMClient == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — DeepSeek is not reachable")
+		return
+	}
+
+	game, err := s.getOrCreateGame(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("game code %s not found", code))
+		return
+	}
+
+	var body generateBuzzwordsRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	token := bearerTokenFromAuthHeader(r.Header.Get("Authorization"))
+	if token == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing bearer token")
+		return
+	}
+
+	clientIP := s.extractClientIP(r)
+	tokenUsername, verifyErr := s.TokenManager.VerifyToken(token, clientIP)
+	if verifyErr != nil {
+		writeAPIError(w, http.StatusUnauthorized, "invalid or expired bearer token")
+		return
+	}
+	if tokenUsername != game.HostID {
+		writeAPIError(w, http.StatusForbidden, "only the game host can generate buzzwords")
+		return
+	}
+
+	if body.HostID != "" && body.HostID != game.HostID {
+		writeAPIError(w, http.StatusForbidden, "host_id does not match this game")
+		return
+	}
+
+	topic := strings.TrimSpace(body.Topic)
+	if len(topic) > 500 {
+		writeAPIError(w, http.StatusBadRequest, "topic must be 500 characters or fewer")
+		return
+	}
+
+	// Build generation options from request, falling back to validated defaults.
+	gameGenOpts := DefaultGenerationOptions()
+	gameGenOpts.GenerationMode = normalizeGenerationMode(body.GenerationMode)
+	if body.FixedWordCount < 0 || body.FixedWordCount > 200 {
+		writeAPIError(w, http.StatusBadRequest, "fixed_word_count must be between 0 and 200")
+		return
+	}
+	if body.FixedWordCount > 0 && body.FixedWordCount < 30 {
+		writeAPIError(w, http.StatusBadRequest, "fixed_word_count must be 0 or at least 30")
+		return
+	}
+	gameGenOpts.FixedWordCount = body.FixedWordCount
+
+	// Build user content: scrape-first ordering is always used.
+	var urlExcerptGame string
+	if body.URL != "" {
+		excerpt, scrapeErr := ScrapeURL(body.URL)
+		if scrapeErr != nil {
+			log.Printf("URL scrape failed for game %s: %v", code, scrapeErr)
+		} else {
+			urlExcerptGame = excerpt
+		}
+	}
+
+	var userContent string
+	switch {
+	case urlExcerptGame != "" && topic != "":
+		userContent = fmt.Sprintf("URL excerpt:\n%s\n\nTopic: %s", urlExcerptGame, topic)
+	case urlExcerptGame != "":
+		userContent = fmt.Sprintf("URL excerpt:\n%s", urlExcerptGame)
+	default:
+		userContent = topic
+	}
+
+	messages := make([]ChatMessage, 0, len(body.Messages)+1)
+	messages = append(messages, body.Messages...)
+	if guidance := s.llmFeedbackGuidance(game.Code, topic, gameGenOpts.GenerationMode); guidance != "" {
+		messages = append(messages, ChatMessage{Role: "system", Content: guidance})
+	}
+	if userContent != "" {
+		messages = append(messages, ChatMessage{Role: "user", Content: userContent})
+	}
+	if len(messages) == 0 {
+		writeAPIError(w, http.StatusBadRequest, "topic or messages required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if !s.LLMClient.Healthy(ctx) {
+		writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — DeepSeek is not reachable")
+		return
+	}
+
+	if err := s.LLMClient.StreamGenerate(r.Context(), messages, gameGenOpts, w); err != nil {
+		log.Printf("LLM generation error for game %s: %v", code, err)
+		if errors.Is(err, ErrLLMUnavailable) {
+			writeAPIError(w, http.StatusServiceUnavailable, "AI generation not available — DeepSeek is not reachable")
+			return
+		}
+	}
 }
