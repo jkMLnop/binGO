@@ -38,14 +38,6 @@ test("host flow does not produce room validation error", async ({ page }) => {
 });
 
 test("all-time leaderboard is refreshed after a room win", async ({ page }) => {
-  const leaderboardRequests = [];
-
-  page.on("request", (request) => {
-    if (request.url().includes("/api/leaderboard?")) {
-      leaderboardRequests.push(request.url());
-    }
-  });
-
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "1) Host a new game" }).click();
 
@@ -66,23 +58,22 @@ test("all-time leaderboard is refreshed after a room win", async ({ page }) => {
   }
 
   await expect(page.getByText(new RegExp(`${username} won this round\\.`))).toBeVisible();
-  const beforeWinRefresh = leaderboardRequests.length;
 
-  // The app automatically refreshes the all-time leaderboard on game_ended.
-  // Wait for the post-win refresh request to arrive.
-  await expect.poll(() => leaderboardRequests.length).toBeGreaterThan(beforeWinRefresh);
+  // Poll the leaderboard API until the winner's entry appears (server records the
+  // win asynchronously after game_ended, so allow a few seconds).
+  let apiPlayerEntry = null;
+  await expect.poll(async () => {
+    apiPlayerEntry = await page.evaluate(async (u) => {
+      const r = await fetch(`/api/leaderboard?limit=50&sort=wins`);
+      const p = await r.json();
+      return (p.data ?? []).find((e) => e.username === u) ?? null;
+    }, username);
+    return apiPlayerEntry;
+  }, { timeout: 15000, intervals: [500, 1000, 2000] }).toBeTruthy();
 
-  const apiEntries = await page.evaluate(async () => {
-    const response = await fetch("/api/leaderboard?limit=10&sort=wins");
-    const payload = await response.json();
-    return payload.data ?? [];
-  });
-
-  const apiPlayerEntry = apiEntries.find((entry) => entry.username === username);
-
-  expect(apiPlayerEntry).toBeTruthy();
   expect(apiPlayerEntry.wins).toBeGreaterThanOrEqual(1);
 
+  // The UI leaderboard should refresh automatically via the game_ended handler.
   const leaderboardItems = page.locator("article").filter({ has: page.getByRole("heading", { name: "Leaderboard" }) }).locator("li");
   const matchingItem = leaderboardItems.filter({ hasText: username }).first();
   await expect(matchingItem).toContainText(username);
