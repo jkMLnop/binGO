@@ -55,17 +55,22 @@ test("all-time leaderboard is refreshed after a room win", async ({ page }) => {
 
   await expect(page.getByText(new RegExp(`You are: ${username}`))).toBeVisible();
 
+  // Host must choose a word list before the board appears
+  const defaultWordsBtn = page.getByRole("button", { name: /Play with default words/i });
+  if (await defaultWordsBtn.isVisible()) {
+    await defaultWordsBtn.click();
+  }
+
   for (const cell of ["A1", "A2", "A3"]) {
     await page.getByRole("button", { name: new RegExp(`^${cell}\\b`) }).click();
   }
 
   await expect(page.getByText(new RegExp(`${username} won this round\\.`))).toBeVisible();
-  const beforeAllTimeRefresh = leaderboardRequests.length;
+  const beforeWinRefresh = leaderboardRequests.length;
 
-  await page.getByRole("button", { name: "This Room" }).click();
-  await page.getByRole("button", { name: "All Time" }).click();
-
-  await expect.poll(() => leaderboardRequests.length).toBeGreaterThan(beforeAllTimeRefresh);
+  // The app automatically refreshes the all-time leaderboard on game_ended.
+  // Wait for the post-win refresh request to arrive.
+  await expect.poll(() => leaderboardRequests.length).toBeGreaterThan(beforeWinRefresh);
 
   const apiEntries = await page.evaluate(async () => {
     const response = await fetch("/api/leaderboard?limit=10&sort=wins");

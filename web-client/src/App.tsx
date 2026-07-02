@@ -553,6 +553,8 @@ function GamePageContent({
               ? `${announcedWinner} won this round.`
               : "Round ended."
         );
+        // Refresh all-time leaderboard after a round ends so it reflects the new winner.
+        fetchLeaderboard().then(setLeaderboard).catch(() => {});
       }
 
       if (message.type === "game_restart") {

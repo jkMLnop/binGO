@@ -127,6 +127,8 @@ jobs:
     needs: deploy-staging
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
