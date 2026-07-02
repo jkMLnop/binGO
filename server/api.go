@@ -133,6 +133,41 @@ func (s *Server) handleGetGameByCode(w http.ResponseWriter, r *http.Request) {
 	writeAPIError(w, http.StatusNotFound, fmt.Sprintf("game code %s not found", code))
 }
 
+// handlePublicCreateGame creates a new game without requiring an admin key.
+// POST /api/games — intended for web client "Host a new game" button.
+func (s *Server) handlePublicCreateGame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	start := time.Now()
+
+	s.GamesMu.Lock()
+	gameID := fmt.Sprintf("game-%d", len(s.Games)+1)
+	newGame := NewGame(gameID, s.Buzzwords, s.Rows, s.Cols)
+	s.Games[gameID] = newGame
+	s.CodeToGame[newGame.Code] = newGame
+	s.GamesMu.Unlock()
+
+	s.Metrics.GameCreationDuration.Observe(float64(time.Since(start).Milliseconds()))
+	s.Metrics.GameCount.Set(float64(len(s.Games)))
+	s.Metrics.GamesCreatedTotal.Inc()
+
+	s.Logger.GameCreated(gameID, newGame.Code, newGame.HostID, map[string]interface{}{
+		"admin_created": false,
+	})
+
+	writeAPISuccess(w, GameInfo{
+		ID:          newGame.ID,
+		Code:        newGame.Code,
+		HostID:      newGame.HostID,
+		Status:      getGameStatus(newGame),
+		PlayerCount: newGame.PlayerCount(),
+		CreatedAt:   newGame.CreatedAt.Unix(),
+	})
+}
+
 // handleGetLeaderboard retrieves top players
 // GET /api/leaderboard?limit=10&sort=wins|win_rate|games_played
 func (s *Server) handleGetLeaderboard(w http.ResponseWriter, r *http.Request) {

@@ -115,11 +115,11 @@ describe("createGame", () => {
     expect(game.id).toBe("game-1");
   });
 
-  it("sends X-Admin-Key header", async () => {
+  it("calls /api/games", async () => {
     mockFetch(200, gamePayload);
     await createGame();
-    const calledInit = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
-    expect((calledInit.headers as Record<string, string>)["X-Admin-Key"]).toBeTruthy();
+    const calledUrl = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(calledUrl).toBe("/api/games");
   });
 
   it("throws on HTTP error with JSON payload", async () => {

@@ -137,6 +137,7 @@ func (s *Server) registerHandlers() {
 	// API handlers (Phase 7.5)
 	s.Mux.HandleFunc("/api/status", s.handleAPIStatus)
 	s.Mux.HandleFunc("/api/game/", s.handleGameRoutes)
+	s.Mux.HandleFunc("/api/games", s.handlePublicCreateGame) // public game creation for web client
 	s.Mux.HandleFunc("/api/leaderboard", s.handleGetLeaderboard)
 	s.Mux.HandleFunc("/api/player/", s.handleGetPlayerStats) // Phase 9: player stats
 

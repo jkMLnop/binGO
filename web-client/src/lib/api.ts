@@ -1,7 +1,5 @@
 import type { ApiResponse, GameInfo, LeaderboardEntry } from "./types";
 
-const DEFAULT_ADMIN_KEY = "dev-admin-key-local-only";
-
 export type APIStatus = {
   status: string;
   port: string;
@@ -45,16 +43,9 @@ export async function fetchAPIStatus(): Promise<APIStatus> {
 }
 
 export async function createGame(): Promise<GameInfo> {
-  const adminKey =
-    ((import.meta as { env?: { VITE_ADMIN_API_KEY?: string } }).env?.VITE_ADMIN_API_KEY as string | undefined) ||
-    DEFAULT_ADMIN_KEY;
-
-  const response = await fetch("/admin/api/games", {
+  const response = await fetch("/api/games", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Admin-Key": adminKey,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
 
