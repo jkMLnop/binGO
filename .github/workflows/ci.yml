@@ -45,8 +45,18 @@ jobs:
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
         run: |
-          go test -tags=container -timeout=10m -v ./tests 2>&1 | tee /tmp/container-test-output.log
-          exit ${PIPESTATUS[0]}
+          set -o pipefail
+          go test -tags=container -timeout=10m -v ./tests 2>&1 | \
+            tee /tmp/container-test-output.log | \
+            tail -500
+          echo "EXIT_CODE=$?" >> $GITHUB_OUTPUT
+      - name: Dump container test output to job summary
+        if: failure()
+        run: |
+          echo '## Container Test Output' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/container-test-output.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
       - name: Upload container test logs
         if: failure()
         uses: actions/upload-artifact@v4
