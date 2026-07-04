@@ -27,7 +27,7 @@ jobs:
         with:
           version: ${{ env.DAGGER_VERSION }}
           workdir: dagger
-          args: test
+          args: go run . test
 
   test-container:
     name: Container Regression Tests
@@ -40,7 +40,7 @@ jobs:
         with:
           version: ${{ env.DAGGER_VERSION }}
           workdir: dagger
-          args: test-container
+          args: go run . test-container
 
   deploy-staging:
     name: Deploy to Staging
@@ -54,7 +54,7 @@ jobs:
         with:
           version: ${{ env.DAGGER_VERSION }}
           workdir: dagger
-          args: all --env staging --version ${{ github.sha }} --registry-user ${{ github.actor }}
+          args: go run . all --env staging --version ${{ github.sha }} --registry-user ${{ github.actor }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,7 +71,7 @@ jobs:
         with:
           version: ${{ env.DAGGER_VERSION }}
           workdir: dagger
-          args: all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }}
+          args: go run . all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
