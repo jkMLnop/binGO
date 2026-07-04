@@ -1,7 +1,9 @@
 # binGO CI/CD Pipeline
 #
-# Uses Dagger for all logic — this file is a thin trigger.
-# Full pipeline in dagger/main.go.
+# All pipeline logic lives in dagger/main.go (Go SDK).
+# This workflow uses actions/setup-go to run it directly — the Dagger Go SDK
+# manages its own engine connection internally; wrapping it in the
+# dagger/dagger-action would create a nested Dagger connection.
 
 name: ci
 
@@ -14,7 +16,8 @@ on:
     types: [published]
 
 env:
-  DAGGER_VERSION: 0.15.3
+  GO_VERSION: '1.25.3'
+  DAGGER_VERSION: '0.15.3'
 
 jobs:
   test:
@@ -22,12 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Dagger pipeline (test)
-        uses: dagger/dagger-action@v1
+      - uses: actions/setup-go@v5
         with:
-          version: ${{ env.DAGGER_VERSION }}
-          workdir: dagger
-          args: go run . test
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run unit tests
+        run: go test ./...
+      - name: Run integration tests
+        run: go test -tags=integration -count=1 -timeout=5m ./tests -v
 
   test-container:
     name: Container Regression Tests
@@ -35,43 +39,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Dagger pipeline (test-container)
-        uses: dagger/dagger-action@v1
+      - uses: actions/setup-go@v5
         with:
-          version: ${{ env.DAGGER_VERSION }}
-          workdir: dagger
-          args: go run . test-container
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run container regression tests
+        run: go test -tags=container -timeout=10m ./tests -v
 
   deploy-staging:
     name: Deploy to Staging
     if: github.ref == 'refs/heads/main'
     needs: [test, test-container]
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run Dagger pipeline (all)
-        uses: dagger/dagger-action@v1
+      - uses: actions/setup-go@v5
         with:
-          version: ${{ env.DAGGER_VERSION }}
-          workdir: dagger
-          args: go run . all --env staging --version ${{ github.sha }} --registry-user ${{ github.actor }}
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build, publish & deploy to staging
+        working-directory: dagger
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run . all --env staging --version ${{ github.sha }} --registry-user ${{ github.actor }}
 
   deploy-production:
     name: Deploy to Production
     if: github.event_name == 'release' && github.event.action == 'published'
     needs: [test, test-container]
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run Dagger pipeline (all)
-        uses: dagger/dagger-action@v1
+      - uses: actions/setup-go@v5
         with:
-          version: ${{ env.DAGGER_VERSION }}
-          workdir: dagger
-          args: go run . all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }}
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build, publish & deploy to production
+        working-directory: dagger
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run . all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }}
