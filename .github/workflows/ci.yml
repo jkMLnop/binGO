@@ -84,7 +84,10 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go run . deploy --env staging --version ${{ github.sha }}
+        run: go run . deploy --env staging --version ${{ github.sha }} 2>&1 | tee /tmp/deploy-output.log
+      - name: Dump deploy output on failure
+        if: failure()
+        run: cat /tmp/deploy-output.log
 
   deploy-production:
     name: Deploy to Production
@@ -103,4 +106,7 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go run . all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }}
+        run: go run . all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }} 2>&1 | tee /tmp/deploy-prod-output.log
+      - name: Dump deploy output on failure
+        if: failure()
+        run: cat /tmp/deploy-prod-output.log
