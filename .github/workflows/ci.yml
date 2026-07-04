@@ -41,15 +41,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Set up Docker
-        uses: docker/setup-docker-action@v1
+      - name: Docker pre-flight check
+        run: docker info
       - name: Run container regression tests
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
         run: go test -tags=container -count=1 -timeout=10m -v ./tests 2>&1 | tee /tmp/container-test-output.log
       - name: Dump last 100 lines on failure
         if: failure()
-        run: tail -100 /tmp/container-test-output.log
+        run: cat /tmp/container-test-output.log
       - name: Upload container test logs
         if: failure()
         uses: actions/upload-artifact@v4
