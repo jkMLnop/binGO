@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/db"
+	"github.com/jkMLnop/binGO/db"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/trace"

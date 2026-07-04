@@ -12,8 +12,6 @@ buzzwords_full.csv
 # Ignore test output files
 coverage.out
 *.log
-web-client/debug-*.png
-web-client/playwright-results.log
 
 # SQLite database files (local dev artefacts)
 *.db

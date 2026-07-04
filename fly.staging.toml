@@ -1,4 +1,4 @@
-# Fly.io Configuration for binGO-CLI Staging Server
+# Fly.io Configuration for binGO Staging Server
 # Deploy with: fly deploy -c fly.staging.toml
 # Or via Dagger: dagger call deploy --env staging
 
@@ -45,6 +45,6 @@ primary_region = "sjc"
 
 [[processes]]
   name = "app"
-  cmd = "./binGO -mode server -port 8080 -db /app/data/bingo.db"
+  cmd = "./binGO -port 8080 -db /app/data/bingo.db"
   auto_stop_machines = true
   auto_start_machines = true

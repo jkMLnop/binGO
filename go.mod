@@ -1,4 +1,4 @@
-module github.com/jkMLnop/binGO-CLI
+module github.com/jkMLnop/binGO
 
 go 1.25.3
 

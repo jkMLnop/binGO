@@ -1,6 +1,6 @@
 # DevOps & CI/CD
 
-How binGO-CLI automates quality enforcement from developer laptop to production.
+How binGO automates quality enforcement from developer laptop to production.
 
 ## Philosophy
 

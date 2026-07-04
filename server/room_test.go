@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkMLnop/binGO-CLI/db"
+	"github.com/jkMLnop/binGO/db"
 )
 
 // TestGenerateRoomCode checks the format and uniqueness of room codes.

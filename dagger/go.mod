@@ -1,4 +1,4 @@
-module github.com/jkMLnop/binGO-CLI/dagger
+module github.com/jkMLnop/binGO/dagger
 
 go 1.25.3
 

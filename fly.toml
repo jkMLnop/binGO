@@ -1,4 +1,4 @@
-# Fly.io Configuration for binGO-CLI Server
+# Fly.io Configuration for binGO Server
 # Deploy with: fly deploy
 
 app = "bingo-server"
@@ -43,6 +43,6 @@ primary_region = "sjc"
 
 [[processes]]
   name = "app"
-  cmd = "./binGO -mode server -port 8080 -db /app/data/bingo.db"
+  cmd = "./binGO -port 8080 -db /app/data/bingo.db"
   auto_stop_machines = true
   auto_start_machines = true

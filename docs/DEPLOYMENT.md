@@ -1,6 +1,6 @@
-# Deployment Guide for binGO-CLI Server
+# Deployment Guide for binGO Server
 
-This guide covers deploying the binGO-CLI server with persistent database to cloud platforms.
+This guide covers deploying the binGO server with persistent database to cloud platforms.
 
 ## Local Testing with Docker
 

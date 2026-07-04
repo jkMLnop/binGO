@@ -15,9 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/db"
-	"github.com/jkMLnop/binGO-CLI/server"
-	"github.com/jkMLnop/binGO-CLI/shared"
+	"github.com/jkMLnop/binGO/db"
+	"github.com/jkMLnop/binGO/server"
 	"golang.org/x/net/websocket"
 )
 
@@ -28,7 +27,7 @@ func startTestServerWithDB(t *testing.T, port string) *server.Server {
 	buzzwordPaths := []string{"../buzzwords.csv", "buzzwords.csv", filepath.Join(".", "buzzwords.csv")}
 	var buzzwords [][]string
 	for _, p := range buzzwordPaths {
-		bw, err := shared.LoadBuzzwords(p)
+		bw, err := LoadBuzzwords(p)
 		if err == nil && len(bw) > 0 {
 			buzzwords = bw
 			break

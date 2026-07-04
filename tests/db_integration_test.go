@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/db"
-	"github.com/jkMLnop/binGO-CLI/server"
+	"github.com/jkMLnop/binGO/db"
+	"github.com/jkMLnop/binGO/server"
 	_ "github.com/mattn/go-sqlite3"
 )
 

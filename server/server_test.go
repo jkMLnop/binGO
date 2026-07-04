@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkMLnop/binGO-CLI/db"
+	"github.com/jkMLnop/binGO/db"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )

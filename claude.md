@@ -1,13 +1,17 @@
-# binGO-CLI — AI Context
+# binGO — AI Context
 
-Multiplayer CLI bingo game with WebSocket server, SQLite persistence, Prometheus
-metrics, and Docker/Fly.io deployment.
+Multiplayer bingo game server with WebSocket support, SQLite persistence, AI-powered
+buzzword generation, Prometheus metrics, and Docker/Fly.io deployment.
 
-Module: `github.com/jkMLnop/binGO-CLI` · Go 1.25.3 · CGO required (SQLite)
+Module: `github.com/jkMLnop/binGO` · Go 1.25.3 · CGO required (SQLite)
 
 ## Quick Commands
 
 ```bash
+# Run server locally
+go run . -port 8080                        # in-memory only
+go run . -port 8080 -db ./bingo.db         # with SQLite persistence
+
 # Run all unit tests (no Docker, no build tags)
 go test ./...
 
@@ -16,23 +20,6 @@ go test -tags=integration ./tests -v
 
 # Run container E2E + regression tests (needs Docker Desktop running)
 go test -tags=container -timeout=10m ./tests -v
-
-# Run E2E tests (needs docker-compose stack already running)
-docker-compose up -d && go test -tags=e2e ./tests -v
-
-# Build binary (version defaults to "dev")
-go build -o binGO-CLI .
-
-# Build binary with version injection
-go build -ldflags "-X main.version=v8.2.0" -o binGO-CLI .
-
-# Print version
-./binGO-CLI -version
-
-# Run modes
-./binGO-CLI -mode standalone                         # local single-player
-./binGO-CLI -mode server -port 8080 -db ./bingo.db   # multiplayer server
-./binGO-CLI -mode client -server localhost:8080 -code BINGO-XXXXX
 
 # Docker stack (server + Prometheus + Grafana)
 cp .env.example .env   # first time only
@@ -60,11 +47,8 @@ git push --no-verify  # bypass (escape hatch)
 
 | Package | Purpose |
 |---|---|
-| `main` (bin.go) | CLI entry point: flag parsing, mode dispatch, signal handling |
-| `server/` | WebSocket server, game logic, admin API, auth, metrics, DB helpers |
-| `client/` | WebSocket client, auth manager, display, player actions |
-| `shared/` | Board model, win detection, display formatting, buzzword loading |
-| `standalone/` | Single-player offline mode (no networking) |
+| `main` (main.go) | Server entry point: flag parsing, HTTP/WS startup, signal handling |
+| `server/` | WebSocket server, game logic, admin API, auth, metrics, DB helpers, LLM client |
 | `db/` | `GameStore` interface + SQLite implementation |
 | `tests/` | Integration, E2E, container, load, and multiplayer tests |
 | `dagger/` | Dagger CI/CD pipeline (separate Go module) |
@@ -75,7 +59,6 @@ git push --no-verify  # bypass (escape hatch)
 - **`server.Game`** — game session: `ID`, `Code`, `HostID` (immutable), `Players map`, `IsActive`, `Orphaned`, `Winner`, `CreatedAt`, `EndedAt`
 - **`server.Player`** — connected player: `ID`, message channel, WebSocket conn (mutex-protected)
 - **`db.GameStore`** — interface for all persistence; only implementation is `SQLiteStore`
-- **`shared.Board`** — bingo board with `MarkCell()`, `CheckWin()`, cell ID system (`A1`, `B2`, etc.)
 
 ### WebSocket Protocol
 
@@ -149,7 +132,7 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 
 ### Graceful Shutdown
 
-`bin.go` catches `SIGINT` + `SIGTERM` → calls `srv.NotifyShutdown()` (broadcasts `server_shutdown` to all players, closes WebSockets) → `srv.Stop(ctx)` with 5s timeout.
+`main.go` catches `SIGINT` + `SIGTERM` → calls `srv.NotifyShutdown()` (broadcasts `server_shutdown` to all players, closes WebSockets) → `srv.Stop(ctx)` with 5s timeout.
 
 ## Test Organization
 
@@ -161,7 +144,7 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 | `-tags=e2e` (`tests/`) | Requires `docker-compose up` already running | Yes (stack up) |
 
 **Test file → build tag mapping:**
-- `server/*_test.go`, `db/*_test.go`, `shared/*_test.go`, `client/*_test.go` → no tag (unit)
+- `server/*_test.go`, `db/*_test.go` → no tag (unit)
 - `tests/db_integration_test.go`, `tests/multiplayer_test.go` → `integration`
 - `tests/container_e2e_test.go`, `tests/container_regression_test.go` → `container`
 - `tests/full_system_load_test.go` → `e2e`
@@ -198,7 +181,6 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 
 | `FLY_API_TOKEN` | (none) | Dagger pipeline — Fly.io deployment |
 | `GHCR_TOKEN` | (none) | Dagger pipeline — push Docker images to ghcr.io |
-| `GH_TOKEN` | (none) | Dagger pipeline — create GitHub Releases |
 
 `.env` is gitignored. Copy from `.env.example` before `docker-compose up`.
 
@@ -208,27 +190,31 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 - **docker-compose.yml**: `bingo-server` + `prometheus` + `grafana` with persistent volumes
 - **Fly.io production**: `bingo-server` at `bingo-server.fly.dev`, config in `fly.toml`
 - **Fly.io staging**: `bingo-server-staging` at `bingo-server-staging.fly.dev`, config in `fly.staging.toml`
-- **Docker images**: pushed to `ghcr.io/jkmlnop/bingo-cli` (GitHub Container Registry)
+- **Docker images**: pushed to `ghcr.io/jkmlnop/bingo` (GitHub Container Registry)
 - **Health check**: `GET /api/status` (used by Docker HEALTHCHECK and Fly.io)
 
 ## CI/CD Pipeline (Dagger)
 
 All CI/CD logic lives in `dagger/main.go` (separate Go module: `dagger/go.mod`). GitHub Actions (`.github/workflows/ci.yml`) is a thin trigger layer that calls Dagger functions. Lefthook (`.lefthook.yml`) enforces the same pipeline locally on every `git push`.
 
-**Pipeline functions:** `test`, `test-container`, `build`, `publish`, `deploy`, `release`, `all`
+**Pipeline functions:** `test`, `test-container`, `build`, `publish`, `deploy`, `all`
 
 **CI triggers:**
 - PR to `main` → `test` only (fast feedback)
 - Push to `main` → `all --env staging` (test → build → publish → deploy to staging)
-- Tag `v*` → `all --env production` + `release` (deploy to prod + GitHub Release)
+- Tag `v*` → `all --env production` (deploy to prod; releases are on binGO-CLI repo)
 
 **Local enforcement (Lefthook):** every `git push` runs `test` + `test-container` before code leaves the machine. Bypass with `git push --no-verify`.
 
-**Required secrets:** `FLY_API_TOKEN` (GitHub + local env), `GHCR_TOKEN` (local env), `GH_TOKEN` (local env for releases)
+**Required secrets:** `FLY_API_TOKEN` (GitHub + local env), `GHCR_TOKEN` (local env)
 
-**Version injection:** `var version = "dev"` in `bin.go`, set via `-ldflags "-X main.version=<tag>"` in Dockerfile + Dagger. Deployed containers are traceable to exact commit/tag.
+**Version injection:** `var version = "dev"` in `main.go`, set via `-ldflags "-X main.version=<tag>"` in Dockerfile + Dagger. Deployed containers are traceable to exact commit/tag.
 
-## Current State (v8.2.0)
+## Current State
+
+This is the **server-only** repository, split from the original monorepo `binGO-CLI`. The CLI client is maintained in [binGO-CLI](https://github.com/jkMLnop/binGO-CLI).
+
+The server has been updated to use `main.go` (not `bin.go`) as its entry point, with no CLI mode dispatch. The `-mode` flag has been removed — the server always starts in server mode.
 
 Completed AI provider migration: Ollama → DeepSeek API.
 - New `server/deepseek.go` — `DeepSeekClient` implementing `LLMClient` interface, OpenAI-compatible `/chat/completions`, SSE streaming, think on/off, temperature/top_p, JSON mode, auto-refill for fixed word count
@@ -243,6 +229,7 @@ See `docs/ROADMAP.md` for upcoming plans.
 
 | File | Why |
 |---|---|
+| `main.go` | Server entry point, flag parsing, signal handling, shutdown orchestration, version var |
 | `server/server.go` | Core server — all WebSocket handling, game flow, shutdown |
 | `server/deepseek.go` | DeepSeek API client — OpenAI-compatible `/chat/completions`, SSE streaming, think/JSON mode |
 | `server/llm.go` | Shared LLM types (`LLMClient` interface), prompts, extraction logic |
@@ -253,9 +240,7 @@ See `docs/ROADMAP.md` for upcoming plans.
 | `server/db.go` | Nil-safe DB helper functions bridging `server.Game` ↔ `db.GameStore` |
 | `db/store.go` | `GameStore` interface — the contract for all persistence |
 | `db/sqlite.go` | SQLite implementation of `GameStore` |
-| `shared/board.go` | Board model, cell marking, win detection |
-| `bin.go` | Entry point, flag parsing, signal handling, shutdown orchestration, version var |
-| `dagger/main.go` | Dagger CI/CD pipeline — test, build, publish, deploy, release |
+| `dagger/main.go` | Dagger CI/CD pipeline — test, build, publish, deploy |
 | `dagger/main_test.go` | Pipeline unit tests (env routing, constants) |
 | `.lefthook.yml` | Git pre-push hooks — enforces test suite before every push |
 | `.github/workflows/ci.yml` | Thin CI trigger calling Dagger functions |

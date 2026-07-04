@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/db"
+	"github.com/jkMLnop/binGO/db"
 )
 
 // DBConfig wraps database configuration

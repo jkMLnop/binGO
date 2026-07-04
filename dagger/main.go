@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	registryBase     = "ghcr.io/jkmlnop/bingo-cli"
+	registryBase     = "ghcr.io/jkmlnop/bingo"
 	flyAppProduction = "bingo-server"
 	flyAppStaging    = "bingo-server-staging"
 	defaultGoVersion = "1.25.3"
@@ -61,7 +61,7 @@ func main() {
 	defer client.Close()
 
 	source := client.Host().Directory(projectRoot(), dagger.HostDirectoryOpts{
-		Exclude: []string{".git", "dagger", "bin", "bingo", "binGO-CLI", "binGO-CLI-*"},
+		Exclude: []string{".git", "dagger", "bin", "bingo", "binGO-CLI", "binGO-CLI-*", "web-client/node_modules", "web-client/debug-*.png"},
 	})
 
 	switch cmd {
@@ -261,47 +261,8 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 	return nil
 }
 
-func runRelease(ctx context.Context, client *dagger.Client, source *dagger.Directory, version string) error {
-	ghToken := os.Getenv("GH_TOKEN")
-	if ghToken == "" {
-		return fmt.Errorf("GH_TOKEN environment variable is required")
-	}
-	secret := client.SetSecret("gh-token", ghToken)
-	goContainer := client.Container().
-		From(fmt.Sprintf("golang:%s-alpine", defaultGoVersion)).
-		WithExec([]string{"apk", "add", "--no-cache", "nodejs", "npm"}).
-		WithMountedDirectory("/src", source).
-		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "0").
-		WithExec([]string{"sh", "-c", "cd web-client && npm install && npm run build"})
-	fmt.Println("=== Building release binaries ===")
-	macBinary := goContainer.
-		WithEnvVariable("GOOS", "darwin").
-		WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{"go", "build", "-ldflags", fmt.Sprintf("-X main.version=%s", version), "-o", "/out/binGO-CLI-intel-mac", "."}).
-		File("/out/binGO-CLI-intel-mac")
-	linuxBinary := goContainer.
-		WithEnvVariable("GOOS", "linux").
-		WithEnvVariable("GOARCH", "amd64").
-		WithExec([]string{"go", "build", "-ldflags", fmt.Sprintf("-X main.version=%s", version), "-o", "/out/binGO-CLI-linux", "."}).
-		File("/out/binGO-CLI-linux")
-	fmt.Printf("=== Creating GitHub Release %s ===\n", version)
-	_, err := client.Container().
-		From("alpine:3.19").
-		WithExec([]string{"apk", "add", "--no-cache", "coreutils", "curl", "tar"}).
-		WithExec([]string{"sh", "-c", "curl -sL https://github.com/cli/cli/releases/download/v2.63.2/gh_2.63.2_linux_amd64.tar.gz | tar xz -C /usr/local --strip-components=1"}).
-		WithSecretVariable("GH_TOKEN", secret).
-		WithFile("/release/binGO-CLI-intel-mac", macBinary).
-		WithFile("/release/binGO-CLI-linux", linuxBinary).
-		WithWorkdir("/release").
-		WithExec([]string{"sh", "-c", "sha256sum binGO-CLI-intel-mac binGO-CLI-linux > SHA256SUMS"}).
-		WithExec([]string{"gh", "release", "create", version, "--repo", "jkMLnop/binGO-CLI", "--title", version, "--generate-notes", "binGO-CLI-intel-mac", "binGO-CLI-linux", "SHA256SUMS"}).
-		Sync(ctx)
-	if err != nil {
-		return fmt.Errorf("release %s: %w", version, err)
-	}
-	fmt.Printf("=== Released %s ===\n", version)
-	return nil
+func runRelease(_ context.Context, _ *dagger.Client, _ *dagger.Directory, version string) error {
+	return fmt.Errorf("release command is not available on the binGO server repo; use binGO-CLI for releases (version=%s)", version)
 }
 
 func runAll(ctx context.Context, client *dagger.Client, source *dagger.Directory, env, version, registryUser string) error {
@@ -320,11 +281,10 @@ func runAll(ctx context.Context, client *dagger.Client, source *dagger.Directory
 func goBase(client *dagger.Client, source *dagger.Directory) *dagger.Container {
 	return client.Container().
 		From(fmt.Sprintf("golang:%s-alpine", defaultGoVersion)).
-		WithExec([]string{"apk", "add", "--no-cache", "gcc", "musl-dev", "sqlite-dev", "nodejs", "npm"}).
+		WithExec([]string{"apk", "add", "--no-cache", "gcc", "musl-dev", "sqlite-dev"}).
 		WithMountedDirectory("/src", source).
 		WithWorkdir("/src").
-		WithEnvVariable("CGO_ENABLED", "1").
-		WithExec([]string{"sh", "-c", "cd web-client && npm install && npm run build"})
+		WithEnvVariable("CGO_ENABLED", "1")
 }
 
 func buildImage(client *dagger.Client, source *dagger.Directory, version string) *dagger.Container {

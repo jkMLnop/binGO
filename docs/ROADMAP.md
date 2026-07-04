@@ -1,13 +1,10 @@
 # Project Roadmap
 
-> **Archive notice:** The roadmap has moved to the
-> [binGO](https://github.com/jkMLnop/binGO) repository along with all server,
-> web client, and platform code. This file is retained in binGO-CLI as a
-> historical reference only.
->
-> **Completed sections (Phase 11, Phase 12) have been migrated to `CHANGELOG.md` v9.3.0.**
+The evolution of binGO organized by development phases.
 
-The evolution of binGO-CLI organized by development phases.
+> **Note:** The CLI client has been split into its own repository —
+> [binGO-CLI](https://github.com/jkMLnop/binGO-CLI). This roadmap covers the
+> server component only.
 
 ## TODO
 

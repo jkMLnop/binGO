@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/server"
+	"github.com/jkMLnop/binGO/server"
 	"golang.org/x/net/websocket"
 )
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/db"
+	"github.com/jkMLnop/binGO/db"
 )
 
 const maxInMemoryFeedbackEntries = 2000

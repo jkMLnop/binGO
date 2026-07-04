@@ -17,8 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkMLnop/binGO-CLI/server"
-	"github.com/jkMLnop/binGO-CLI/shared"
+	"github.com/jkMLnop/binGO/server"
 	"golang.org/x/net/websocket"
 )
 
@@ -32,7 +31,7 @@ func findBuzzwordsFile() ([][]string, error) {
 
 	for _, path := range buzzwordPaths {
 		if _, err := os.Stat(path); err == nil {
-			buzzwords, err := shared.LoadBuzzwords(path)
+			buzzwords, err := LoadBuzzwords(path)
 			if err == nil && len(buzzwords) > 0 {
 				return buzzwords, nil
 			}
@@ -43,12 +42,12 @@ func findBuzzwordsFile() ([][]string, error) {
 }
 
 // createTestGame creates a new game session for testing (3x3 speed bingo)
-func createTestGame(t *testing.T) *shared.Board {
+func createTestGame(t *testing.T) *Board {
 	buzzwords, err := findBuzzwordsFile()
 	if err != nil {
 		t.Fatalf("Failed to load buzzwords: %v", err)
 	}
-	return shared.NewGameSession(buzzwords, 3, 3)
+	return NewGameSession(buzzwords, 3, 3)
 }
 
 // runServerForTest starts a server for testing purposes
