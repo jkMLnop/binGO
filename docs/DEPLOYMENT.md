@@ -75,11 +75,6 @@ This guide covers deploying the binGO server with persistent database to cloud p
    curl https://bingo-server.fly.dev/api/status
    ```
 
-### Connect CLI Client to Fly.io
-   ```bash
-   ./binGO-CLI -mode client -server bingo-server.fly.dev -code GAME-CODE
-   ```
-
 ### View Logs
    ```bash
    flyctl logs

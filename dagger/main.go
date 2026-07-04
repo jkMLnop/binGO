@@ -77,8 +77,6 @@ func main() {
 		err = runPublish(ctx, client, source, *version, *registryUser)
 	case "deploy":
 		err = runDeploy(ctx, client, source, *env, *version)
-	case "release":
-		err = runRelease(ctx, client, source, *version)
 	case "all":
 		err = runAll(ctx, client, source, *env, *version, *registryUser)
 	default:
@@ -102,7 +100,7 @@ Commands:
   build            Build Docker image
   publish          Push image to ghcr.io
   deploy           Deploy to Fly.io (--env=staging|production)
-  release          Cross-compile + create GitHub Release
+  deploy           Deploy to Fly.io (--env=staging|production)
   all              Full pipeline: test -> build -> publish -> deploy
 
 Flags:
@@ -259,10 +257,6 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 	}
 	fmt.Printf("=== Deployed to %s ===\n", env)
 	return nil
-}
-
-func runRelease(_ context.Context, _ *dagger.Client, _ *dagger.Directory, version string) error {
-	return fmt.Errorf("release command is not available on the binGO server repo; use binGO-CLI for releases (version=%s)", version)
 }
 
 func runAll(ctx context.Context, client *dagger.Client, source *dagger.Directory, env, version, registryUser string) error {
