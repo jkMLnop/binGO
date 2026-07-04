@@ -26,7 +26,7 @@ jobs:
         uses: dagger/dagger-action@v1
         with:
           version: ${{ env.DAGGER_VERSION }}
-          module: dagger
+          workdir: dagger
           args: test
 
   test-container:
@@ -39,7 +39,7 @@ jobs:
         uses: dagger/dagger-action@v1
         with:
           version: ${{ env.DAGGER_VERSION }}
-          module: dagger
+          workdir: dagger
           args: test-container
 
   deploy-staging:
@@ -53,7 +53,7 @@ jobs:
         uses: dagger/dagger-action@v1
         with:
           version: ${{ env.DAGGER_VERSION }}
-          module: dagger
+          workdir: dagger
           args: all --env staging --version ${{ github.sha }} --registry-user ${{ github.actor }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
@@ -70,7 +70,7 @@ jobs:
         uses: dagger/dagger-action@v1
         with:
           version: ${{ env.DAGGER_VERSION }}
-          module: dagger
+          workdir: dagger
           args: all --env production --version ${{ github.event.release.tag_name }} --registry-user ${{ github.actor }}
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
