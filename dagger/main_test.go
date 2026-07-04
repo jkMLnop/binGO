@@ -49,7 +49,7 @@ func TestFlyConfigInvalid(t *testing.T) {
 
 // TestRegistryBase verifies the registry constant matches expected format.
 func TestRegistryBase(t *testing.T) {
-	expected := "ghcr.io/jkmlnop/bingo-cli"
+	expected := "ghcr.io/jkmlnop/bingo"
 	if registryBase != expected {
 		t.Errorf("registryBase = %q, want %q", registryBase, expected)
 	}

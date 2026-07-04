@@ -41,15 +41,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Debug Docker info
-        run: |
-          docker version
-          docker info
-          docker ps
       - name: Run container regression tests
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: go test -tags=container -timeout=10m -v ./tests -count=1 2>&1 | head -200
+        run: go test -tags=container -timeout=10m -v ./tests
 
   deploy-staging:
     name: Deploy to Staging
@@ -63,12 +58,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Build, publish & deploy to staging
+      - name: Dagger build image
+        working-directory: dagger
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run . build --version ${{ github.sha }}
+      - name: Dagger publish image
+        working-directory: dagger
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run . publish --version ${{ github.sha }} --registry-user ${{ github.actor }}
+      - name: Dagger deploy to staging
         working-directory: dagger
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go run . all --env staging --version ${{ github.sha }} --registry-user ${{ github.actor }}
+        run: go run . deploy --env staging --version ${{ github.sha }}
 
   deploy-production:
     name: Deploy to Production

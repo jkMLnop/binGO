@@ -100,7 +100,6 @@ Commands:
   build            Build Docker image
   publish          Push image to ghcr.io
   deploy           Deploy to Fly.io (--env=staging|production)
-  deploy           Deploy to Fly.io (--env=staging|production)
   all              Full pipeline: test -> build -> publish -> deploy
 
 Flags:
