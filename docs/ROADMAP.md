@@ -1,5 +1,12 @@
 # Project Roadmap
 
+> **Archive notice:** The roadmap has moved to the
+> [binGO](https://github.com/jkMLnop/binGO) repository along with all server,
+> web client, and platform code. This file is retained in binGO-CLI as a
+> historical reference only.
+>
+> **Completed sections (Phase 11, Phase 12) have been migrated to `CHANGELOG.md` v9.3.0.**
+
 The evolution of binGO-CLI organized by development phases.
 
 ## TODO
@@ -67,108 +74,13 @@ Before scaling to K8s, establish a persistent observability layer:
   - Integrate k6 metrics with self-hosted Prometheus/Grafana for unified dashboards (load test results alongside app metrics)
   - Keep existing `full_system_load_test.go` for quick smoke tests; k6 for capacity planning and stress testing
 
-#### Phase 11: Room Codes, QR Sharing & Per-Room Isolation
-**Goal:** Rename game share codes to room codes throughout the UI, add QR code sharing to the web client, bring the CLI's custom buzzword upload to the web client, and isolate leaderboards and buzzword lists per room so custom-list games don't compete against default-list games on a shared scoreboard.
+#### Phase 12: AI-Powered Buzzword Generation ✅
+**Status:** Complete. See CHANGELOG.md v9.3.0 for full details.
 
-**Design decisions:**
-- **Phase 11.0 introduces the real room entity.** Room code (`AB3K7`, 5-char alphanumeric) is the player-facing identifier from this phase onwards. The game code (`BINGO-AB3K7`) is retained for internal use and backward-compatible CLI connections. This is done in Phase 11 — not Phase 13 — so that `room_buzzwords` and `wins_history` FK to `rooms.code` from day one, avoiding the naming collision that would arise if rooms were added later.
-- Game codes keep their `BINGO-XXXXX` format. Only UI labels change for room-based games ("game code" / "share code" → "room code").
-- QR codes encode the full join URL (`https://yubetcha.com/join/:roomCode`) — generated entirely client-side, using the 5-char room code.
-- Leaderboards are scoped to room: wins FK to `rooms.code`. The global `/api/leaderboard` remains for standalone games only (where `room_code IS NULL`).
-- Buzzword lists stored per room in a new `room_buzzwords` table — FK to `rooms.code` from day one. Server falls back to built-in `buzzwords.csv` when no custom list is set. Phase 12 (AI generation) writes to this same table.
 
----
 
-##### Phase 11.0: Room Foundation
-**Goal:** Introduce the `Room` entity as the canonical identifier for a bingo session. Every new game is associated with a room. The room code (`AB3K7`, 5-char alphanumeric) is the player-facing identifier; the game code (`BINGO-AB3K7`) is retained internally and for backward-compatible CLI connections. Standalone games without a room continue to work unchanged.
-
-- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add `rooms` table (`id`, `code` 5-char unique, `host_id`, `created_at`). Add nullable `room_code` FK column to `games` table (NULL for pre-existing standalone games). Add `GameStore` methods: `CreateRoom(hostID string) (*Room, error)`, `GetRoom(code string) (*Room, error)`, `GetRoomByGameCode(gameCode string) (*Room, error)`.
-- [x] **Server** (`server/room.go` — new file): `Room` struct (`Code`, `HostID`, `Game *Game` nil until first login, `mu sync.RWMutex`). `NewRoom(hostID string)`. `GenerateRoomCode()` — 5-char alphanumeric, collision-checked against DB. `getOrCreateRoom(code string)`. Add `Rooms map[string]*Room` + `RoomsMu sync.RWMutex` to `Server` struct.
-- [x] **HTTP** (`server/api.go`): `POST /api/rooms` (host auth; returns `{code, game_code}`). `GET /api/room/:code` (lobby snapshot: room info, game status, player count). Existing `/api/game/:code` endpoints unchanged for backward compat.
-- [x] **WebSocket** (`server/types.go`, `server/server.go`): Add `room_login` client action (`{room_code, username, token}`). Server resolves room → game, then follows existing login flow. Add `room_welcome` server message (game status, players online). Existing `login` action with game code (`BINGO-XXXXX`) remains supported.
-- [x] **Metrics** (`server/metrics.go`): Add `bingo_rooms_active` Gauge.
-- [x] **Logging** (`server/logger.go`): Add `RoomCreated(code, hostID string)`.
-- [x] **Tests** (`server/room_test.go`): `NewRoom`, `GenerateRoomCode` uniqueness and format (5-char alphanum), room creation API, `room_login` WS flow, backward-compat `login` with game code still works, `GetRoomByGameCode` round-trip, lazy game creation on first login.
-
----
-
-##### Phase 11.1: Room Code Rename (UI & Docs)
-**Goal:** Rename "game code" / "share code" → "room code" everywhere in user-facing surfaces. "Room code" now refers to the 5-char code from Phase 11.0 (e.g. `AB3K7`). No protocol changes.
-
-- [x] **Web client** (`web-client/src/`): Replace all "game code", "share code", "game link" label text with "room code". Update join flow copy, placeholder text, and help tooltips.
-- [x] **CLI** (`client/display.go`, `client/player.go`): Update terminal output strings — "Your game code:" → "Room code:", "Share this code:" → "Share this room code:".
-- [x] **Docs** (`README.md`, `docs/ADMIN_API.md`, `docs/DEPLOYMENT.md`): Update terminology throughout.
-- [x] **Tests**: grep for old strings in user-facing output paths to confirm none remain; no logic changes needed.
-
----
-
-##### Phase 11.2: QR Code Share Menu
-**Goal:** QR code generated client-side in the web app under the share menu so players can scan to join without typing the room code.
-
-- [x] **Web client** (`web-client/src/`): Add share dropdown/modal to the active game view. Generate QR code client-side using the `qrcode` npm package (no server round-trip). QR encodes `https://yubetcha.com/join/:roomCode`. Display alongside a copy-link button and the plain room code text. Mobile-responsive: QR fills most of screen on narrow viewports for easy across-the-table scanning.
-- [x] **No server changes required** — purely client-side generation.
-- [ ] **Tests** (`web-client/src/lib/`): Unit test that QR URL is correctly formed from room code; no trailing slashes or double-slashes.
-
----
-
-##### Phase 11.3: Web Client Buzzword Upload
-**Goal:** Bring the CLI's custom buzzword list feature to the web client. The host can upload a JSON file or paste a JSON array before the game starts.
-
-- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add `room_buzzwords` table (`room_code` PK FK → `rooms.code`, `words` JSON array, `uploaded_by`, `uploaded_at`). Add `GameStore` methods: `SetRoomBuzzwords(roomCode string, words []string, uploadedBy string) error` and `GetRoomBuzzwords(roomCode string) ([]string, error)`. Server falls back to built-in list when `GetRoomBuzzwords` returns no rows.
-- [x] **HTTP** (`server/api.go`): `POST /api/room/:code/buzzwords` (host auth required). Accepts `{words: string[]}` JSON body. Validates: min 24 words, max 500, each word max 60 chars, strip control chars, reject empty strings. `GET /api/room/:code/buzzwords` returns the active word list (custom or built-in).
-- [x] **Web client** (`web-client/src/`): "Customize Word List" panel in the host game lobby. Two input methods: JSON file drag-and-drop (`.json`) or paste a JSON array directly. Preview shows word count + 5 sample words. "Use this list" → `POST /api/room/:code/buzzwords` → success toast. Validation errors shown inline. Link to example JSON format in help text.
-- [ ] **Tests**: upload validation (too few words, control char stripping, max word length), 403 for non-host, GET returns uploaded list, server falls back to built-in when unset.
-
----
-
-##### Phase 11.4: Per-Room Leaderboards
-**Goal:** Leaderboard wins are scoped to the room code they were achieved in. Custom-list games are isolated from the global board so difficulty differences don't skew rankings.
-
-- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add nullable `room_code` column to `wins_history` table — FK → `rooms.code` (NULL = standalone game not in a room; backward-compatible). Add `GameStore` method `GetRoomLeaderboard(roomCode string, limit int) ([]LeaderboardEntry, error)`. Update `RecordWinInDB` to accept and store `roomCode`. Existing `GetLeaderboard` returns only rows where `room_code IS NULL`.
-- [x] **HTTP** (`server/api.go`): `GET /api/leaderboard` unchanged (global, standalone wins only). Add `GET /api/room/:code/leaderboard` — per-room top players by win count. Both return the same `LeaderboardEntry` shape.
-- [x] **Web client** (`web-client/src/`): Active game view shows a per-room leaderboard tab. Global leaderboard remains on landing/stats page but only reflects default-list games. Tab labels make the distinction clear ("This Room" vs "All Time").
-- [ ] **Tests**: `GetRoomLeaderboard` returns only wins for that room code. `GetLeaderboard` excludes room-scoped wins. Migration: existing NULL room_code rows unaffected.
-
----
-
-#### Phase 12: AI-Powered Buzzword Generation
-**Goal:** Streaming chat interface in the web client where the host describes their event or topic — optionally pasting a URL — and an LLM generates a themed buzzword list ready to load into their room, with multiple distinct sets so friends at the same event don't get identical boards.
-
-**User story:** Going to Anime North. Go to yubetcha.com, host a room, click "Generate word list with AI". A chat opens — paste `https://www.animenorth.com/` and type a short description. The agent scrapes the page, combines it with its anime convention knowledge, and streams back 3 sets of 25 buzzwords (one per friend). Pick a set, it loads into the room, friends scan the QR code to join. The game becomes a scavenger hunt.
-
-**Why LLM is the right tool here:** This task requires synthesising scraped web content with broad world knowledge (e.g. what to expect at an anime convention), then generating multiple *distinct* creative lists of short observable phrases. Template-based approaches (category menus, keyword extraction) can't bridge the gap between a URL and playful, event-specific buzzwords. DeepSeek API provides the generation quality needed at low per-request cost.
-
-**LLM provider decision:**
-- **This phase (interactive, web-based):** DeepSeek API (`deepseek-v4-pro` default, `deepseek-v4-flash` optional). OpenAI-compatible `/chat/completions` endpoint, SSE streaming, structured JSON mode (`response_format: {type: "json_object"}`), thinking on/off. Configured via `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL` env vars. Feature gracefully disabled (HTTP 503 + clear message) when DeepSeek is unreachable or API key is unset.
-- **Phase 14 settlement agent (local, 24/7):** Ollama + `deepseek-r1:8b` — separate Python agent stack, not the Go server. The settlement agent connects to its own local Ollama instance independently of the bingo server's LLM provider.
-
-**Design decisions:**
-- URL scraping is server-side (avoids CORS, keeps API key off the client). Go `net/http` fetches with a 5 s timeout, strips HTML, truncates to 8 KB. Private IP ranges and non-HTTP(S) schemes rejected before connection (SSRF protection).
-- Streaming: Go handler writes `text/event-stream` SSE; React client renders tokens word-by-word as they arrive — same feel as Perplexity / ChatGPT search.
-- Structured output: LLM returns `{"sets": [{"label": string, "words": string[]}]}` as the final `data: [DONE]` SSE event after conversational tokens.
-- Server validates the returned JSON (min 24 words per set, max 60 chars each, no cross-set duplicates) before writing to the `room_buzzwords` table (FK → `rooms.code`, established in Phase 11.3).
-
----
-
-##### Phase 12.1: Server-Side LLM Proxy + URL Scraper
-**Goal:** Go endpoint that optionally scrapes a URL, calls the DeepSeek API with a bingo-card designer system prompt, and streams the response as SSE. Validated with `curl` before any web client work.
-
-- [ ] **Config** (`bin.go` / env): Add `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` (default `https://api.deepseek.com`), and `DEEPSEEK_MODEL` (default `deepseek-v4-pro`) env vars. At startup, probe `GET $DEEPSEEK_BASE_URL/models` with Bearer auth — log a warning if unreachable (feature disabled, HTTP 503 returned to clients). Add all three to `docs/DEPLOYMENT.md`. **Note:** the Phase 14 settlement agent connects to its own local Ollama instance independently; it does not share env vars with the Go server.
-- [ ] **URL scraper** (`server/scraper.go` — new file): `ScrapeURL(url string) (string, error)`. Fetches with 5 s timeout and `User-Agent: binGO-buzzword-agent/1.0`. Parses HTML via `golang.org/x/net/html`, extracts visible text nodes. Truncates to 8 KB. **SSRF protection:** resolve hostname before connecting; reject if resolved IP is RFC 1918, loopback, link-local, or multicast — or if scheme is not `http`/`https`.
-- [ ] **LLM client** (`server/deepseek.go` — existing): `DeepSeekClient` already implements `LLMClient` interface with `StreamGenerate(ctx, messages, opts, w)` for SSE streaming via OpenAI-compatible `/chat/completions`. Uses `response_format: {type: "json_object"}` for structured output. Supports thinking on/off via `DeepSeekClient.Thinking` field. Temperature and top_p are configurable per client instance. See existing implementation for details.
-- [ ] **HTTP** (`server/api.go`): `POST /api/room/:code/generate-buzzwords` (host-only auth). Body: `{topic: string, url?: string, messages?: [{role, content}]}`. Validates: topic ≤ 500 chars; URL if present passes SSRF check. Scrapes URL → appends excerpt to system context → calls `LLMClient.StreamGenerate`. Returns HTTP 503 with `{"error": "AI generation not available — DeepSeek is not configured or unreachable"}` when DeepSeek health probe failed at startup or API returns errors at request time.
-- [ ] **Prompt template** (`server/llm.go`): System: *"You are a bingo card designer. Generate a themed buzzword list for a scavenger-hunt style bingo game. The words should be short observable things (2–5 words), specific to the topic, and fun to spot in person. Output 3 distinct sets of 25 words each. Return your final answer as JSON: `{\"sets\": [{\"label\": \"Set A\", \"words\": [...]}]}`."* User message: topic text + URL excerpt when available.
-- [ ] **Tests** (`server/`): SSRF protection unit tests (reject `192.168.x.x`, `127.0.0.1`, `file://`, `http://metadata.google.internal`). Scraper strips tags and truncates. `DeepSeekClient` test with a mock HTTP server replaying a fixture SSE stream (see `server/deepseek_test.go`). HTTP 503 when DeepSeek health probe fails (mock server returns 401 or is unreachable). Host-only 403 for non-host callers.
-
----
-
-##### Phase 12.2: Streaming Chat UI
-**Goal:** Chat interface in the web client that renders the LLM token stream, lets the host refine with follow-up messages, then saves the chosen word set to their room.
-
-- [ ] **Web client** (`web-client/src/`): "Generate with AI" button in the host lobby (alongside "Upload JSON" from Phase 11.3). Opens a `/room/:code/generate` route. Layout: topic input + optional URL field at top; streaming chat output renders below token-by-token as SSE arrives. When stream ends, 3 word-set cards appear (label + word count + 5 sample words). "Use this set" → `POST /api/room/:code/buzzwords` → toast → return to lobby. "Regenerate" reruns with the same prompt. "Start over" clears history. HTTP 503 shows an error card ("AI generation not available — DeepSeek is not configured on this server").
-- [ ] **SSE client** (`web-client/src/lib/api.ts`): `streamBuzzwords(roomCode, topic, url, messages, onToken, onDone)` — uses `fetch` with `ReadableStream` to `POST /api/room/:code/generate-buzzwords`. Calls `onToken(chunk)` per SSE data event, `onDone(sets)` on the `[DONE]` event.
-- [ ] **Follow-up prompts**: Text input at the bottom of the chat view appends to `messages` history and sends a new request — enables iterative refinement ("make them funnier", "add more cosplay-related items", "remove food").
-- [ ] **Tests** (`web-client/src/lib/`): `streamBuzzwords` unit test against a mock SSE endpoint. "Use Set" flow saves words via upload API and navigates back to lobby. HTTP 503 error card renders correctly.
+**Remaining (moved to `binGO` repo):**
+- [ ] **Deployment docs** (`docs/DEPLOYMENT.md`): Add DEEPSEEK env vars documentation.
 
 ---
 

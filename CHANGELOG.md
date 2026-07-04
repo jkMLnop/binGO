@@ -1,13 +1,160 @@
 # Changelog
 
-> **Archive notice:** This file is a historical record up to v9.2.0.
+> **Archive notice:** This is the final update to this file. binGO-CLI has been
+> archived as of v9.3.3. The server, web client, and platform code have moved to
+> the [binGO](https://github.com/jkMLnop/binGO) repository.
 > Releases from v9.3.0 onwards are documented in [GitHub Releases](https://github.com/jkMLnop/binGO-CLI/releases).
-> Use `gh release create vX.Y.Z --generate-notes` to create new releases.
-> Do not update this file manually.
 
 All notable changes to binGO-CLI are documented in this file.
 
-## [Unreleased]
+## [v9.3.3] - 2026-07-01
+
+### Repo Split — binGO-CLI → binGO
+
+**Summary:** binGO-CLI is now archived as the standalone CLI experience. All server,
+web client, database, Dagger CI/CD, and infrastructure code has moved to the new
+[binGO](https://github.com/jkMLnop/binGO) repository. binGO-CLI retains the
+standalone single-player mode and the networked CLI client for offline play.
+
+**What moved to `binGO`:**
+- `server/` — WebSocket server, game logic, admin API, auth, metrics, LLM integration
+- `db/` — GameStore interface + SQLite implementation
+- `web-client/` — React SPA with PWA, QR sharing, AI generation, betting UI
+- `dagger/` — Dagger CI/CD pipeline (test, build, publish, deploy, release)
+- `tests/` — Integration, container, E2E, and load tests
+- `docs/` — ROADMAP, ADMIN_API, DEPLOYMENT, DEVOPS, MONITORING_SETUP
+- Infra — Dockerfile, docker-compose.yml, fly.toml, fly.staging.toml, Prometheus/Grafana configs
+- CI — `.github/workflows/ci.yml`, `.github/workflows/dev-smoke.yml`, `.github/workflows/prod-synthetic.yml`
+
+**What stayed in `binGO-CLI`:**
+- `client/` — WebSocket client, auth, display, menu, player
+- `standalone/` — Single-player offline mode
+- `shared/` — Board model, win detection, display formatting, buzzword loading
+- `bin.go` — CLI entry point (standalone + client modes only)
+- `CHANGELOG.md` — This file (archived after this entry)
+
+### Hotfix
+- fix: add public POST /api/games endpoint; remove admin key from web client flow
+
+## [v9.3.2] - 2026-07-01
+
+### Smoke Test Hardening & DeepSeek Migration Completion
+
+**Summary:** Completion of the Ollama → DeepSeek API migration. CI smoke automation
+hardened with reliable leaderboard polling, race-condition fixes in merge conflict
+resolution, and faster pre-push hooks. GHCR pull authentication fixed for Fly.io deploys.
+
+**What changed:**
+- ✅ feat: Add cached llm_health check, test-llm CI job, DEEPSEEK_API_KEY for CI
+- ✅ Fix merge conflict residue in `web-client/src/App.tsx` restoring Phase 12 changes
+- ✅ fix(smoke): robust leaderboard poll via API instead of request counting
+- ✅ fix(smoke): drop unreliable top-N UI leaderboard rank assertion
+- ✅ fix(smoke): refresh leaderboard on game_ended; fix CI lobby and tab handling
+- ✅ fix: Run unit/integration tests directly (not via Dagger) in pre-push hook
+- ✅ fix: Pass GHCR_TOKEN to flyctl deploy so Fly.io can pull private GHCR images
+
+## [v9.3.1] - 2026-06-03
+
+### Production Hardening, Room Fixes & CI Automation
+
+**Summary:** Phase 12 AI generation hardened with strict output contracts and
+SSRF protection. Room creation + room_login flow fixed and integration-tested.
+Leaderboard refresh and sync rules added. New CI automation tier: dev, staging,
+and prod smoke checks with Playwright and hotfix issue automation.
+
+**What changed:**
+- ✅ hardening: secure Phase 12 AI generation and enforce strict output contracts
+- ✅ Refresh all-time leaderboard after wins
+- ✅ Add leaderboard sync rules and broaden smoke automation
+- ✅ fix web host flow to create rooms and add room integration tests
+- ✅ fix room routes to validate by room code and use room_login
+- ✅ ci: add dev/staging/prod agentic smoke automation
+- ✅ ci: add staging playwright smoke checks and hotfix issue automation
+- ✅ docs: require regression coverage updates with new features
+- ✅ docs: add Phase 15 — Agentic DevOps Loop to roadmap
+
+## [v9.3.0] - 2026-05-14
+
+### Phase 11 Complete: Room Codes, QR Sharing, Buzzword Upload & Per-Room Leaderboard
+
+**Summary:** Phase 11 is fully complete. The room entity is now the canonical game
+identifier (5-char room code `AB3K7`). QR code sharing and custom buzzword upload
+added to the web client. Leaderboards are scoped per room so custom-list games
+don't compete with default-list games on a shared scoreboard. The `BINGO-XXXXX`
+game code format is retained internally for backward-compatible CLI connections.
+
+#### Phase 11.0: Room Foundation ✅
+- ✅ DB: `rooms` table (`id`, `code` 5-char unique, `host_id`, `created_at`). Nullable `room_code` FK column on `games` table. `GameStore` methods: `CreateRoom`, `GetRoom`, `GetRoomByGameCode`
+- ✅ Server (`server/room.go` — new): `Room` struct, `NewRoom`, `GenerateRoomCode` (5-char alphanumeric), `getOrCreateRoom`. `Server.Rooms` map + `RoomsMu` RWMutex
+- ✅ HTTP: `POST /api/rooms`, `GET /api/room/:code`. Existing `/api/game/:code` endpoints unchanged
+- ✅ WebSocket: `room_login` client action + `room_welcome` server message. Legacy `login` with game code `BINGO-XXXXX` remains supported
+- ✅ Metrics: `bingo_rooms_active` Gauge
+- ✅ Logging: `RoomCreated(code, hostID string)`
+- ✅ Tests: room creation, code generation, `room_login` WS flow, backward-compat `login`, `GetRoomByGameCode` round-trip
+
+#### Phase 11.1: Room Code Rename (UI & Docs) ✅
+- ✅ Web client: all "game code"/"share code" → "room code"
+- ✅ CLI: "Your game code:" → "Room code:", "Share this code:" → "Share this room code:"
+- ✅ Docs: README, ADMIN_API, DEPLOYMENT updated
+- ✅ Tests: grep for old strings, no logic changes
+
+#### Phase 11.2: QR Code Share Menu ✅
+- ✅ Web client: share dropdown/modal with client-side QR (qrcode npm package)
+- ✅ QR encodes `https://yubetcha.com/join/:roomCode`, mobile-responsive
+
+#### Phase 11.3: Web Client Buzzword Upload ✅
+- ✅ DB: `room_buzzwords` table, `SetRoomBuzzwords`/`GetRoomBuzzwords` methods
+- ✅ HTTP: `POST /api/room/:code/buzzwords`, `GET /api/room/:code/buzzwords`
+- ✅ Web client: "Customize Word List" panel with JSON drag-and-drop or paste
+
+#### Phase 11.4: Per-Room Leaderboards ✅
+- ✅ DB: `room_code` column on `wins_history`, `GetRoomLeaderboard` method
+- ✅ HTTP: `GET /api/room/:code/leaderboard`
+- ✅ Web client: "This Room" vs "All Time" leaderboard tabs
+
+### Phase 12 Complete: AI-Powered Buzzword Generation
+
+**Summary:** Phase 12 is fully complete. The web client features a streaming chat
+interface where the host describes their event or topic (optionally pasting a URL),
+and the DeepSeek API generates themed buzzword lists in real-time. Server-side URL
+scraper with SSRF protection, SSE streaming endpoint, follow-up prompts for
+refinement, and full test coverage on both Go and web client sides.
+
+#### Phase 12.1: Server-Side LLM Proxy + URL Scraper ✅
+- ✅ Config: `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL` env vars (default `deepseek-v4-pro`)
+- ✅ URL scraper (`server/scraper.go`): `ScrapeURL` with 5s timeout, HTML stripping, 8KB truncation, SSRF protection
+- ✅ LLM client (`server/deepseek.go`): `DeepSeekClient` implements `LLMClient` with SSE streaming, JSON mode, thinking on/off
+- ✅ HTTP: `POST /api/room/:code/generate-buzzwords` and `POST /api/game/:code/generate-buzzwords` — host-only auth, 503 when unreachable
+- ✅ Prompt templates (`server/llm.go`): `buzzwordSystemPrompt` + `agenticRetrievalSystemPrompt`
+- ✅ Tests: 20 tests covering SSRF, HTML stripping, mock SSE, error handling, malformed output, health checks
+
+#### Phase 12.2: Streaming Chat UI ✅
+- ✅ Web client: `<GenerateModal>` component — topic input, optional URL, token-by-token SSE rendering, word-set cards
+- ✅ SSE client (`api.ts`): `streamGameBuzzwords()` via `fetch` + `ReadableStream`
+- ✅ Follow-up prompts: `FollowUpInput` component, conversation history, re-send
+- ✅ Tests: mock SSE token/done/error events, missing auth, HTTP 503, truncated stream
+
+**What changed:**
+- ✅ feat: Phase 12 — AI-Powered Buzzword Generation (streaming DeepSeek, SSE, JSON mode)
+- ✅ feat: Add cached llm_health check, test-llm CI job, DEEPSEEK_API_KEY for CI
+- ✅ hardening: secure Phase 12 AI generation and enforce strict output contracts
+- ✅ fix: migrate `room_code` columns on existing SQLite databases
+- ✅ chore: repo hygiene + agentic workflow setup
+- ✅ chore: retire CHANGELOG.md — historical archive only
+- ✅ docs: update Phase 12 LLM provider details
+
+## [v9.2.2] - 2026-05-14
+
+### Build & Staging Fixes
+- ✅ fix: build web client before `go test` in Dagger pipeline
+- ✅ fix: build web client before `go build` in runRelease
+- ✅ fix: commit `board.ts` shuffleArray and `board.test.ts` missing from v9.3.0
+- ✅ docs: update Phase 13.2 Twitch adapter to use BlackHole audio pipeline
+
+## [v9.2.1] - 2026-05-13
+
+### Hotfix
+- ✅ fix: use dynamic `window.location.host` in web client heading
 
 ## [v9.2.0] - 2026-05-13
 
