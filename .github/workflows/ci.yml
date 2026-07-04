@@ -17,7 +17,6 @@ on:
 
 env:
   GO_VERSION: '1.25.3'
-  DAGGER_VERSION: '0.15.3'
 
 jobs:
   test:
@@ -43,6 +42,8 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Run container regression tests
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
         run: go test -tags=container -timeout=10m ./tests -v
 
   deploy-staging:
