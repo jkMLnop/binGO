@@ -1,9 +1,9 @@
-// Hotfix agent: reads error logs, extracts Go file paths, calls an LLM to
+// Hotfix agent: reads error logs, extracts Go file paths, calls DeepSeek to
 // generate a minimal unified diff, and outputs it for automation.
 //
 // Usage:
 //
-//	hotfix-agent [-api-key key] [-model gpt-4o] < error.log > fix.diff
+//	hotfix-agent [-api-key key] [-model deepseek-v4-pro] [-base-url https://api.deepseek.com] < error.log > fix.diff
 //
 // Reads error text from stdin.  Writes the unified diff to stdout.
 // All logging goes to stderr.
@@ -30,13 +30,17 @@ const maxSourceBytes = 8192
 const maxFiles = 3
 
 func main() {
-	apiKey := flag.String("api-key", os.Getenv("OPENAI_API_KEY"), "OpenAI API key")
-	model := flag.String("model", "gpt-4o", "LLM model name")
+	apiKey := flag.String("api-key", os.Getenv("DEEPSEEK_API_KEY"), "DeepSeek API key")
+	model := flag.String("model", "deepseek-v4-pro", "LLM model name")
+	baseURL := flag.String("base-url", os.Getenv("DEEPSEEK_BASE_URL"), "API base URL (default: https://api.deepseek.com)")
 	repoDir := flag.String("repo", ".", "path to repository root")
 	flag.Parse()
 
 	if *apiKey == "" {
-		log.Fatal("OPENAI_API_KEY not set (use -api-key flag or env var)")
+		log.Fatal("DEEPSEEK_API_KEY not set (use -api-key flag or env var)")
+	}
+	if *baseURL == "" {
+		*baseURL = "https://api.deepseek.com"
 	}
 
 	// Read error log from stdin
@@ -78,10 +82,10 @@ func main() {
 	// Assemble prompt
 	prompt := buildPrompt(errorText, sourceSnippets.String())
 
-	// Call LLM
-	diff, err := callLLM(*apiKey, *model, prompt)
+	// Call DeepSeek
+	diff, err := callLLM(*apiKey, *baseURL, *model, prompt)
 	if err != nil {
-		log.Fatalf("LLM call failed: %v", err)
+		log.Fatalf("DeepSeek call failed: %v", err)
 	}
 
 	fmt.Print(diff)
@@ -145,9 +149,9 @@ type chatCompletionResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// callLLM sends the prompt to the OpenAI-compatible chat completions endpoint
+// callLLM sends the prompt to the DeepSeek (OpenAI-compatible) chat completions endpoint
 // and returns the generated unified diff.
-func callLLM(apiKey, model, prompt string) (string, error) {
+func callLLM(apiKey, baseURL, model, prompt string) (string, error) {
 	reqBody := chatCompletionRequest{
 		Model: model,
 		Messages: []chatMessage{
@@ -161,7 +165,7 @@ func callLLM(apiKey, model, prompt string) (string, error) {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(bodyBytes))
+	httpReq, err := http.NewRequest("POST", baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

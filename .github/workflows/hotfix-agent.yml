@@ -62,7 +62,7 @@ jobs:
         id: llm
         if: steps.error.outputs.error_lines != '0'
         run: |
-          /tmp/hotfix-agent -api-key "${{ secrets.OPENAI_API_KEY }}" -repo . < /tmp/error-text.txt > /tmp/fix.diff 2>/tmp/hotfix-agent.log || {
+          /tmp/hotfix-agent -api-key "${{ secrets.DEEPSEEK_API_KEY }}" -repo . < /tmp/error-text.txt > /tmp/fix.diff 2>/tmp/hotfix-agent.log || {
             echo "llm_failed=true" >> "$GITHUB_OUTPUT"
             cat /tmp/hotfix-agent.log
             exit 0
@@ -70,7 +70,7 @@ jobs:
           echo "llm_failed=false" >> "$GITHUB_OUTPUT"
           echo "diff_size=$(wc -c < /tmp/fix.diff)" >> "$GITHUB_OUTPUT"
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 
       - name: Apply diff and create branch
         id: branch
