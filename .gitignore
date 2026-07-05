@@ -40,3 +40,4 @@ tools/llm_experiments/*.log
 # Web client artifacts
 /web-client/node_modules/
 /web-client/dist/web-client/*.tsbuildinfo
+hotfix-agent
