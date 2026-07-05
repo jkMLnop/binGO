@@ -1103,3 +1103,46 @@ func (s *Server) handleGenerateBuzzwordsForGame(w http.ResponseWriter, r *http.R
 		}
 	}
 }
+
+// ── Agent observability endpoint (Phase 15.2) ────────────────────────────────
+
+// AgentEventRequest is the body for POST /metrics/agent-event.
+type AgentEventRequest struct {
+	Event     string  `json:"event"`      // "hotfix_success" or "hotfix_failure"
+	RunID     string  `json:"run_id"`     // GitHub Actions run ID
+	Outcome   string  `json:"outcome"`    // "pr_opened", "tests_failed", "no_fix_generated"
+	LatencyMs float64 `json:"latency_ms"` // time from CI failure to PR opened
+}
+
+// handleAgentEvent records an agent observability event.
+// POST /metrics/agent-event — requires X-Agent-Key header.
+func (s *Server) handleAgentEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if !agentKeyMiddleware(w, r) {
+		return
+	}
+
+	var body AgentEventRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.Outcome == "" {
+		writeAPIError(w, http.StatusBadRequest, "outcome is required")
+		return
+	}
+
+	// Record the metrics
+	s.Metrics.HotfixTotal.WithLabelValues(body.Outcome).Inc()
+	if body.LatencyMs > 0 {
+		s.Metrics.HotfixLatency.Observe(body.LatencyMs)
+	}
+
+	log.Printf("agent event: run=%s outcome=%s latency_ms=%.0f", body.RunID, body.Outcome, body.LatencyMs)
+	writeAPISuccess(w, map[string]interface{}{"recorded": true})
+}

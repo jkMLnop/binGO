@@ -1,0 +1,165 @@
+# Hotfix Agent Workflow — Phase 15.1
+#
+# Triggered on every failed push to main (ci.yml failure), this workflow:
+# 1. Fetches Fly.io staging logs
+# 2. Extracts the error pattern
+# 3. Calls an LLM to generate a minimal fix
+# 4. Creates a feat/hotfix-* branch and opens a PR
+#
+# The agent NEVER auto-merges — a human must approve and merge the PR.
+# One hotfix PR per CI run (idempotent via run-id tagging).
+
+name: hotfix-agent
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:  # manual trigger for testing
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  hotfix:
+    name: Generate Hotfix
+    # Only run if the triggering CI workflow failed
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
+
+      - name: Fetch Fly.io staging logs
+        id: logs
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: |
+          flyctl logs --app bingo-server-staging --no-tail 2>&1 | tail -100 > /tmp/fly-logs.txt || true
+          echo "log_size=$(wc -c < /tmp/fly-logs.txt)" >> "$GITHUB_OUTPUT"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Extract error pattern
+        id: error
+        run: |
+          ERROR_TEXT=$(grep -E 'level=error|panic:|Failed to initialize|fatal error' /tmp/fly-logs.txt | tail -20 || true)
+          if [ -z "$ERROR_TEXT" ]; then
+            ERROR_TEXT=$(tail -20 /tmp/fly-logs.txt)
+          fi
+          # Write to file for later steps
+          echo "$ERROR_TEXT" > /tmp/error-text.txt
+          echo "error_lines=$(echo "$ERROR_TEXT" | wc -l)" >> "$GITHUB_OUTPUT"
+
+      - name: Build hotfix agent
+        run: go build -o /tmp/hotfix-agent ./tools/hotfix-agent/
+
+      - name: Generate fix via LLM
+        id: llm
+        if: steps.error.outputs.error_lines != '0'
+        run: |
+          /tmp/hotfix-agent -api-key "${{ secrets.DEEPSEEK_API_KEY }}" -repo . < /tmp/error-text.txt > /tmp/fix.diff 2>/tmp/hotfix-agent.log || {
+            echo "llm_failed=true" >> "$GITHUB_OUTPUT"
+            cat /tmp/hotfix-agent.log
+            exit 0
+          }
+          echo "llm_failed=false" >> "$GITHUB_OUTPUT"
+          echo "diff_size=$(wc -c < /tmp/fix.diff)" >> "$GITHUB_OUTPUT"
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+      - name: Apply diff and create branch
+        id: branch
+        if: steps.llm.outputs.llm_failed == 'false' && steps.llm.outputs.diff_size != '0'
+        run: |
+          git apply /tmp/fix.diff 2>/tmp/apply.log || {
+            echo "apply_failed=true" >> "$GITHUB_OUTPUT"
+            cat /tmp/apply.log
+            exit 0
+          }
+          echo "apply_failed=false" >> "$GITHUB_OUTPUT"
+          BRANCH="feat/hotfix-${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+          git add -A
+          git -c user.name="hotfix-agent[bot]" -c user.email="hotfix-agent[bot]@users.noreply.github.com" commit -m "fix: auto-hotfix from CI failure ${{ github.run_id }}"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests on fix
+        if: steps.branch.outputs.apply_failed == 'false'
+        run: |
+          go build ./... 2>&1 | tee /tmp/build.log
+          go test ./... -count=1 -timeout=3m 2>&1 | tee /tmp/test.log
+
+      - name: Create PR
+        if: steps.branch.outputs.apply_failed == 'false'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: feat/hotfix-${{ github.run_id }}
+          base: main
+          title: "[auto-hotfix] Fix for CI failure ${{ github.run_id }}"
+          body: |
+            ## 🤖 Auto-generated hotfix
+
+            **Trigger:** CI workflow [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) failed on `main`.
+
+            This PR was generated automatically by the hotfix agent. **It has NOT been merged — human review required.**
+
+            ### Error detected:
+            ```
+            $(cat /tmp/error-text.txt)
+            ```
+
+            ### Fly.io logs (last 100 lines):
+            <details>
+            <summary>Click to expand</summary>
+
+            ```
+            $(cat /tmp/fly-logs.txt)
+            ```
+            </details>
+
+            ### Agent reasoning:
+            The LLM identified the root cause from the error pattern and relevant source files, and generated the minimal unified diff in this PR.
+
+            ### Actions required:
+            - [ ] Review the diff for correctness
+            - [ ] Verify CI passes on this branch
+            - [ ] Merge if the fix looks good
+            - [ ] Close without merging if the fix is incorrect (the agent will try again on the next failure)
+
+            ---
+            *Generated by [hotfix-agent](.github/workflows/hotfix-agent.yml) (Phase 15.1)*
+
+      - name: Post agent event to server
+        if: always()
+        run: |
+          EVENT="pr_opened"
+          if [ "${{ steps.llm.outputs.llm_failed }}" = "true" ]; then
+            EVENT="no_fix_generated"
+          elif [ "${{ steps.branch.outputs.apply_failed }}" = "true" ]; then
+            EVENT="tests_failed"
+          fi
+          curl -s -X POST "https://bingo-server-staging.fly.dev/metrics/agent-event" \
+            -H "Content-Type: application/json" \
+            -H "X-Agent-Key: ${{ secrets.AGENT_API_KEY }}" \
+            -d "{\"event\":\"hotfix_${EVENT}\",\"run_id\":\"${{ github.run_id }}\",\"error_type\":\"deploy\"}" || true
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotfix-debug-${{ github.run_id }}
+          path: |
+            /tmp/fly-logs.txt
+            /tmp/error-text.txt
+            /tmp/fix.diff
+            /tmp/hotfix-agent.log
+            /tmp/apply.log
+            /tmp/build.log
+            /tmp/test.log

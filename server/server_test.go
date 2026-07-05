@@ -1042,9 +1042,9 @@ func TestEvaluateBetsWin(t *testing.T) {
 
 	// Place two bets: one that should win, one that should lose
 	game.BetsMu.Lock()
-	game.Bets = []Bet{
-		{ID: "b1", BetterID: "charlie", Conditions: []BetCondition{{PlayerUsername: "alice", Outcome: "wins"}}, Status: "active"},
-		{ID: "b2", BetterID: "dave", Conditions: []BetCondition{{PlayerUsername: "bob", Outcome: "wins"}}, Status: "active"},
+	game.Bets = []GameBet{
+		{ID: "b1", BetterID: "charlie", Conditions: []GameBetCondition{{PlayerUsername: "alice", Outcome: "wins"}}, Status: "active"},
+		{ID: "b2", BetterID: "dave", Conditions: []GameBetCondition{{PlayerUsername: "bob", Outcome: "wins"}}, Status: "active"},
 	}
 	game.BetsMu.Unlock()
 

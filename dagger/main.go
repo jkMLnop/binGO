@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"dagger.io/dagger"
 )
@@ -255,6 +257,13 @@ func runDeploy(ctx context.Context, client *dagger.Client, source *dagger.Direct
 		return fmt.Errorf("deploy to %s (%s): %w", env, appName, err)
 	}
 	fmt.Printf("=== Deployed to %s ===\n", env)
+
+	// Phase 15.0: Smoke-test — verify the deployed server responds to health checks.
+	appURL := appURLForEnv(env)
+	if err := waitForHealthy(ctx, appURL, 30*time.Second); err != nil {
+		return fmt.Errorf("deploy health check failed for %s (%s): %w", env, appURL, err)
+	}
+	fmt.Printf("=== Health check passed for %s ===\n", env)
 	return nil
 }
 
@@ -299,5 +308,47 @@ func flyConfig(env string) (appName, configFile string, err error) {
 		return flyAppStaging, "fly.staging.toml", nil
 	default:
 		return "", "", fmt.Errorf("invalid environment %q: must be \"staging\" or \"production\"", env)
+	}
+}
+
+// appURLForEnv returns the public URL for the given deployment environment.
+func appURLForEnv(env string) string {
+	switch env {
+	case "production":
+		return "https://bingo-server.fly.dev"
+	case "staging":
+		return "https://bingo-server-staging.fly.dev"
+	default:
+		return ""
+	}
+}
+
+// waitForHealthy polls GET <appURL>/api/status every 3s until it returns 200
+// or the timeout elapses. Returns an error if the server never becomes healthy.
+// Phase 15.0: Dagger smoke-test step for agentic DevOps loop.
+func waitForHealthy(ctx context.Context, appURL string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 5 * time.Second}
+	healthURL := appURL + "/api/status"
+
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("server did not become healthy within %v", timeout)
+		}
+
+		resp, err := client.Get(healthURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return nil
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
 	}
 }

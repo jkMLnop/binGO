@@ -155,6 +155,9 @@ func (s *Server) registerHandlers() {
 	// If unset (local dev / docker-compose), the endpoint is open.
 	s.Mux.Handle("/metrics", metricsAuthMiddleware(promhttp.Handler()))
 
+	// Agent observability endpoint (Phase 15.2)
+	s.Mux.HandleFunc("/metrics/agent-event", s.handleAgentEvent)
+
 	// Serve embedded web client at / (Phase 7.6 — set by bin.go when built with embed)
 	if s.StaticHandler != nil {
 		s.Mux.Handle("/", s.StaticHandler)
@@ -1018,7 +1021,7 @@ func (s *Server) handlePlayerBet(game *Game, player *Player, rawText string) err
 		}
 	}
 	betID := fmt.Sprintf("bet-%s-%d", player.ID, time.Now().UnixNano())
-	game.Bets = append(game.Bets, Bet{
+	game.Bets = append(game.Bets, GameBet{
 		ID:             betID,
 		BetterID:       player.ID,
 		BetterUsername: player.ID,
@@ -1026,7 +1029,7 @@ func (s *Server) handlePlayerBet(game *Game, player *Player, rawText string) err
 		Conditions:     conditions,
 		Status:         "active",
 	})
-	snapshot := make([]Bet, len(game.Bets))
+	snapshot := make([]GameBet, len(game.Bets))
 	copy(snapshot, game.Bets)
 	game.BetsMu.Unlock()
 
@@ -1034,9 +1037,9 @@ func (s *Server) handlePlayerBet(game *Game, player *Player, rawText string) err
 	return nil
 }
 
-// parseBetConditions parses an AND-joined bet string into BetCondition slice (Phase 9.5)
+// parseBetConditions parses an AND-joined bet string into GameBetCondition slice (Phase 9.5)
 // Format: "<player> wins|loses [AND <player> wins|loses]"
-func parseBetConditions(rawText string, game *Game) ([]BetCondition, error) {
+func parseBetConditions(rawText string, game *Game) ([]GameBetCondition, error) {
 	parts := strings.Split(strings.ToLower(rawText), " and ")
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("invalid bet format — usage: <player> wins|loses [AND ...]")
@@ -1050,7 +1053,7 @@ func parseBetConditions(rawText string, game *Game) ([]BetCondition, error) {
 	}
 	game.PlayersMu.RUnlock()
 
-	conditions := make([]BetCondition, 0, len(parts))
+	conditions := make([]GameBetCondition, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		tokens := strings.Fields(part)
@@ -1065,7 +1068,7 @@ func parseBetConditions(rawText string, game *Game) ([]BetCondition, error) {
 		if !playerNames[playerName] {
 			return nil, fmt.Errorf("player %q not found in this game", playerName)
 		}
-		conditions = append(conditions, BetCondition{
+		conditions = append(conditions, GameBetCondition{
 			PlayerUsername: playerName,
 			Outcome:        outcome,
 		})
@@ -1102,7 +1105,7 @@ func (s *Server) evaluateBets(game *Game, winnerID string) {
 			game.Bets[i].Status = "lost"
 		}
 	}
-	snapshot := make([]Bet, len(game.Bets))
+	snapshot := make([]GameBet, len(game.Bets))
 	copy(snapshot, game.Bets)
 	game.BetsMu.Unlock()
 
@@ -1110,7 +1113,7 @@ func (s *Server) evaluateBets(game *Game, winnerID string) {
 }
 
 // broadcastBetsUpdate sends the current bets list to all players (Phase 9.5)
-func (s *Server) broadcastBetsUpdate(game *Game, bets []Bet) {
+func (s *Server) broadcastBetsUpdate(game *Game, bets []GameBet) {
 	msg := ServerMessage{
 		Type:       "bets_update",
 		GameID:     game.ID,

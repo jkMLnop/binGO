@@ -21,6 +21,8 @@ type Metrics struct {
 	AdminAPILatency       prometheus.Histogram
 	ErrorsTotal           *prometheus.CounterVec // labeled by error_type: auth, game, db, ws, input
 	RateLimitedTotal      *prometheus.CounterVec // labeled by endpoint: ws, code_guess
+	HotfixTotal           *prometheus.CounterVec // Phase 15.2: labeled by outcome: pr_opened, tests_failed, no_fix_generated
+	HotfixLatency         prometheus.Histogram   // Phase 15.2: time from CI failure to PR opened
 	Registry              prometheus.Registerer  // Store the registry for Prometheus scraping
 }
 
@@ -94,6 +96,15 @@ func NewMetrics() *Metrics {
 			Name: "bingo_rate_limited_total",
 			Help: "Total number of requests rejected by rate limiting, by endpoint (ws, code_guess)",
 		}, []string{"endpoint"}),
+		HotfixTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "bingo_agent_hotfix_total",
+			Help: "Total number of hotfix agent activations by outcome (pr_opened, tests_failed, no_fix_generated)",
+		}, []string{"outcome"}),
+		HotfixLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "bingo_agent_hotfix_latency_ms",
+			Help:    "Hotfix agent latency from CI failure to PR opened in milliseconds",
+			Buckets: []float64{1000, 5000, 15000, 30000, 60000, 120000, 300000, 600000},
+		}),
 		Registry: prometheus.DefaultRegisterer,
 	}
 
@@ -113,6 +124,8 @@ func NewMetrics() *Metrics {
 		globalMetrics.AdminAPILatency,
 		globalMetrics.ErrorsTotal,
 		globalMetrics.RateLimitedTotal,
+		globalMetrics.HotfixTotal,
+		globalMetrics.HotfixLatency,
 	)
 
 	return globalMetrics
@@ -136,6 +149,8 @@ func ResetMetrics() {
 		prometheus.Unregister(globalMetrics.AdminAPILatency)
 		prometheus.Unregister(globalMetrics.ErrorsTotal)
 		prometheus.Unregister(globalMetrics.RateLimitedTotal)
+		prometheus.Unregister(globalMetrics.HotfixTotal)
+		prometheus.Unregister(globalMetrics.HotfixLatency)
 	}
 	globalMetrics = nil
 }

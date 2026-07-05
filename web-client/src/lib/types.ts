@@ -34,17 +34,17 @@ export type Suggestion = {
   phrase: string;
 };
 
-export type BetCondition = {
+export type GameBetCondition = {
   player_username: string;
   outcome: string;
 };
 
-export type Bet = {
+export type GameBet = {
   id: string;
   better_id: string;
   better_username: string;
   raw_text: string;
-  conditions: BetCondition[];
+  conditions: GameBetCondition[];
   status: string;
 };
 
@@ -64,7 +64,7 @@ export type ServerMessage = {
   winner: string;
   message: string;
   suggestions?: Suggestion[];
-  active_bets?: Bet[];
+  active_bets?: GameBet[];
   flat_buzzwords?: string[];
   rejected_suggestions?: string[];
 };

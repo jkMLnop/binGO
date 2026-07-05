@@ -28,7 +28,7 @@ type ServerMessage struct {
 	Winner              string       `json:"winner"`                         // player ID who won (in game_ended)
 	Message             string       `json:"message"`                        // error or info messages
 	Suggestions         []Suggestion `json:"suggestions,omitempty"`          // Phase 9: pending buzzword suggestions
-	ActiveBets          []Bet        `json:"active_bets,omitempty"`          // Phase 9.5: active player bets
+	ActiveBets          []GameBet    `json:"active_bets,omitempty"`          // Phase 9.5: active player bets
 	FlatBuzzwords       []string     `json:"flat_buzzwords,omitempty"`       // Phase 9.6: flat buzzword pool for list_buzzwords
 	RejectedSuggestions []string     `json:"rejected_suggestions,omitempty"` // Phase 9.6: host-rejected phrases this round
 }
@@ -39,18 +39,18 @@ type Suggestion struct {
 	Phrase   string `json:"phrase"`
 }
 
-// BetCondition represents one condition within a compound bet
-type BetCondition struct {
+// GameBetCondition represents one condition within a compound bet
+type GameBetCondition struct {
 	PlayerUsername string `json:"player_username"`
 	Outcome        string `json:"outcome"` // "wins" or "loses"
 }
 
-// Bet represents a player's in-game bet on the outcome of the round
-type Bet struct {
-	ID             string         `json:"id"`
-	BetterID       string         `json:"better_id"`
-	BetterUsername string         `json:"better_username"`
-	RawText        string         `json:"raw_text"`
-	Conditions     []BetCondition `json:"conditions"`
-	Status         string         `json:"status"` // "active", "won", "lost"
+// GameBet represents a player's in-game bet on the outcome of the round
+type GameBet struct {
+	ID             string             `json:"id"`
+	BetterID       string             `json:"better_id"`
+	BetterUsername string             `json:"better_username"`
+	RawText        string             `json:"raw_text"`
+	Conditions     []GameBetCondition `json:"conditions"`
+	Status         string             `json:"status"` // "active", "won", "lost"
 }
