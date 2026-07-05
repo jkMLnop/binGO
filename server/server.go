@@ -100,12 +100,13 @@ func (s *Server) SetTracer(t trace.Tracer) {
 // configured DeepSeekClient with a background health check loop. When the API
 // key is empty or DeepSeek is not reachable the LLMClient field stays nil and
 // the generate-buzzwords endpoint returns HTTP 503.
-func (s *Server) InitLLMClient(baseURL, apiKey, model string) {
+func (s *Server) InitLLMClient(baseURL, apiKey, model string, enableThinking bool) {
 	if strings.TrimSpace(apiKey) == "" {
 		log.Printf("Warning: DEEPSEEK_API_KEY not set — AI buzzword generation disabled")
 		return
 	}
 	client := NewDeepSeekClient(baseURL, apiKey, model)
+	client.Thinking = enableThinking
 	client.Metrics = s.Metrics
 	// Start background health check loop (30s interval) so /api/status can
 	// report llm_healthy without hitting the DeepSeek API on every request.
@@ -114,7 +115,7 @@ func (s *Server) InitLLMClient(baseURL, apiKey, model string) {
 	defer cancel()
 	if client.Healthy(ctx) {
 		s.LLMClient = client
-		log.Printf("DeepSeek LLM client ready (model: %s, base: %s)", model, baseURL)
+		log.Printf("DeepSeek LLM client ready (model: %s, thinking: %t, base: %s)", model, enableThinking, baseURL)
 	} else {
 		log.Printf("Warning: DeepSeek not reachable at %s — AI buzzword generation disabled", baseURL)
 	}

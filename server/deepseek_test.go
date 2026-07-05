@@ -103,6 +103,32 @@ func TestDeepSeekClientStreamGenerate(t *testing.T) {
 	}
 }
 
+func TestServerInitLLMClientThinkingEnabled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	server := NewServer(nil, 3, 3, "0")
+	server.InitLLMClient(srv.URL, "test-api-key", "deepseek-v4-pro", true)
+
+	if server.LLMClient == nil {
+		t.Fatal("expected LLM client to be initialized")
+	}
+
+	client, ok := server.LLMClient.(*DeepSeekClient)
+	if !ok {
+		t.Fatalf("expected *DeepSeekClient, got %T", server.LLMClient)
+	}
+	if !client.Thinking {
+		t.Fatal("expected thinking to be enabled")
+	}
+}
+
 // TestDeepSeekClientStreamGenerateError verifies that a non-200 response causes
 // StreamGenerate to return an error without panicking.
 func TestDeepSeekClientStreamGenerateError(t *testing.T) {

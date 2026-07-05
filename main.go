@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -115,7 +116,16 @@ func main() {
 	if deepSeekModel == "" {
 		deepSeekModel = "deepseek-v4-pro"
 	}
-	srv.InitLLMClient(deepSeekBaseURL, deepSeekAPIKey, deepSeekModel)
+	deepSeekThinking := false
+	if rawThinking := os.Getenv("DEEPSEEK_THINKING"); rawThinking != "" {
+		parsedThinking, parseErr := strconv.ParseBool(rawThinking)
+		if parseErr != nil {
+			log.Printf("Warning: invalid DEEPSEEK_THINKING value %q; defaulting to false", rawThinking)
+		} else {
+			deepSeekThinking = parsedThinking
+		}
+	}
+	srv.InitLLMClient(deepSeekBaseURL, deepSeekAPIKey, deepSeekModel, deepSeekThinking)
 
 	// Serve embedded web client
 	if distFS, fsErr := fs.Sub(webClientDist, "web-client/dist"); fsErr == nil {

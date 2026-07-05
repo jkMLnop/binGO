@@ -176,6 +176,7 @@ All metrics prefixed `bingo_`. Defined in `server/metrics.go`:
 | `DEEPSEEK_API_KEY` | (none) | `server/deepseek.go` — DeepSeek API auth (required) |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | `server/deepseek.go` — DeepSeek API base URL |
 | `DEEPSEEK_MODEL` | `deepseek-v4-pro` | `server/deepseek.go` — model name |
+| `DEEPSEEK_THINKING` | `false` | `server/deepseek.go` — enable thinking mode |
 | `GRAFANA_USER` | `admin` | `docker-compose.yml` — Grafana UI |
 | `GRAFANA_PASSWORD` | `change_me_in_production` | `docker-compose.yml` — Grafana UI |
 

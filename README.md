@@ -49,6 +49,7 @@ binGO -port 8080 -db ./bingo.db
 | `DEEPSEEK_API_KEY` | (none) | Required for AI buzzword generation |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek API base URL |
 | `DEEPSEEK_MODEL` | `deepseek-v4-pro` | DeepSeek model name |
+| `DEEPSEEK_THINKING` | `false` | Enable DeepSeek thinking mode |
 | `LOG_LEVEL` | `info` | Log verbosity |
 
 ## Endpoints
