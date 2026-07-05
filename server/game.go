@@ -63,7 +63,7 @@ type Game struct {
 	Suggestions         []Suggestion       // Phase 9: pending buzzword suggestions (in-memory only)
 	SuggestionsMu       sync.Mutex         // Protect Suggestions slice
 	RejectedSuggestions []string           // Phase 9.6: phrases rejected by host this round (in-memory)
-	Bets                []Bet              // Phase 9.5: active player bets (in-memory only)
+	Bets                []GameBet          // Phase 9.5: active player bets (in-memory only)
 	BetsMu              sync.Mutex         // Protect Bets slice
 	PlayersMu           sync.RWMutex       // Protect Players map
 }

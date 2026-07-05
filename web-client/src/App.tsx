@@ -18,7 +18,7 @@ import { formatGenerationError } from "./lib/api";
 import type { GenerationOptions } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
-import type { Bet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
+import type { GameBet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
 import type { WordSet } from "./lib/api";
 
 type HelpEntry = { cmd: string; desc: string; hostOnly?: boolean };
@@ -209,7 +209,7 @@ function SuggestionsPanel({ suggestions, isHost, onApprove, onReject }: {
 
 // ── Bets panel ───────────────────────────────────────────────────────────────
 
-function BetsPanel({ bets }: { bets: Bet[] }) {
+function BetsPanel({ bets }: { bets: GameBet[] }) {
   if (bets.length === 0) return null;
   const statusIcon = (s: string) => s === "won" ? "✅" : s === "lost" ? "❌" : "⏳";
   return (
@@ -353,7 +353,7 @@ function GamePageContent({
   const [winPending, setWinPending] = useState(false);
   const [board, setBoard] = useState<BoardState | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [bets, setBets] = useState<Bet[]>([]);
+  const [bets, setBets] = useState<GameBet[]>([]);
   const [buzzwordPool, setBuzzwordPool] = useState<string[]>([]);
   const [rejectedSuggestions, setRejectedSuggestions] = useState<string[]>([]);
   const [showBuzzwords, setShowBuzzwords] = useState(false);

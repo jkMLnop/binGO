@@ -3,7 +3,10 @@ package server
 import (
 	"crypto/rand"
 	"fmt"
+	"log"
 	"math/big"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -100,4 +103,35 @@ func generateRandomSecret(length int) string {
 		secret[i] = charset[num.Int64()]
 	}
 	return string(secret)
+}
+
+// Phase 15.2: Agent auth for hotfix agent observability endpoint.
+
+const (
+	AgentKeyHeader  = "X-Agent-Key"
+	AgentKeyEnvVar  = "AGENT_API_KEY"
+	DefaultAgentKey = "dev-agent-key-local-only"
+)
+
+// agentKeyMiddleware validates the X-Agent-Key header against AGENT_API_KEY.
+// Returns true if the request is authorized, false otherwise.
+func agentKeyMiddleware(w http.ResponseWriter, r *http.Request) bool {
+	agentKey := os.Getenv(AgentKeyEnvVar)
+	if agentKey == "" {
+		agentKey = DefaultAgentKey
+		log.Printf("AGENT_API_KEY not set, using default dev key")
+	}
+
+	providedKey := r.Header.Get(AgentKeyHeader)
+	if providedKey == "" {
+		writeAPIError(w, http.StatusUnauthorized, "missing X-Agent-Key header")
+		return false
+	}
+
+	if providedKey != agentKey {
+		writeAPIError(w, http.StatusForbidden, "invalid X-Agent-Key")
+		return false
+	}
+
+	return true
 }

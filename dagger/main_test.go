@@ -1,7 +1,10 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestFlyConfigStaging verifies staging environment resolves to the correct
@@ -69,4 +72,84 @@ func TestDefaultGoVersion(t *testing.T) {
 func TestPrintUsageDoesNotPanic(t *testing.T) {
 	// printUsage writes to stderr; just verify no panic
 	printUsage()
+}
+
+// TestAppURLForEnv verifies the URL mapping for each environment.
+func TestAppURLForEnv(t *testing.T) {
+	tests := []struct {
+		env  string
+		want string
+	}{
+		{"production", "https://bingo-server.fly.dev"},
+		{"staging", "https://bingo-server-staging.fly.dev"},
+		{"unknown", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.env, func(t *testing.T) {
+			got := appURLForEnv(tt.env)
+			if got != tt.want {
+				t.Errorf("appURLForEnv(%q) = %q, want %q", tt.env, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWaitForHealthyImmediate verifies that waitForHealthy returns immediately
+// when the server responds with 200 on the first attempt.
+func TestWaitForHealthyImmediate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/status" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	err := waitForHealthy(t.Context(), srv.URL, 5*time.Second)
+	if err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+// TestWaitForHealthyDelayed verifies that waitForHealthy polls until the
+// server eventually returns 200.
+func TestWaitForHealthyDelayed(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/status" {
+			attempts++
+			if attempts >= 3 {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	err := waitForHealthy(t.Context(), srv.URL, 15*time.Second)
+	if err != nil {
+		t.Errorf("expected no error after 3 attempts, got: %v", err)
+	}
+	if attempts < 3 {
+		t.Errorf("expected at least 3 attempts, got %d", attempts)
+	}
+}
+
+// TestWaitForHealthyTimeout verifies that waitForHealthy returns an error
+// when the server never becomes healthy.
+func TestWaitForHealthyTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	err := waitForHealthy(t.Context(), srv.URL, 2*time.Second)
+	if err == nil {
+		t.Error("expected timeout error, got nil")
+	}
 }
