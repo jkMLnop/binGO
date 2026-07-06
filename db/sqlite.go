@@ -862,12 +862,19 @@ func (s *SQLiteStore) SetRoomLinkedCode(ctx context.Context, code string, linked
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE rooms SET linked_room_code = ? WHERE code = ?`,
 		linkedRoomCode, code,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to set linked_room_code for room %s: %w", code, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for room %s linked_room_code update: %w", code, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("room not found: %w", sql.ErrNoRows)
 	}
 	return nil
 }
