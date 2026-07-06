@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const STAGING_BASE_URL = process.env.STAGING_BASE_URL || "https://bingo-server-staging.fly.dev";
-const PROD_BASE_URL = process.env.PROD_BASE_URL || "https://bingo-server.fly.dev";
+const PROD_BASE_URL = process.env.PROD_BASE_URL || "https://yubetcha.com";
 
 // Agent key must be explicitly provided via env — no default.
 // Tests requiring a valid key are skipped when AGENT_API_KEY is unset.

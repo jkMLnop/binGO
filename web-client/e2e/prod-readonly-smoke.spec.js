@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const PROD_BASE_URL = process.env.PROD_BASE_URL || "https://bingo-server.fly.dev";
+const PROD_BASE_URL = process.env.PROD_BASE_URL || "https://yubetcha.com";
 
 test("prod status endpoint is healthy", async ({ request }) => {
   const response = await request.get(`${PROD_BASE_URL}/api/status`);
