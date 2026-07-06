@@ -617,13 +617,15 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 
 	// Include room code if this game is attached to a room (Phase 11.0)
 	roomCode := s.roomCodeForGame(game)
+	linkedRoomCode := s.linkedRoomCodeForGame(game) // Phase 13.1
 
 	welcomeMsg := ServerMessage{
-		Type:      "welcome",
-		GameID:    game.ID,
-		Code:      game.Code,   // Phase 7.3: Include game code
-		RoomCode:  roomCode,    // Phase 11.0: 5-char room code (empty for standalone)
-		HostID:    game.HostID, // Include host player ID (immutable)
+		Type:           "welcome",
+		GameID:         game.ID,
+		Code:           game.Code,   // Phase 7.3: Include game code
+		RoomCode:       roomCode,    // Phase 11.0: 5-char room code (empty for standalone)
+		LinkedRoomCode: linkedRoomCode, // Phase 13.1: side-bet linked room code
+		HostID:         game.HostID, // Include host player ID (immutable)
 		PlayerID:  player.ID,
 		Username:  player.ID, // username is the player ID
 		Token:     token,     // Include JWT token

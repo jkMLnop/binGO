@@ -163,10 +163,19 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to migrate llm_feedback.generation_mode: %w", err)
 	}
 
+	// Phase 13.1: linked room code for side-bet / linked rooms.
+	if err := s.addColumnIfNotExists(ctx, "rooms", "linked_room_code", "TEXT"); err != nil {
+		return fmt.Errorf("failed to migrate rooms.linked_room_code: %w", err)
+	}
+
 	// Phase 3: indexes that depend on migrated columns.
 	if _, err := s.db.ExecContext(ctx,
 		`CREATE INDEX IF NOT EXISTS idx_wins_room_code ON wins_history(room_code)`); err != nil {
 		return fmt.Errorf("failed to create idx_wins_room_code: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_rooms_linked_room_code ON rooms(linked_room_code)`); err != nil {
+		return fmt.Errorf("failed to create idx_rooms_linked_room_code: %w", err)
 	}
 
 	return nil
@@ -803,16 +812,20 @@ func (s *SQLiteStore) GetRoom(ctx context.Context, code string) (*Room, error) {
 	defer s.mu.RUnlock()
 
 	room := &Room{}
+	var linkedRoomCode sql.NullString
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, code, host_id, created_at FROM rooms WHERE code = ?`,
+		`SELECT id, code, host_id, linked_room_code, created_at FROM rooms WHERE code = ?`,
 		code,
-	).Scan(&room.ID, &room.Code, &room.HostID, &room.CreatedAt)
+	).Scan(&room.ID, &room.Code, &room.HostID, &linkedRoomCode, &room.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("room not found: %w", sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query room: %w", err)
+	}
+	if linkedRoomCode.Valid {
+		room.LinkedRoomCode = &linkedRoomCode.String
 	}
 	return room, nil
 }
@@ -823,21 +836,72 @@ func (s *SQLiteStore) GetRoomByGameCode(ctx context.Context, gameCode string) (*
 	defer s.mu.RUnlock()
 
 	room := &Room{}
+	var linkedRoomCode sql.NullString
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT r.id, r.code, r.host_id, r.created_at
+		`SELECT r.id, r.code, r.host_id, r.linked_room_code, r.created_at
 		 FROM rooms r
 		 JOIN games g ON g.room_code = r.code
 		 WHERE g.code = ?`,
 		gameCode,
-	).Scan(&room.ID, &room.Code, &room.HostID, &room.CreatedAt)
+	).Scan(&room.ID, &room.Code, &room.HostID, &linkedRoomCode, &room.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("room not found for game code %s: %w", gameCode, sql.ErrNoRows)
 		}
 		return nil, fmt.Errorf("failed to query room by game code: %w", err)
 	}
+	if linkedRoomCode.Valid {
+		room.LinkedRoomCode = &linkedRoomCode.String
+	}
 	return room, nil
+}
+
+// SetRoomLinkedCode sets or updates the linked_room_code for a room.
+func (s *SQLiteStore) SetRoomLinkedCode(ctx context.Context, code string, linkedRoomCode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE rooms SET linked_room_code = ? WHERE code = ?`,
+		linkedRoomCode, code,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set linked_room_code for room %s: %w", code, err)
+	}
+	return nil
+}
+
+// GetLinkedRooms returns all rooms linked to the given parent room code.
+func (s *SQLiteStore) GetLinkedRooms(ctx context.Context, roomCode string) ([]*Room, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, code, host_id, linked_room_code, created_at FROM rooms WHERE linked_room_code = ?`,
+		roomCode,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query linked rooms for %s: %w", roomCode, err)
+	}
+	defer rows.Close()
+
+	var rooms []*Room
+	for rows.Next() {
+		r := &Room{}
+		var lrc sql.NullString
+		if err := rows.Scan(&r.ID, &r.Code, &r.HostID, &lrc, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan linked room: %w", err)
+		}
+		if lrc.Valid {
+			r.LinkedRoomCode = &lrc.String
+		}
+		rooms = append(rooms, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating linked rooms: %w", err)
+	}
+	return rooms, nil
 }
 
 // ── Buzzword operations (Phase 11.3) ─────────────────────────────────────────

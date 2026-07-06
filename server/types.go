@@ -16,7 +16,8 @@ type ServerMessage struct {
 	Type                string       `json:"type"` // "welcome", "room_welcome", "game_ended", "error", "suggestion_broadcast", "bets_update"
 	GameID              string       `json:"game_id"`
 	Code                string       `json:"code,omitempty"`      // Phase 7.3: Game code for joining
-	RoomCode            string       `json:"room_code,omitempty"` // Phase 11.0: 5-char room code
+	RoomCode            string       `json:"room_code,omitempty"`             // Phase 11.0: 5-char room code
+	LinkedRoomCode      *string      `json:"linked_room_code,omitempty"`       // Phase 13.1: linked side-bet room code
 	HostID              string       `json:"host_id,omitempty"`   // Host player ID (immutable)
 	PlayerID            string       `json:"player_id"`
 	Username            string       `json:"username,omitempty"` // authenticated username

@@ -15,11 +15,12 @@ import (
 // The room code (5-char alphanumeric) is the player-facing identifier.
 // The associated game (BINGO-XXXXX) is created lazily on first room_login.
 type Room struct {
-	Code      string // 5-char alphanumeric, e.g. "AB3K7"
-	HostID    string // First player to log into the room
-	Game      *Game  // nil until the first player connects via room_login
-	CreatedAt time.Time
-	mu        sync.RWMutex
+	Code            string  // 5-char alphanumeric, e.g. "AB3K7"
+	HostID          string  // First player to log into the room
+	LinkedRoomCode  *string // Phase 13.1: nullable — nil for standalone rooms, set for side-bet rooms
+	Game            *Game   // nil until the first player connects via room_login
+	CreatedAt       time.Time
+	mu              sync.RWMutex
 }
 
 // NewRoom creates a new in-memory room with a generated code.
@@ -74,6 +75,7 @@ func (s *Server) getOrCreateRoom(code string) (*Room, error) {
 		dbRoom, err := s.DB.GetRoom(ctx, code)
 		if err == nil && dbRoom != nil {
 			r := NewRoom(dbRoom.Code, dbRoom.HostID)
+			r.LinkedRoomCode = dbRoom.LinkedRoomCode
 			s.RoomsMu.Lock()
 			s.Rooms[code] = r
 			s.RoomsMu.Unlock()
@@ -136,4 +138,17 @@ func (s *Server) roomCodeForGame(game *Game) string {
 		}
 	}
 	return ""
+}
+
+// linkedRoomCodeForGame returns the linked room code for the room attached to a
+// game, or nil if the room has no linked room. (Phase 13.1)
+func (s *Server) linkedRoomCodeForGame(game *Game) *string {
+	s.RoomsMu.RLock()
+	defer s.RoomsMu.RUnlock()
+	for _, room := range s.Rooms {
+		if g := room.GetGame(); g != nil && g.ID == game.ID {
+			return room.LinkedRoomCode
+		}
+	}
+	return nil
 }
