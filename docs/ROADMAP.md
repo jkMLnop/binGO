@@ -71,16 +71,6 @@ Before scaling to K8s, establish a persistent observability layer:
   - Integrate k6 metrics with self-hosted Prometheus/Grafana for unified dashboards (load test results alongside app metrics)
   - Keep existing `full_system_load_test.go` for quick smoke tests; k6 for capacity planning and stress testing
 
-#### Phase 12: AI-Powered Buzzword Generation ✅
-**Status:** Complete. See CHANGELOG.md v9.3.0 for full details.
-
-
-
-**Remaining (moved to `binGO` repo):**
-- [ ] **Deployment docs** (`docs/DEPLOYMENT.md`): Add DEEPSEEK env vars documentation.
-
----
-
 #### Phase 13: Rooms, Live Bets & Bet Exchange
 **Goal:** Persistent rooms hosting bingo games and a live prediction-bet exchange. Implemented in 6 incremental sub-phases.
 
@@ -98,15 +88,6 @@ Bet code:       BET-AB3K7-X9Q2M   (room code + 5-char random suffix)
 Branch bet:     BET-AB3K7-R7KP1   (same room prefix; parent_bet_code → BET-AB3K7-X9Q2M)
 Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 ```
-
----
-
-##### Phase 13.0: Prerequisite — Rename GameBet types ✅
-
-- [x] Rename `Bet` → `GameBet` and `BetCondition` → `GameBetCondition` in `server/types.go`
-- [x] Update all references in `server/server.go`, `server/game.go` (`Game.Bets []Bet` → `[]GameBet`)
-- [x] Update `web-client/src/lib/types.ts` and `web-client/src/App.tsx` to use renamed types
-- [x] Run `go test ./...` and web client build to confirm no regressions
 
 ---
 
@@ -302,83 +283,6 @@ Webhook strategy: use polling (5-min interval) to avoid inbound connection requi
 - [ ] **Publish to server**: approved suggestions → `POST /api/public-bets/` with `source_type=youtube|twitch`, `status=open`, `creator_username` tag. Appear on landing page trending section.
 - [ ] **Scheduling**: full ingestion + generation run weekly per creator (heavy). Pattern extraction cached — only re-run if new content volume > 5 items since last run.
 - [ ] **Tests**: pattern extraction with known creator transcript fixture. Bet generation smoke test (verify structured output schema). Score filter boundary tests. End-to-end: corpus → published bet on local server.
-
----
-
-#### Phase 15: Agentic DevOps Loop
-**Goal:** Close the human-in-the-loop gap between code push and confirmed healthy deployment. A cloud agent watches every CI run, reads Fly.io logs on failure, generates a targeted hotfix branch, runs tests, and opens a PR — all without manual intervention.
-
-**Motivation:** The staging crash-loop from Phase 11 (SQLite schema migration missing `room_code` column) required ~2 hours of manual diagnosis and repair that a well-instrumented agent could have resolved in minutes. This phase makes that entire loop autonomous.
-
-**Architecture:**
-
-```
-GitHub Actions CI (push to main)
-  ↓
-Dagger pipeline: test → build → deploy → smoke-test
-  ↓ (on smoke-test failure)
-GitHub Actions: trigger "hotfix agent" workflow
-  ↓
-Agent workflow:
-  1. fetch Fly.io logs (flyctl logs --no-tail)
-  2. extract error pattern (structured log field or stderr line)
-  3. call LLM with: error message + relevant source files + git diff
-  4. LLM proposes minimal fix (unified diff)
-  5. agent applies diff to a new feat/hotfix-<timestamp> branch
-  6. runs go test ./... + integration tests
-  7. opens PR against main with "[auto-hotfix]" prefix
-  8. posts Fly.io log excerpt as PR comment (evidence)
-  9. pings owner via GitHub notification
-```
-
-**Design decisions:**
-- Agent is a GitHub Actions workflow, not a standalone service — no additional infrastructure, runs in the CI environment.
-- LLM: GitHub Models API (free tier, GPT-4o or Claude Sonnet) for code generation. No local Ollama needed — cloud agent can't reach a local machine.
-- Scope limited: agent only opens PRs, never auto-merges. Human approves and merges. Trust boundary is explicit.
-- Agent auth: uses `GITHUB_TOKEN` for PR/branch creation; `FLY_API_TOKEN` for log fetching. Both already exist as CI secrets.
-- Idempotent: one hotfix PR per failed CI run (tagged with run ID). Re-runs don't create duplicates.
-- Smoke-test step in Dagger: after `fly deploy`, wait 15s and `curl /api/status` — fail the pipeline immediately rather than waiting for Fly.io's health-check timeout. This is the trigger for the agent loop.
-
----
-
-##### Phase 15.0: Dagger Smoke-Test Step ✅
-
-**Goal:** Add a health-check step to the Dagger `deploy` function. Pipeline fails fast if the deployed server doesn't respond within 30s. Prerequisite for all other Phase 15 sub-phases.
-
-- [x] **`dagger/main.go`**: After `fly deploy`, add a `waitForHealthy(ctx, appURL string, timeoutSeconds int) error` helper. Polls `GET <appURL>/api/status` every 3s for up to `timeoutSeconds`. Fails the Dagger pipeline with `"deploy health check failed: <last error>"` if server never responds. `appURL` derived from env: `https://bingo-server-staging.fly.dev` for staging, `https://bingo-server.fly.dev` for production.
-- [x] **Tests** (`dagger/main_test.go`): `waitForHealthy` unit tests — mock HTTP server returning 200 after N attempts; timeout reached; immediate 200.
-
----
-
-##### Phase 15.1: Hotfix Agent Workflow ✅
-
-**Goal:** GitHub Actions workflow triggered on CI failure that fetches logs, calls LLM, generates a fix branch, and opens a PR.
-
-- [x] **`.github/workflows/hotfix-agent.yml`**: Workflow triggered by `workflow_run` event (on `ci.yml` failure) or manually via `workflow_dispatch`. Steps:
-  1. Checkout repo
-  2. `flyctl logs --app bingo-server-staging --no-tail` → extract last 50 lines
-  3. Identify error pattern: grep for `level=error` or `Failed to initialize` or `panic:`
-  4. Call DeepSeek API (`DEEPSEEK_API_KEY` + `DEEPSEEK_BASE_URL`) with system prompt + error + relevant files (identified by file path in error message)
-  5. Apply LLM-generated unified diff via `git apply`
-  6. Run `go build ./...` and `go test ./...` — abort and post failure comment if tests fail
-  7. Create branch `feat/hotfix-<run-id>`, push, open PR via `gh pr create`
-  8. Post PR comment with raw Fly.io log excerpt and LLM reasoning
-- [x] **`tools/hotfix-agent/main.go`**: CLI tool reads error logs from stdin, extracts Go file paths (`[\w\-/]+\.go`), caps at 3 files/8KB each, calls DeepSeek API, outputs unified diff
-- [x] **`tools/hotfix-agent/main_test.go`**: Tests for `extractGoFiles` (6 cases) and `buildPrompt` (2 cases)
-- [x] **Secrets**: `FLY_API_TOKEN`, `GH_TOKEN`, `DEEPSEEK_API_KEY` (new — added to repo secrets)
-
----
-
-##### Phase 15.2: Agent Observability ✅
-
-**Goal:** Track agent activations, success rate, and time-to-PR in Prometheus/Grafana.
-
-- [x] **`server/metrics.go`**: `HotfixTotal` CounterVec (labels: `outcome` = `pr_opened|tests_failed|no_fix_generated`), `HotfixLatency` Histogram
-- [x] **`server/auth.go`**: `agentKeyMiddleware()` — validates `X-Agent-Key` against `AGENT_API_KEY` env
-- [x] **`server/api.go`**: `POST /metrics/agent-event` endpoint with `AgentEventRequest` struct
-- [x] **`.github/workflows/hotfix-agent.yml`**: Posts agent-event to staging after PR creation
-- [x] **`web-client/e2e/agent-metrics-smoke.spec.js`**: Playwright smoke tests for staging and production (5 tests)
-- [x] All 12 Playwright tests pass ✅
 
 ---
 
