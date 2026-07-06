@@ -519,8 +519,6 @@ func TestCreateRoomWithLinkedCode(t *testing.T) {
 // given parent room code and returns nil/empty when no links exist.
 func TestGetLinkedRoomsDB(t *testing.T) {
 	srv := startTestServerWithDB(t, "9978")
-	defer srv.Stop(context.Background())
-	time.Sleep(100 * time.Millisecond)
 
 	// Create two parent rooms and linked child rooms directly via API
 	parentA := createRoomForTest(t, "9978")
