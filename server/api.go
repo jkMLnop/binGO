@@ -377,12 +377,13 @@ func getGameStatus(game *Game) string {
 
 // RoomInfo is the API response shape for room endpoints.
 type RoomInfo struct {
-	Code        string `json:"code"`      // 5-char room code
-	GameCode    string `json:"game_code"` // BINGO-XXXXX (empty if game not yet created)
-	HostID      string `json:"host_id"`
-	PlayerCount int    `json:"player_count"`
-	GameStatus  string `json:"game_status"` // "pending", "active", "ended"
-	CustomBoard bool   `json:"custom_board_used"`
+	Code           string  `json:"code"`             // 5-char room code
+	GameCode       string  `json:"game_code"`        // BINGO-XXXXX (empty if game not yet created)
+	HostID         string  `json:"host_id"`
+	PlayerCount    int     `json:"player_count"`
+	GameStatus     string  `json:"game_status"`      // "pending", "active", "ended"
+	CustomBoard    bool    `json:"custom_board_used"`
+	LinkedRoomCode *string `json:"linked_room_code"` // Phase 13.1: nullable — set when room is a side-bet room
 }
 
 // handleCreateRoom creates a new room.
@@ -394,7 +395,8 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		HostID string `json:"host_id"`
+		HostID         string  `json:"host_id"`
+		LinkedRoomCode *string `json:"linked_room_code"` // Phase 13.1: optional side-bet room link
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		body.HostID = "" // allow empty body → auto-generate host ID
@@ -411,13 +413,27 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 13.1: set linked room code if requested, after room creation.
+	if body.LinkedRoomCode != nil && *body.LinkedRoomCode != "" {
+		lc := strings.ToUpper(*body.LinkedRoomCode)
+		if s.DB != nil {
+			if setErr := s.DB.SetRoomLinkedCode(r.Context(), room.Code, lc); setErr != nil {
+				log.Printf("Error: failed to set linked_room_code for room %s: %v", room.Code, setErr)
+				writeAPIError(w, http.StatusInternalServerError, "failed to set linked_room_code")
+				return
+			}
+		}
+		room.LinkedRoomCode = &lc
+	}
+
 	info := RoomInfo{
-		Code:        room.Code,
-		GameCode:    "",
-		HostID:      room.HostID,
-		PlayerCount: 0,
-		GameStatus:  "pending",
-		CustomBoard: false,
+		Code:           room.Code,
+		GameCode:       "",
+		HostID:         room.HostID,
+		PlayerCount:    0,
+		GameStatus:     "pending",
+		CustomBoard:    false,
+		LinkedRoomCode: room.LinkedRoomCode,
 	}
 	if s.DB != nil {
 		if words, getErr := s.DB.GetRoomBuzzwords(r.Context(), room.Code); getErr == nil && len(words) > 0 {
@@ -474,11 +490,12 @@ func (s *Server) handleGetRoom(w http.ResponseWriter, r *http.Request, code stri
 	}
 
 	info := RoomInfo{
-		Code:        room.Code,
-		HostID:      room.HostID,
-		PlayerCount: 0,
-		GameStatus:  "pending",
-		CustomBoard: false,
+		Code:           room.Code,
+		HostID:         room.HostID,
+		PlayerCount:    0,
+		GameStatus:     "pending",
+		CustomBoard:    false,
+		LinkedRoomCode: room.LinkedRoomCode,
 	}
 	if s.DB != nil {
 		if words, getErr := s.DB.GetRoomBuzzwords(r.Context(), room.Code); getErr == nil && len(words) > 0 {

@@ -439,3 +439,162 @@ func TestRoomLeaderboard(t *testing.T) {
 	}
 	t.Logf("✓ fresh room leaderboard returned empty list for room %s", roomCode)
 }
+
+// TestCreateRoomWithLinkedCode verifies that creating a room with linked_room_code
+// in the request body stores the link and returns it in GET /api/room/:code.
+func TestCreateRoomWithLinkedCode(t *testing.T) {
+	startTestServerWithDB(t, "9979")
+
+	// Create a parent room first
+	parentCode := createRoomForTest(t, "9979")
+
+	// Create a side-bet room linked to the parent
+	body, err := json.Marshal(map[string]interface{}{
+		"host_id":          "side-bet-host",
+		"linked_room_code": parentCode,
+	})
+	if err != nil {
+		t.Fatalf("marshal create room body: %v", err)
+	}
+	resp, err := http.Post("http://localhost:9979/api/rooms", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/rooms with linked_room_code failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var createPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Code           string  `json:"code"`
+			LinkedRoomCode *string `json:"linked_room_code"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createPayload); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if !createPayload.Success {
+		t.Fatal("expected success=true")
+	}
+	childCode := createPayload.Data.Code
+	if childCode == "" {
+		t.Fatal("expected non-empty room code")
+	}
+	if createPayload.Data.LinkedRoomCode == nil || *createPayload.Data.LinkedRoomCode != parentCode {
+		t.Fatalf("expected linked_room_code=%s in create response, got %v", parentCode, createPayload.Data.LinkedRoomCode)
+	}
+
+	// Verify GET /api/room/:code also returns linked_room_code
+	getResp, err := http.Get(fmt.Sprintf("http://localhost:9979/api/room/%s", childCode))
+	if err != nil {
+		t.Fatalf("GET /api/room/:code failed: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", getResp.StatusCode)
+	}
+
+	var getPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Code           string  `json:"code"`
+			LinkedRoomCode *string `json:"linked_room_code"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&getPayload); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if getPayload.Data.LinkedRoomCode == nil || *getPayload.Data.LinkedRoomCode != parentCode {
+		t.Fatalf("expected linked_room_code=%s in GET response, got %v", parentCode, getPayload.Data.LinkedRoomCode)
+	}
+
+	t.Logf("✓ linked room creation and retrieval: parent=%s child=%s", parentCode, childCode)
+}
+
+// TestGetLinkedRoomsDB verifies that GetLinkedRooms returns all rooms linked to a
+// given parent room code and returns nil/empty when no links exist.
+func TestGetLinkedRoomsDB(t *testing.T) {
+	srv := startTestServerWithDB(t, "9978")
+
+	// Create two parent rooms and linked child rooms directly via API
+	parentA := createRoomForTest(t, "9978")
+	parentB := createRoomForTest(t, "9978")
+
+	makeLinkedRoom := func(parent string) string {
+		body, err := json.Marshal(map[string]interface{}{
+			"host_id":          "test-host",
+			"linked_room_code": parent,
+		})
+		if err != nil {
+			t.Fatalf("marshal linked room body: %v", err)
+		}
+		resp, err := http.Post("http://localhost:9978/api/rooms", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST linked room failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST linked room: expected 200, got %d", resp.StatusCode)
+		}
+		var p struct {
+			Success bool `json:"success"`
+			Data    struct{ Code string `json:"code"` } `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+			t.Fatalf("decode linked room response: %v", err)
+		}
+		if !p.Success || p.Data.Code == "" {
+			t.Fatalf("unexpected linked room response: success=%v code=%q", p.Success, p.Data.Code)
+		}
+		return p.Data.Code
+	}
+
+	childA1 := makeLinkedRoom(parentA)
+	childA2 := makeLinkedRoom(parentA)
+	childB1 := makeLinkedRoom(parentB)
+
+	// Verify GetLinkedRooms via the DB store directly
+	ctx := context.Background()
+	linkedA, err := srv.DB.GetLinkedRooms(ctx, parentA)
+	if err != nil {
+		t.Fatalf("GetLinkedRooms(%s) failed: %v", parentA, err)
+	}
+	if len(linkedA) != 2 {
+		t.Fatalf("expected 2 rooms linked to parent A, got %d", len(linkedA))
+	}
+	for _, r := range linkedA {
+		if r.Code != childA1 && r.Code != childA2 {
+			t.Errorf("unexpected linked room: %s", r.Code)
+		}
+		if r.LinkedRoomCode == nil || *r.LinkedRoomCode != parentA {
+			t.Errorf("linked room %s: expected LinkedRoomCode=%s, got %v", r.Code, parentA, r.LinkedRoomCode)
+		}
+	}
+
+	linkedB, err := srv.DB.GetLinkedRooms(ctx, parentB)
+	if err != nil {
+		t.Fatalf("GetLinkedRooms(%s) failed: %v", parentB, err)
+	}
+	if len(linkedB) != 1 {
+		t.Fatalf("expected 1 room linked to parent B, got %d", len(linkedB))
+	}
+	if linkedB[0].Code != childB1 {
+		t.Errorf("expected %s, got %s", childB1, linkedB[0].Code)
+	}
+
+	// No rooms linked to an unknown code
+	emptyResult, err := srv.DB.GetLinkedRooms(ctx, "ZZZZZ")
+	if err != nil {
+		t.Fatalf("GetLinkedRooms(ZZZZZ) failed: %v", err)
+	}
+	if len(emptyResult) != 0 {
+		t.Fatalf("expected 0 linked rooms for unknown code, got %d", len(emptyResult))
+	}
+
+	t.Logf("✓ GetLinkedRooms: parentA has %d children, parentB has %d, unknown has 0",
+		len(linkedA), len(linkedB))
+}
