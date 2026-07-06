@@ -49,3 +49,20 @@ Before adding a helper, check whether the logic already exists. Centralise share
 - Use table-driven tests with `t.Run()` for multiple cases
 - Pass `context.Context` as the first argument where applicable
 - Prefer explicit returns over named return values
+
+## PR Merge Checklist
+
+Before merging a pull request:
+
+1. ✅ All CI checks must be green (`go test ./...`, `go test -tags=container ./tests`, `npx playwright test`)
+2. ✅ **Copilot Code Review must be complete and all comments resolved.** Request a review via `@Copilot` on the PR. Wait for the review to finish (state: `APPROVED` or `COMMENTED`). Address every comment — either fix the issue or reply explaining why it's not applicable. Do not merge with pending comments.
+3. ✅ Manual smoke test if the change touches WebSocket protocol, game lifecycle, or auth
+4. ✅ Roadmap updated if a phase was completed (`docs/ROADMAP.md`)
+
+The Copilot reviewer is an excellent defense against:
+- Missing validation (unbounded Prometheus label cardinality, unvalidated inputs)
+- Insecure defaults (hard-coded dev keys going to production, plain string key comparisons)
+- Dead code and unused imports
+- Missing error handling (e.g., ignored HTTP status codes)
+- Test weaknesses (overly permissive assertions that mask regressions)
+
