@@ -415,18 +415,15 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 
 	// Phase 13.1: set linked room code if requested, after room creation.
 	if body.LinkedRoomCode != nil && *body.LinkedRoomCode != "" {
+		lc := strings.ToUpper(*body.LinkedRoomCode)
 		if s.DB != nil {
-			lc := strings.ToUpper(*body.LinkedRoomCode)
 			if setErr := s.DB.SetRoomLinkedCode(r.Context(), room.Code, lc); setErr != nil {
-				log.Printf("Warning: failed to set linked_room_code for room %s: %v", room.Code, setErr)
-			} else {
-				room.LinkedRoomCode = &lc
+				log.Printf("Error: failed to set linked_room_code for room %s: %v", room.Code, setErr)
+				writeAPIError(w, http.StatusInternalServerError, "failed to set linked_room_code")
+				return
 			}
-		} else {
-			// No DB — set in memory only.
-			lc := strings.ToUpper(*body.LinkedRoomCode)
-			room.LinkedRoomCode = &lc
 		}
+		room.LinkedRoomCode = &lc
 	}
 
 	info := RoomInfo{
