@@ -525,19 +525,31 @@ func TestGetLinkedRoomsDB(t *testing.T) {
 	parentB := createRoomForTest(t, "9978")
 
 	makeLinkedRoom := func(parent string) string {
-		body, _ := json.Marshal(map[string]interface{}{
+		body, err := json.Marshal(map[string]interface{}{
 			"host_id":          "test-host",
 			"linked_room_code": parent,
 		})
+		if err != nil {
+			t.Fatalf("marshal linked room body: %v", err)
+		}
 		resp, err := http.Post("http://localhost:9978/api/rooms", "application/json", bytes.NewReader(body))
 		if err != nil {
 			t.Fatalf("POST linked room failed: %v", err)
 		}
 		defer resp.Body.Close()
-		var p struct {
-			Data struct{ Code string `json:"code"` } `json:"data"`
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST linked room: expected 200, got %d", resp.StatusCode)
 		}
-		json.NewDecoder(resp.Body).Decode(&p)
+		var p struct {
+			Success bool `json:"success"`
+			Data    struct{ Code string `json:"code"` } `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+			t.Fatalf("decode linked room response: %v", err)
+		}
+		if !p.Success || p.Data.Code == "" {
+			t.Fatalf("unexpected linked room response: success=%v code=%q", p.Success, p.Data.Code)
+		}
 		return p.Data.Code
 	}
 
