@@ -449,10 +449,13 @@ func TestCreateRoomWithLinkedCode(t *testing.T) {
 	parentCode := createRoomForTest(t, "9979")
 
 	// Create a side-bet room linked to the parent
-	body, _ := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]interface{}{
 		"host_id":          "side-bet-host",
 		"linked_room_code": parentCode,
 	})
+	if err != nil {
+		t.Fatalf("marshal create room body: %v", err)
+	}
 	resp, err := http.Post("http://localhost:9979/api/rooms", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST /api/rooms with linked_room_code failed: %v", err)
