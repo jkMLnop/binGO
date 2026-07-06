@@ -19,7 +19,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -184,6 +183,10 @@ func callLLM(apiKey, baseURL, model, prompt string) (string, error) {
 		return "", fmt.Errorf("read response: %w", err)
 	}
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("API returned HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
 	var chatResp chatCompletionResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
 		return "", fmt.Errorf("unmarshal response: %w", err)
@@ -199,17 +202,4 @@ func callLLM(apiKey, baseURL, model, prompt string) (string, error) {
 
 	content := chatResp.Choices[0].Message.Content
 	return content, nil
-}
-
-// applyDiff applies a unified diff string using `git apply`.
-func applyDiff(repoDir, diff string) error {
-	cmd := exec.Command("git", "apply")
-	cmd.Dir = repoDir
-	cmd.Stdin = strings.NewReader(diff)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git apply: %w\nstderr: %s", err, stderr.String())
-	}
-	return nil
 }

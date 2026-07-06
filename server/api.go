@@ -1108,10 +1108,18 @@ func (s *Server) handleGenerateBuzzwordsForGame(w http.ResponseWriter, r *http.R
 
 // AgentEventRequest is the body for POST /metrics/agent-event.
 type AgentEventRequest struct {
-	Event     string  `json:"event"`      // "hotfix_success" or "hotfix_failure"
+	Outcome   string  `json:"outcome"`    // see validAgentOutcomes
 	RunID     string  `json:"run_id"`     // GitHub Actions run ID
-	Outcome   string  `json:"outcome"`    // "pr_opened", "tests_failed", "no_fix_generated"
 	LatencyMs float64 `json:"latency_ms"` // time from CI failure to PR opened
+}
+
+// validAgentOutcomes is the allowlist of outcomes accepted by /metrics/agent-event.
+// Unbounded label cardinality can harm Prometheus performance, so we reject
+// any value not in this set.
+var validAgentOutcomes = map[string]bool{
+	"pr_opened":        true,
+	"tests_failed":     true,
+	"no_fix_generated": true,
 }
 
 // handleAgentEvent records an agent observability event.
@@ -1132,8 +1140,8 @@ func (s *Server) handleAgentEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.Outcome == "" {
-		writeAPIError(w, http.StatusBadRequest, "outcome is required")
+	if !validAgentOutcomes[body.Outcome] {
+		writeAPIError(w, http.StatusBadRequest, "invalid outcome: must be one of pr_opened, tests_failed, no_fix_generated")
 		return
 	}
 

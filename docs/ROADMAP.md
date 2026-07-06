@@ -101,12 +101,12 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
-##### Phase 13.0: Prerequisite — Rename GameBet types
+##### Phase 13.0: Prerequisite — Rename GameBet types ✅
 
-- [ ] Rename `Bet` → `GameBet` and `BetCondition` → `GameBetCondition` in `server/types.go`
-- [ ] Update all references in `server/server.go`, `server/game.go` (`Game.Bets []Bet` → `[]GameBet`)
-- [ ] Update `web-client/src/lib/types.ts` and `web-client/src/App.tsx` to use renamed types
-- [ ] Run `go test ./...` and web client build to confirm no regressions
+- [x] Rename `Bet` → `GameBet` and `BetCondition` → `GameBetCondition` in `server/types.go`
+- [x] Update all references in `server/server.go`, `server/game.go` (`Game.Bets []Bet` → `[]GameBet`)
+- [x] Update `web-client/src/lib/types.ts` and `web-client/src/App.tsx` to use renamed types
+- [x] Run `go test ./...` and web client build to confirm no regressions
 
 ---
 
@@ -341,40 +341,44 @@ Agent workflow:
 
 ---
 
-##### Phase 15.0: Dagger Smoke-Test Step
+##### Phase 15.0: Dagger Smoke-Test Step ✅
+
 **Goal:** Add a health-check step to the Dagger `deploy` function. Pipeline fails fast if the deployed server doesn't respond within 30s. Prerequisite for all other Phase 15 sub-phases.
 
-- [ ] **`dagger/main.go`**: After `fly deploy`, add a `waitForHealthy(ctx, appURL string, timeoutSeconds int) error` helper. Polls `GET <appURL>/api/status` every 3s for up to `timeoutSeconds`. Fails the Dagger pipeline with `"deploy health check failed: <last error>"` if server never responds. `appURL` derived from env: `https://bingo-server-staging.fly.dev` for staging, `https://bingo-server.fly.dev` for production.
-- [ ] **Tests** (`dagger/main_test.go`): `waitForHealthy` unit tests — mock HTTP server returning 200 after N attempts; timeout reached; immediate 200.
+- [x] **`dagger/main.go`**: After `fly deploy`, add a `waitForHealthy(ctx, appURL string, timeoutSeconds int) error` helper. Polls `GET <appURL>/api/status` every 3s for up to `timeoutSeconds`. Fails the Dagger pipeline with `"deploy health check failed: <last error>"` if server never responds. `appURL` derived from env: `https://bingo-server-staging.fly.dev` for staging, `https://bingo-server.fly.dev` for production.
+- [x] **Tests** (`dagger/main_test.go`): `waitForHealthy` unit tests — mock HTTP server returning 200 after N attempts; timeout reached; immediate 200.
 
 ---
 
-##### Phase 15.1: Hotfix Agent Workflow
+##### Phase 15.1: Hotfix Agent Workflow ✅
+
 **Goal:** GitHub Actions workflow triggered on CI failure that fetches logs, calls LLM, generates a fix branch, and opens a PR.
 
-- [ ] **`.github/workflows/hotfix-agent.yml`**: Workflow triggered by `workflow_run` event (on `ci.yml` failure) or manually via `workflow_dispatch`. Steps:
+- [x] **`.github/workflows/hotfix-agent.yml`**: Workflow triggered by `workflow_run` event (on `ci.yml` failure) or manually via `workflow_dispatch`. Steps:
   1. Checkout repo
   2. `flyctl logs --app bingo-server-staging --no-tail` → extract last 50 lines
   3. Identify error pattern: grep for `level=error` or `Failed to initialize` or `panic:`
-  4. Call GitHub Models API (or OpenAI via `OPENAI_API_KEY` secret) with system prompt + error + relevant files (identified by file path in error message)
+  4. Call DeepSeek API (`DEEPSEEK_API_KEY` + `DEEPSEEK_BASE_URL`) with system prompt + error + relevant files (identified by file path in error message)
   5. Apply LLM-generated unified diff via `git apply`
   6. Run `go build ./...` and `go test ./...` — abort and post failure comment if tests fail
   7. Create branch `feat/hotfix-<run-id>`, push, open PR via `gh pr create`
   8. Post PR comment with raw Fly.io log excerpt and LLM reasoning
-- [ ] **LLM prompt template**: System: *"You are a Go backend engineer. A deployment of a Go + SQLite server failed with the error below. Identify the root cause and generate the minimal unified diff to fix it. Focus on the file paths mentioned in the error. Output only a valid unified diff — no prose, no markdown fences."* User: `<error lines>\n\n<relevant source file contents>`.
-- [ ] **Relevant-file extraction**: Parse error message for Go file paths (e.g. `db/sqlite.go:42`) → include those files' contents in the prompt (capped at 8 KB per file, 3 files max to stay within context window).
-- [ ] **Secrets required**: `FLY_API_TOKEN` (already in CI), `GH_TOKEN` (already in CI), `OPENAI_API_KEY` or `GITHUB_MODELS_TOKEN` (new — add to repo secrets).
-- [ ] **Tests**: workflow unit-testable logic (file extraction, prompt assembly) extracted to a shell script or small Go tool in `tools/hotfix-agent/`.
+- [x] **`tools/hotfix-agent/main.go`**: CLI tool reads error logs from stdin, extracts Go file paths (`[\w\-/]+\.go`), caps at 3 files/8KB each, calls DeepSeek API, outputs unified diff
+- [x] **`tools/hotfix-agent/main_test.go`**: Tests for `extractGoFiles` (6 cases) and `buildPrompt` (2 cases)
+- [x] **Secrets**: `FLY_API_TOKEN`, `GH_TOKEN`, `DEEPSEEK_API_KEY` (new — added to repo secrets)
 
 ---
 
-##### Phase 15.2: Agent Observability
-**Goal:** Track agent activations, success rate, and time-to-PR in Prometheus/Grafana so you can see whether the loop is working.
+##### Phase 15.2: Agent Observability ✅
 
-- [ ] **GitHub Actions step** (in `hotfix-agent.yml`): After PR creation, call `POST /metrics/agent-event` (new internal endpoint, agent-key auth) with `{event: "hotfix_pr_opened", run_id, pr_number, error_type}`.
-- [ ] **Server** (`server/metrics.go`): Add `bingo_agent_hotfix_total` CounterVec (labels: `outcome` = `pr_opened|tests_failed|no_fix_generated`). Add `bingo_agent_hotfix_latency_ms` Histogram.
-- [ ] **Grafana dashboard** (`grafana-dashboards/bingo-dashboard.json`): Add "Agentic Ops" row — panel for `bingo_agent_hotfix_total` by outcome, panel for hotfix latency distribution.
-- [ ] **Tests**: agent event endpoint (auth, counter increment).
+**Goal:** Track agent activations, success rate, and time-to-PR in Prometheus/Grafana.
+
+- [x] **`server/metrics.go`**: `HotfixTotal` CounterVec (labels: `outcome` = `pr_opened|tests_failed|no_fix_generated`), `HotfixLatency` Histogram
+- [x] **`server/auth.go`**: `agentKeyMiddleware()` — validates `X-Agent-Key` against `AGENT_API_KEY` env
+- [x] **`server/api.go`**: `POST /metrics/agent-event` endpoint with `AgentEventRequest` struct
+- [x] **`.github/workflows/hotfix-agent.yml`**: Posts agent-event to staging after PR creation
+- [x] **`web-client/e2e/agent-metrics-smoke.spec.js`**: Playwright smoke tests for staging and production (5 tests)
+- [x] All 12 Playwright tests pass ✅
 
 ---
 

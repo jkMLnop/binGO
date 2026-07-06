@@ -2,11 +2,13 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -107,19 +109,24 @@ func generateRandomSecret(length int) string {
 
 // Phase 15.2: Agent auth for hotfix agent observability endpoint.
 
+// agentKeyOnce ensures we only log the missing-key warning once per process.
+var agentKeyOnce sync.Once
+
 const (
-	AgentKeyHeader  = "X-Agent-Key"
-	AgentKeyEnvVar  = "AGENT_API_KEY"
-	DefaultAgentKey = "dev-agent-key-local-only"
+	AgentKeyHeader = "X-Agent-Key"
+	AgentKeyEnvVar = "AGENT_API_KEY"
 )
 
 // agentKeyMiddleware validates the X-Agent-Key header against AGENT_API_KEY.
-// Returns true if the request is authorized, false otherwise.
+// Fails closed: if AGENT_API_KEY is not set, all requests are rejected.
 func agentKeyMiddleware(w http.ResponseWriter, r *http.Request) bool {
 	agentKey := os.Getenv(AgentKeyEnvVar)
 	if agentKey == "" {
-		agentKey = DefaultAgentKey
-		log.Printf("AGENT_API_KEY not set, using default dev key")
+		agentKeyOnce.Do(func() {
+			log.Printf("AGENT_API_KEY not set — agent event endpoint is disabled")
+		})
+		writeAPIError(w, http.StatusServiceUnavailable, "agent metrics endpoint not configured")
+		return false
 	}
 
 	providedKey := r.Header.Get(AgentKeyHeader)
@@ -128,7 +135,7 @@ func agentKeyMiddleware(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	if providedKey != agentKey {
+	if subtle.ConstantTimeCompare([]byte(providedKey), []byte(agentKey)) != 1 {
 		writeAPIError(w, http.StatusForbidden, "invalid X-Agent-Key")
 		return false
 	}

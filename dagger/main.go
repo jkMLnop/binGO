@@ -336,7 +336,12 @@ func waitForHealthy(ctx context.Context, appURL string, timeout time.Duration) e
 			return fmt.Errorf("server did not become healthy within %v", timeout)
 		}
 
-		resp, err := client.Get(healthURL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			return fmt.Errorf("create health check request: %w", err)
+		}
+
+		resp, err := client.Do(req)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resp.Body.Close()
 			return nil

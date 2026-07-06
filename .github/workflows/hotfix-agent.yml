@@ -148,7 +148,7 @@ jobs:
           curl -s -X POST "https://bingo-server-staging.fly.dev/metrics/agent-event" \
             -H "Content-Type: application/json" \
             -H "X-Agent-Key: ${{ secrets.AGENT_API_KEY }}" \
-            -d "{\"event\":\"hotfix_${EVENT}\",\"run_id\":\"${{ github.run_id }}\",\"error_type\":\"deploy\"}" || true
+            -d "{\"outcome\":\"${EVENT}\",\"run_id\":\"${{ github.run_id }}\"}" || true
 
       - name: Upload artifacts on failure
         if: failure()
