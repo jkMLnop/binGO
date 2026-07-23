@@ -17,14 +17,17 @@ type GameStore interface {
 	CreateRoom(ctx context.Context, hostID string) (*Room, error)
 	GetRoom(ctx context.Context, code string) (*Room, error)
 	GetRoomByGameCode(ctx context.Context, gameCode string) (*Room, error)
-	SetRoomLinkedCode(ctx context.Context, code string, linkedRoomCode string) error             // Phase 13.1
-	GetLinkedRooms(ctx context.Context, roomCode string) ([]*Room, error)                        // Phase 13.1
+	SetRoomLinkedCode(ctx context.Context, code string, linkedRoomCode string) error // Phase 13.1
+	GetLinkedRooms(ctx context.Context, roomCode string) ([]*Room, error)            // Phase 13.1
 
 	// Game operations
-	CreateGame(ctx context.Context, code string, hostID string, buzzwords json.RawMessage) (gameID string, err error)
+	CreateGame(ctx context.Context, code string, hostID string, title string, buzzwords json.RawMessage) (gameID string, err error)
 	GetGameByCode(ctx context.Context, code string) (*Game, error)
 	GetGameByID(ctx context.Context, gameID string) (*Game, error)
+	GetGamesByRoom(ctx context.Context, roomCode string) ([]*Game, error)      // Phase 12.5: all non-deleted games for a room
+	SetGameRoomCode(ctx context.Context, gameID string, roomCode string) error // Phase 12.5: link game to room after creation
 	UpdateGameStatus(ctx context.Context, gameID string, status string) error
+	UpdateGameStatusByCode(ctx context.Context, gameCode string, status string) error
 	UpdateGameWinner(ctx context.Context, gameID string, winnerID string) error
 	UpdateGameBuzzwords(ctx context.Context, gameID string, buzzwords json.RawMessage) error
 	DeleteGame(ctx context.Context, gameID string) error
@@ -91,11 +94,11 @@ type LLMFeedbackEntry struct {
 // The room code (5-char alphanumeric) is the player-facing identifier.
 // The associated game code retains the BINGO-XXXXX format for backward compat.
 type Room struct {
-	ID              string
-	Code            string // 5-char alphanumeric, e.g. "AB3K7"
-	HostID          string
-	LinkedRoomCode  *string // Phase 13.1: nullable — nil for standalone rooms, set for side-bet rooms
-	CreatedAt       int64   // Unix timestamp
+	ID             string
+	Code           string // 5-char alphanumeric, e.g. "AB3K7"
+	HostID         string
+	LinkedRoomCode *string // Phase 13.1: nullable — nil for standalone rooms, set for side-bet rooms
+	CreatedAt      int64   // Unix timestamp
 }
 
 // Game represents a game session
@@ -103,6 +106,7 @@ type Game struct {
 	ID        string
 	Code      string
 	HostID    string
+	Title     string  // Board name (Phase 12.5) — set from AI generation topic
 	RoomCode  *string // nullable — nil for standalone games not in a room (Phase 11.0)
 	Status    string  // "active", "ended"
 	Buzzwords json.RawMessage

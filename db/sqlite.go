@@ -168,6 +168,11 @@ func (s *SQLiteStore) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to migrate rooms.linked_room_code: %w", err)
 	}
 
+	// Phase 12.5: game title for multi-board rooms.
+	if err := s.addColumnIfNotExists(ctx, "games", "title", "TEXT"); err != nil {
+		return fmt.Errorf("failed to migrate games.title: %w", err)
+	}
+
 	// Phase 3: indexes that depend on migrated columns.
 	if _, err := s.db.ExecContext(ctx,
 		`CREATE INDEX IF NOT EXISTS idx_wins_room_code ON wins_history(room_code)`); err != nil {
@@ -211,7 +216,7 @@ func (s *SQLiteStore) Close(ctx context.Context) error {
 }
 
 // CreateGame creates a new game record
-func (s *SQLiteStore) CreateGame(ctx context.Context, code string, hostID string, buzzwords json.RawMessage) (string, error) {
+func (s *SQLiteStore) CreateGame(ctx context.Context, code string, hostID string, title string, buzzwords json.RawMessage) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -221,9 +226,9 @@ func (s *SQLiteStore) CreateGame(ctx context.Context, code string, hostID string
 
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO games (id, code, host_id, status, buzzwords, created_at, expires_at)
-		 VALUES (?, ?, ?, 'active', ?, ?, ?)`,
-		gameID, code, hostID, buzzwords, now, expiresAt,
+		`INSERT INTO games (id, code, host_id, title, status, buzzwords, created_at, expires_at)
+		 VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+		gameID, code, hostID, title, buzzwords, now, expiresAt,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create game: %w", err)
@@ -240,10 +245,10 @@ func (s *SQLiteStore) GetGameByCode(ctx context.Context, code string) (*Game, er
 	game := &Game{}
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, code, host_id, room_code, status, buzzwords, winner_id, created_at, ended_at, expires_at
+		`SELECT id, code, host_id, COALESCE(title, ''), room_code, status, buzzwords, winner_id, created_at, ended_at, expires_at
 		 FROM games WHERE code = ?`,
 		code,
-	).Scan(&game.ID, &game.Code, &game.HostID, &game.RoomCode, &game.Status, &game.Buzzwords, &game.WinnerID,
+	).Scan(&game.ID, &game.Code, &game.HostID, &game.Title, &game.RoomCode, &game.Status, &game.Buzzwords, &game.WinnerID,
 		&game.CreatedAt, &game.EndedAt, &game.ExpiresAt)
 
 	if err != nil {
@@ -264,10 +269,10 @@ func (s *SQLiteStore) GetGameByID(ctx context.Context, gameID string) (*Game, er
 	game := &Game{}
 	err := s.db.QueryRowContext(
 		ctx,
-		`SELECT id, code, host_id, room_code, status, buzzwords, winner_id, created_at, ended_at, expires_at
+		`SELECT id, code, host_id, COALESCE(title, ''), room_code, status, buzzwords, winner_id, created_at, ended_at, expires_at
 		 FROM games WHERE id = ?`,
 		gameID,
-	).Scan(&game.ID, &game.Code, &game.HostID, &game.RoomCode, &game.Status, &game.Buzzwords, &game.WinnerID,
+	).Scan(&game.ID, &game.Code, &game.HostID, &game.Title, &game.RoomCode, &game.Status, &game.Buzzwords, &game.WinnerID,
 		&game.CreatedAt, &game.EndedAt, &game.ExpiresAt)
 
 	if err != nil {
@@ -280,7 +285,52 @@ func (s *SQLiteStore) GetGameByID(ctx context.Context, gameID string) (*Game, er
 	return game, nil
 }
 
-// UpdateGameStatus updates a game's status
+// GetGamesByRoom returns all non-deleted games for a room, ordered by creation time.
+// Phase 12.5: used by the Games/Bets panel to list all boards in a room.
+func (s *SQLiteStore) GetGamesByRoom(ctx context.Context, roomCode string) ([]*Game, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, code, host_id, COALESCE(title, ''), room_code, status, buzzwords,
+		        winner_id, created_at, ended_at, expires_at
+		 FROM games
+		 WHERE room_code = ? AND status != 'deleted'
+		 ORDER BY created_at ASC`, roomCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query games by room: %w", err)
+	}
+	defer rows.Close()
+
+	var games []*Game
+	for rows.Next() {
+		g := &Game{}
+		if err := rows.Scan(&g.ID, &g.Code, &g.HostID, &g.Title, &g.RoomCode, &g.Status,
+			&g.Buzzwords, &g.WinnerID, &g.CreatedAt, &g.EndedAt, &g.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("failed to scan game: %w", err)
+		}
+		games = append(games, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating games: %w", err)
+	}
+	return games, nil
+}
+
+// SetGameRoomCode links a game to a room by setting its room_code column.
+// Phase 12.5: used after creating a game in a room to establish the association.
+func (s *SQLiteStore) SetGameRoomCode(ctx context.Context, gameID string, roomCode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(ctx, `UPDATE games SET room_code = ? WHERE id = ?`, roomCode, gameID)
+	if err != nil {
+		return fmt.Errorf("failed to set room_code on game %s: %w", gameID, err)
+	}
+	return nil
+}
+
+// UpdateGameStatus updates a game's status by ID
 func (s *SQLiteStore) UpdateGameStatus(ctx context.Context, gameID string, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -292,6 +342,22 @@ func (s *SQLiteStore) UpdateGameStatus(ctx context.Context, gameID string, statu
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update game status: %w", err)
+	}
+	return nil
+}
+
+// UpdateGameStatusByCode updates a game's status by code
+func (s *SQLiteStore) UpdateGameStatusByCode(ctx context.Context, gameCode string, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE games SET status = ? WHERE code = ?`,
+		status, gameCode,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update game status by code: %w", err)
 	}
 	return nil
 }

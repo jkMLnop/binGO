@@ -219,7 +219,7 @@ func (s *Server) createNewGameLocked() {
 	defer dbCancel()
 	spanCtx, span := s.Tracer.Start(dbCtx, "bingo.game.create")
 	defer span.End()
-	if err := SaveGameToDB(spanCtx, s.DB, newGame, s.Buzzwords); err != nil {
+	if err := SaveGameToDB(spanCtx, s.DB, newGame, s.Buzzwords, ""); err != nil {
 		log.Printf("Warning: failed to save game to DB: %v", err)
 		s.Metrics.RecordError("db")
 	}
@@ -284,7 +284,7 @@ func (s *Server) createGameForHost(ctx context.Context, hostUsername string, cus
 	defer dbCancel()
 	spanCtx, span := s.Tracer.Start(dbCtx, "bingo.game.create")
 	defer span.End()
-	if err := SaveGameToDB(spanCtx, s.DB, newGame, buzzwords); err != nil {
+	if err := SaveGameToDB(spanCtx, s.DB, newGame, buzzwords, ""); err != nil {
 		log.Printf("Warning: failed to save host game to DB: %v", err)
 		s.Metrics.RecordError("db")
 	}
@@ -383,6 +383,8 @@ func (s *Server) handlePlayerConnect(ctx context.Context, ws *websocket.Conn) (*
 			ws.Close()
 			return nil, nil, roomErr
 		}
+		// First player to enter becomes the room host.
+		room.SetHostID(username)
 		// Lazily create the game the first time someone joins this room
 		game = room.GetGame()
 		if game == nil {
@@ -551,6 +553,10 @@ func (s *Server) extractClientIP(r *http.Request) string {
 		return strings.TrimSpace(xff)
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		// Normalise IPv6 loopback to IPv4 so tokens work across both transports.
+		if host == "::1" {
+			return "127.0.0.1"
+		}
 		return host
 	}
 	return r.RemoteAddr
@@ -622,19 +628,19 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 	welcomeMsg := ServerMessage{
 		Type:           "welcome",
 		GameID:         game.ID,
-		Code:           game.Code,   // Phase 7.3: Include game code
-		RoomCode:       roomCode,    // Phase 11.0: 5-char room code (empty for standalone)
+		Code:           game.Code,      // Phase 7.3: Include game code
+		RoomCode:       roomCode,       // Phase 11.0: 5-char room code (empty for standalone)
 		LinkedRoomCode: linkedRoomCode, // Phase 13.1: side-bet linked room code
-		HostID:         game.HostID, // Include host player ID (immutable)
-		PlayerID:  player.ID,
-		Username:  player.ID, // username is the player ID
-		Token:     token,     // Include JWT token
-		Buzzwords: buzzwords,
-		Rows:      s.Rows,
-		Cols:      s.Cols,
-		Players:   game.GetPlayerList(),
-		Winner:    game.Winner,
-		Message:   fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
+		HostID:         game.HostID,    // Include host player ID (immutable)
+		PlayerID:       player.ID,
+		Username:       player.ID, // username is the player ID
+		Token:          token,     // Include JWT token
+		Buzzwords:      buzzwords,
+		Rows:           s.Rows,
+		Cols:           s.Cols,
+		Players:        game.GetPlayerList(),
+		Winner:         game.Winner,
+		Message:        fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
 	}
 
 	if err := websocket.JSON.Send(ws, welcomeMsg); err != nil {

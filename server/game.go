@@ -53,6 +53,7 @@ type Game struct {
 	ID                  string
 	Code                string             // Join code for this game
 	HostID              string             // ID of the host player (immutable once set on first player connect)
+	Title               string             // Board name (Phase 12.5) — set from AI generation topic
 	Players             map[string]*Player // playerID -> Player
 	IsActive            bool               // Game is in progress
 	Orphaned            bool               // True when all players disconnected without a winner

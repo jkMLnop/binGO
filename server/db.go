@@ -47,7 +47,7 @@ func (cfg *DBConfig) Close(ctx context.Context) error {
 }
 
 // SaveGameToDB persists a game session to the database
-func SaveGameToDB(ctx context.Context, store db.GameStore, game *Game, buzzwords [][]string) error {
+func SaveGameToDB(ctx context.Context, store db.GameStore, game *Game, buzzwords [][]string, title string) error {
 	if store == nil {
 		return nil // DB not enabled
 	}
@@ -66,7 +66,7 @@ func SaveGameToDB(ctx context.Context, store db.GameStore, game *Game, buzzwords
 	}
 
 	// Create new game in DB
-	gameID, err := store.CreateGame(ctx, game.Code, game.HostID, json.RawMessage(buzzwordData))
+	gameID, err := store.CreateGame(ctx, game.Code, game.HostID, title, json.RawMessage(buzzwordData))
 	if err != nil {
 		return fmt.Errorf("failed to save game to DB: %w", err)
 	}

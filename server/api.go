@@ -377,11 +377,12 @@ func getGameStatus(game *Game) string {
 
 // RoomInfo is the API response shape for room endpoints.
 type RoomInfo struct {
-	Code           string  `json:"code"`             // 5-char room code
-	GameCode       string  `json:"game_code"`        // BINGO-XXXXX (empty if game not yet created)
+	Code           string  `json:"code"`      // 5-char room code
+	GameCode       string  `json:"game_code"` // BINGO-XXXXX (empty if game not yet created)
 	HostID         string  `json:"host_id"`
+	HostUsername   string  `json:"host_username"` // Phase 12.5: host's username (from hosts table or empty)
 	PlayerCount    int     `json:"player_count"`
-	GameStatus     string  `json:"game_status"`      // "pending", "active", "ended"
+	GameStatus     string  `json:"game_status"` // "pending", "active", "ended"
 	CustomBoard    bool    `json:"custom_board_used"`
 	LinkedRoomCode *string `json:"linked_room_code"` // Phase 13.1: nullable — set when room is a side-bet room
 }
@@ -401,10 +402,12 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		body.HostID = "" // allow empty body → auto-generate host ID
 	}
-	hostID := body.HostID
-	if hostID == "" {
-		hostID = fmt.Sprintf("host-%d", len(s.Rooms)+1)
+	var hostID string
+	if body.HostID != "" {
+		hostID = body.HostID
 	}
+	// When no host_id is provided, leave HostID empty — the first player to
+	// connect via room_login becomes the room host.
 
 	room, err := s.createRoom(r.Context(), hostID)
 	if err != nil {
@@ -433,6 +436,7 @@ func (s *Server) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		Code:           room.Code,
 		GameCode:       "",
 		HostID:         room.HostID,
+		HostUsername:   s.hostUsernameForID(r.Context(), room.HostID),
 		PlayerCount:    0,
 		GameStatus:     "pending",
 		CustomBoard:    false,
@@ -478,6 +482,17 @@ func (s *Server) handleRoomRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleGetRoomLeaderboard(w, r, code)
 	case sub == "generate-buzzwords" && r.Method == http.MethodPost:
 		s.handleGenerateBuzzwords(w, r, code)
+	case sub == "games" && r.Method == http.MethodGet:
+		s.handleGetRoomGames(w, r, code)
+	case sub == "games" && r.Method == http.MethodPost:
+		s.handleCreateRoomGame(w, r, code)
+	case strings.HasPrefix(sub, "games/") && r.Method == http.MethodDelete:
+		gameCode := strings.TrimPrefix(sub, "games/")
+		if gameCode == "" {
+			writeAPIError(w, http.StatusBadRequest, "missing game code")
+			return
+		}
+		s.handleDeleteRoomGame(w, r, code, gameCode)
 	default:
 		writeAPIError(w, http.StatusNotFound, "not found")
 	}
@@ -495,6 +510,7 @@ func (s *Server) handleGetRoom(w http.ResponseWriter, r *http.Request, code stri
 	info := RoomInfo{
 		Code:           room.Code,
 		HostID:         room.HostID,
+		HostUsername:   s.hostUsernameForID(r.Context(), room.HostID),
 		PlayerCount:    0,
 		GameStatus:     "pending",
 		CustomBoard:    false,
@@ -638,7 +654,7 @@ func (s *Server) handleSetGameBuzzwords(w http.ResponseWriter, r *http.Request, 
 
 	var body BuzzwordUploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
 
@@ -1173,4 +1189,240 @@ func (s *Server) handleAgentEvent(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("agent event: run=%s outcome=%s latency_ms=%.0f", body.RunID, body.Outcome, body.LatencyMs)
 	writeAPISuccess(w, map[string]interface{}{"recorded": true})
+}
+
+// ── Phase 12.5: Multi-Board Room Games ────────────────────────────────────────
+
+// RoomGameInfo is the API response shape for a board in the room's Games/Bets panel.
+type RoomGameInfo struct {
+	ID          string `json:"id"`
+	Code        string `json:"code"`
+	Title       string `json:"title"`
+	HostID      string `json:"host_id"`
+	Status      string `json:"status"`
+	Winner      string `json:"winner,omitempty"`
+	PlayerCount int    `json:"player_count"`
+	CreatedAt   int64  `json:"created_at"`
+	EndedAt     *int64 `json:"ended_at,omitempty"`
+}
+
+// hostUsernameForID resolves a host ID to a username via the hosts DB table.
+// Returns empty string if DB is nil or the host is not found.
+func (s *Server) hostUsernameForID(ctx context.Context, hostID string) string {
+	if s.DB == nil {
+		return ""
+	}
+	host, err := s.DB.GetHostByUsername(ctx, hostID)
+	if err != nil || host == nil {
+		return ""
+	}
+	return host.Username
+}
+
+// handleGetRoomGames returns all boards in a room.
+// GET /api/room/:code/games
+func (s *Server) handleGetRoomGames(w http.ResponseWriter, r *http.Request, code string) {
+	if s.DB == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "room games not available - database not enabled")
+		return
+	}
+
+	room, err := s.getOrCreateRoom(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("room %s not found", code))
+		return
+	}
+
+	games, err := s.DB.GetGamesByRoom(r.Context(), room.Code)
+	if err != nil {
+		log.Printf("Error fetching games for room %s: %v", code, err)
+		writeAPIError(w, http.StatusInternalServerError, "failed to fetch room games")
+		return
+	}
+
+	result := make([]RoomGameInfo, 0, len(games))
+	for _, g := range games {
+		info := RoomGameInfo{
+			ID:        g.ID,
+			Code:      g.Code,
+			Title:     g.Title,
+			HostID:    g.HostID,
+			Status:    g.Status,
+			CreatedAt: g.CreatedAt,
+			EndedAt:   g.EndedAt,
+		}
+		if g.WinnerID != nil {
+			info.Winner = *g.WinnerID
+		}
+		// Check in-memory for player count (falls back to 0 for archived games)
+		s.GamesMu.RLock()
+		if inMem, ok := s.Games[g.ID]; ok {
+			info.PlayerCount = inMem.PlayerCount()
+		}
+		s.GamesMu.RUnlock()
+		result = append(result, info)
+	}
+
+	writeAPISuccess(w, result)
+}
+
+// CreateRoomGameRequest is the body for POST /api/room/:code/games.
+type CreateRoomGameRequest struct {
+	Title     string   `json:"title"`     // Board name — AI generation topic
+	Buzzwords []string `json:"buzzwords"` // Flat word list for the board
+}
+
+// handleCreateRoomGame creates a new board in a room.
+// POST /api/room/:code/games
+// Requires bearer token auth; only the room admin can create boards.
+func (s *Server) handleCreateRoomGame(w http.ResponseWriter, r *http.Request, code string) {
+	room, err := s.getOrCreateRoom(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("room %s not found", code))
+		return
+	}
+
+	// Auth: only room admin (host) can create boards
+	tokenUsername, authErr := s.verifyBearerToken(r, room.HostID)
+	if authErr != "" {
+		writeAPIError(w, http.StatusForbidden, authErr)
+		return
+	}
+
+	var body CreateRoomGameRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.Title == "" {
+		body.Title = "Untitled Board"
+	}
+	if len(body.Buzzwords) < 1 {
+		writeAPIError(w, http.StatusBadRequest, "buzzwords are required")
+		return
+	}
+
+	// Wrap the flat word list into the [][]string shape Game.Buzzwords expects.
+	rows := make([][]string, 0, len(body.Buzzwords))
+	for _, word := range body.Buzzwords {
+		rows = append(rows, []string{word})
+	}
+
+	// Create the game in-memory
+	s.GamesMu.Lock()
+	gameID := fmt.Sprintf("game-%d-%d", len(s.Games)+1, time.Now().UnixNano())
+	newGame := NewGame(gameID, rows, s.Rows, s.Cols)
+	newGame.Title = body.Title
+	s.Games[gameID] = newGame
+	s.CodeToGame[newGame.Code] = newGame
+	s.GamesMu.Unlock()
+
+	// Persist to DB with room code and title
+	if s.DB != nil {
+		buzzwordJSON, _ := json.Marshal(rows)
+		dbGameID, dbErr := s.DB.CreateGame(r.Context(), newGame.Code, room.HostID, body.Title, buzzwordJSON)
+		if dbErr != nil {
+			log.Printf("Warning: failed to persist new room game: %v", dbErr)
+			s.Metrics.RecordError("db")
+		} else {
+			// Link the game to the room in DB
+			_ = s.DB.SetGameRoomCode(r.Context(), dbGameID, room.Code)
+		}
+	}
+
+	s.Metrics.GameCount.Set(float64(len(s.Games)))
+	s.Metrics.GamesCreatedTotal.Inc()
+
+	log.Printf("Room %s: new board created: %s (%s) by %s", room.Code, newGame.Code, body.Title, tokenUsername)
+
+	writeAPISuccess(w, RoomGameInfo{
+		ID:          gameID,
+		Code:        newGame.Code,
+		Title:       body.Title,
+		HostID:      room.HostID,
+		Status:      "active",
+		PlayerCount: 0,
+		CreatedAt:   newGame.CreatedAt.Unix(),
+	})
+}
+
+// handleDeleteRoomGame deletes (soft-deletes) a board from a room.
+// DELETE /api/room/:code/games/:gameCode
+// Room admin or board creator can delete.
+func (s *Server) handleDeleteRoomGame(w http.ResponseWriter, r *http.Request, code string, gameCode string) {
+	room, err := s.getOrCreateRoom(code)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("room %s not found", code))
+		return
+	}
+
+	// Find the game
+	s.GamesMu.RLock()
+	game, exists := s.CodeToGame[strings.ToUpper(gameCode)]
+	s.GamesMu.RUnlock()
+	if !exists || game == nil {
+		writeAPIError(w, http.StatusNotFound, fmt.Sprintf("game %s not found", gameCode))
+		return
+	}
+
+	// Auth: room admin or board creator
+	tokenUsername, authErr := s.verifyBearerToken(r, "")
+	if authErr != "" {
+		writeAPIError(w, http.StatusUnauthorized, authErr)
+		return
+	}
+	if tokenUsername != room.HostID && tokenUsername != game.HostID {
+		writeAPIError(w, http.StatusForbidden, "only the room admin or board creator can delete this board")
+		return
+	}
+
+	// Soft-delete in DB by game code (DB IDs differ from in-memory IDs)
+	if s.DB != nil {
+		if err := s.DB.UpdateGameStatusByCode(r.Context(), game.Code, "deleted"); err != nil {
+			log.Printf("Warning: failed to soft-delete game %s: %v", game.Code, err)
+		}
+	}
+
+	// Mark game inactive and notify players
+	game.IsActive = false
+	s.broadcastToGame(game.ID, ServerMessage{
+		Type:    "game_ended",
+		GameID:  game.ID,
+		Message: "This board has been removed by the room admin.",
+	})
+
+	// Remove from in-memory maps
+	s.GamesMu.Lock()
+	delete(s.Games, game.ID)
+	delete(s.CodeToGame, strings.ToUpper(gameCode))
+	s.GamesMu.Unlock()
+
+	s.Metrics.GameCount.Set(float64(len(s.Games)))
+
+	log.Printf("Room %s: board %s (%s) deleted by %s", room.Code, gameCode, game.Title, tokenUsername)
+
+	writeAPISuccess(w, map[string]interface{}{"deleted": true})
+}
+
+// verifyBearerToken extracts and verifies the JWT from Authorization header.
+// If requiredUsername is non-empty, also checks that the token belongs to that user.
+// Returns (username, "") on success or ("", errorMessage) on failure.
+func (s *Server) verifyBearerToken(r *http.Request, requiredUsername string) (string, string) {
+	token := bearerTokenFromAuthHeader(r.Header.Get("Authorization"))
+	if token == "" {
+		return "", "missing bearer token"
+	}
+
+	clientIP := s.extractClientIP(r)
+	username, err := s.TokenManager.VerifyToken(token, clientIP)
+	if err != nil {
+		return "", "invalid or expired bearer token"
+	}
+
+	if requiredUsername != "" && username != requiredUsername {
+		return "", "only the room admin can perform this action"
+	}
+
+	return username, ""
 }

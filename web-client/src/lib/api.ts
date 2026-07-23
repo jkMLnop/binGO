@@ -72,9 +72,11 @@ export type RoomInfo = {
   code: string;
   game_code: string;
   host_id: string;
+  host_username: string;
   player_count: number;
   game_status: string;
   custom_board_used: boolean;
+  linked_room_code?: string;
 };
 
 export async function createRoom(): Promise<RoomInfo> {
@@ -526,6 +528,92 @@ export async function submitGameBuzzwordFeedback(
 
   if (!response.ok || !parsed?.success) {
     throw new Error(parsed?.error || `Unable to submit feedback (HTTP ${response.status})`);
+  }
+}
+
+// ─── Phase 12.5: Room Games API ──────────────────────────────────────────────
+
+export type RoomGameInfo = {
+  id: string;
+  code: string;
+  title: string;
+  host_id: string;
+  status: string;
+  winner: string;
+  player_count: number;
+  created_at: number;
+  ended_at: number;
+};
+
+export async function fetchRoomGames(roomCode: string): Promise<RoomGameInfo[]> {
+  const response = await fetch(`/api/room/${encodeURIComponent(roomCode)}/games`);
+  const raw = await response.text();
+  let payload: ApiResponse<RoomGameInfo[]> | null = null;
+  if (raw.trim()) {
+    try {
+      payload = JSON.parse(raw) as ApiResponse<RoomGameInfo[]>;
+    } catch {
+      throw new Error("Fetch room games failed: non-JSON response");
+    }
+  }
+  if (!response.ok || !payload?.success || !payload.data) {
+    throw new Error(payload?.error || `Unable to fetch room games (HTTP ${response.status})`);
+  }
+  return payload.data;
+}
+
+export async function createRoomGame(
+  roomCode: string,
+  title: string,
+  buzzwords: string[],
+  authToken: string,
+): Promise<RoomGameInfo> {
+  const response = await fetch(`/api/room/${encodeURIComponent(roomCode)}/games`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({ title, buzzwords }),
+  });
+  const raw = await response.text();
+  let payload: ApiResponse<RoomGameInfo> | null = null;
+  if (raw.trim()) {
+    try {
+      payload = JSON.parse(raw) as ApiResponse<RoomGameInfo>;
+    } catch {
+      throw new Error("Create room game failed: non-JSON response");
+    }
+  }
+  if (!response.ok || !payload?.success || !payload.data) {
+    throw new Error(payload?.error || `Unable to create room game (HTTP ${response.status})`);
+  }
+  return payload.data;
+}
+
+export async function deleteRoomGame(
+  roomCode: string,
+  gameCode: string,
+  authToken: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/room/${encodeURIComponent(roomCode)}/games/${encodeURIComponent(gameCode)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${authToken}` },
+    },
+  );
+  const raw = await response.text();
+  let payload: ApiResponse<null> | null = null;
+  if (raw.trim()) {
+    try {
+      payload = JSON.parse(raw) as ApiResponse<null>;
+    } catch {
+      throw new Error("Delete room game failed: non-JSON response");
+    }
+  }
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.error || `Unable to delete room game (HTTP ${response.status})`);
   }
 }
 

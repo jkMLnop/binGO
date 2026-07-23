@@ -91,6 +91,26 @@ Side-bet room:  XK2P9              (separate room, linked_room_code = AB3K7)
 
 ---
 
+##### Phase 12.5: Multi-Board Room System ✅
+**Goal:** One room, many boards. Room pages show all boards; hosts create new boards from a room page. Completed June 2025.
+
+**Design decisions:**
+- Each board is a `Game` with an optional `title` field. Boards link to their parent room via `room_code` column.
+- Room page (`/room/:code`) shows all boards in the room with join/delete actions.
+- Board creation happens from the room page using the existing GenerateModal in "create" mode.
+- Identity layer: `bingo-identity` localStorage key persists username across sessions. Pre-fills join form.
+
+**Tasks:**
+- [x] **DB** (`db/store.go`, `db/sqlite.go`): Add `title` column to `games` table. Add `GetGamesByRoom(roomCode)` and `SetGameRoomCode(gameID, roomCode)` to `GameStore`.
+- [x] **Server** (`server/api.go`): Add `GET/POST/DELETE /api/room/:code/games` endpoints. Set `HostUsername` on room info responses. Auth via Bearer token (room admin).
+- [x] **Frontend** (`App.tsx`): Add `/room/:code` route with `RoomPage` component. Add `GamesBetsPanel` component showing board cards. Update `GenerateModal` with `mode` prop ("edit"|"create") and board title field for create mode. Update `HomePage` with "Create Room" button and room join form.
+- [x] **API** (`api.ts`): Add `RoomGameInfo` type, `fetchRoomGames`, `createRoomGame`, `deleteRoomGame` functions.
+- [x] **Identity layer**: localStorage `bingo-identity` for persistent username. Pre-fills join form. "Change" link clears identity. Token cleared on Leave but localStorage preserved.
+- [x] **Tests**: All existing unit + integration tests pass. Room tests pass.
+- [x] **Playwright tests** (Phase G): `room-flow-smoke.spec.js`, `dev-smoke.spec.js`, update `staging-smoke.spec.js`.
+
+---
+
 ##### Phase 13.1: Room Linking (prerequisite for Phase 13.5)
 **Goal:** Add `linked_room_code` to the `rooms` table so Phase 13.5 can create side-bet rooms that mirror events from a source room. No user-facing changes.
 

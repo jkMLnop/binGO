@@ -139,6 +139,20 @@ button:hover {
   background: #fff;
 }
 
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: inherit;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.link-btn:hover {
+  color: var(--accent-hover);
+}
+
 .game-header {
   display: flex;
   justify-content: space-between;
@@ -881,6 +895,18 @@ button:hover {
   align-items: center;
   justify-content: center;
   z-index: 110;
+  padding: 1rem;
+}
+
+.modal-panel {
+  width: min(480px, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 32px var(--shadow);
 }
 
 .modal-panel.generate-modal {
@@ -1045,6 +1071,16 @@ button:hover {
   flex: 1;
 }
 
+.manual-add-word {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.manual-add-word input {
+  flex: 1;
+}
+
 /* Generate modal — advanced settings */
 .gen-advanced {
   border: 1px solid #d0dce8;
@@ -1133,4 +1169,71 @@ details[open] .gen-advanced-summary::before {
   border: 1px solid #f0c040;
   border-radius: 6px;
   padding: 0.35rem 0.6rem;
+}
+
+/* ─── Phase 12.5: Room Page & Games Panel ─────────────────────────── */
+
+.room-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.room-header .header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.games-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.game-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.game-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.game-card-title {
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.game-card-meta {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.game-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.muted {
+  color: #888;
+  font-style: italic;
+}
+
+.ghost-btn.danger {
+  color: #d32f2f;
+}
+
+.ghost-btn.danger:hover {
+  background: #fce4ec;
 }
