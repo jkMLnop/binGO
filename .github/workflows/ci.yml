@@ -18,6 +18,13 @@ on:
 env:
   GO_VERSION: '1.25.3'
 
+# Fail any step that pipes a command into another (e.g. `... | tee file`) if the
+# first command fails. Without pipefail, `cmd | tee file` always exits 0 (tee's
+# exit code), silently masking real failures such as a broken `flyctl deploy`.
+defaults:
+  run:
+    shell: bash --noprofile --norc -eo pipefail {0}
+
 jobs:
   test:
     name: Unit + Integration Tests
