@@ -15,12 +15,12 @@ import (
 // The room code (5-char alphanumeric) is the player-facing identifier.
 // The associated game (BINGO-XXXXX) is created lazily on first room_login.
 type Room struct {
-	Code            string  // 5-char alphanumeric, e.g. "AB3K7"
-	HostID          string  // First player to log into the room
-	LinkedRoomCode  *string // Phase 13.1: nullable — nil for standalone rooms, set for side-bet rooms
-	Game            *Game   // nil until the first player connects via room_login
-	CreatedAt       time.Time
-	mu              sync.RWMutex
+	Code           string  // 5-char alphanumeric, e.g. "AB3K7"
+	HostID         string  // First player to log into the room
+	LinkedRoomCode *string // Phase 13.1: nullable — nil for standalone rooms, set for side-bet rooms
+	Game           *Game   // nil until the first player connects via room_login
+	CreatedAt      time.Time
+	mu             sync.RWMutex
 }
 
 // NewRoom creates a new in-memory room with a generated code.
@@ -37,6 +37,15 @@ func (r *Room) SetGame(g *Game) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.Game = g
+}
+
+// SetHostID assigns the host for this room. Only sets if currently empty.
+func (r *Room) SetHostID(hostID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.HostID == "" {
+		r.HostID = hostID
+	}
 }
 
 // GetGame returns the current game (may be nil before first login).

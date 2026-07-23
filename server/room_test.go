@@ -145,7 +145,7 @@ func TestGetRoomByGameCodeRoundTrip(t *testing.T) {
 
 	// Create a game associated with this room
 	gameCode := "BINGO-AB3K7"
-	_, err = store.CreateGame(ctx, gameCode, "host-1", nil)
+	_, err = store.CreateGame(ctx, gameCode, "host-1", "", nil)
 	if err != nil {
 		t.Fatalf("CreateGame: %v", err)
 	}

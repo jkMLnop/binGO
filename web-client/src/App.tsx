@@ -1,21 +1,28 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import QRCode from "qrcode";
 import {
   createGame,
+  createRoom,
+  createRoomGame,
+  deleteRoomGame,
   fetchAPIStatus,
   fetchGameByCode,
   fetchLeaderboard,
+  fetchRoom,
+  fetchRoomGames,
   fetchRoomLeaderboard,
   getRoomBuzzwords,
   setGameBuzzwords,
   setRoomBuzzwords,
+  streamBuzzwords,
   streamGameBuzzwords,
   submitGameBuzzwordFeedback,
   DEFAULT_GENERATION_OPTIONS,
 } from "./lib/api";
 import { formatGenerationError } from "./lib/api";
-import type { GenerationOptions } from "./lib/api";
+import type { GenerationOptions, RoomGameInfo } from "./lib/api";
+import type { RoomInfo } from "./lib/api";
 import { hasBingo, shuffleArray, toCellId } from "./lib/board";
 import type { BoardCell, BoardState } from "./lib/board";
 import type { GameBet, ClientMessage, LeaderboardEntry, ServerMessage, Suggestion } from "./lib/types";
@@ -258,6 +265,7 @@ function BuzzwordsPanel({ buzzwords, rejected, onClose }: {
 
 function HomePage() {
   const [code, setCode] = useState("");
+  const [roomJoinCode, setRoomJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const navigate = useNavigate();
@@ -268,6 +276,12 @@ function HomePage() {
       return;
     }
     navigate(`/game/${code.trim().toUpperCase()}`);
+  }
+
+  function handleJoinRoom(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!roomJoinCode.trim()) return;
+    navigate(`/room/${roomJoinCode.trim().toUpperCase()}`);
   }
 
   async function handleCreateGame() {
@@ -281,6 +295,23 @@ function HomePage() {
         err instanceof Error
           ? err.message
           : "Could not create a new game"
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleCreateRoom() {
+    setCreateError("");
+    setCreating(true);
+    try {
+      const room = await createRoom();
+      navigate(`/room/${room.code}`);
+    } catch (err) {
+      setCreateError(
+        err instanceof Error
+          ? err.message
+          : "Could not create a new room"
       );
     } finally {
       setCreating(false);
@@ -304,8 +335,17 @@ function HomePage() {
             {creating ? "Creating..." : "1) Host a new game"}
           </button>
 
+          <button
+            type="button"
+            className="cli-option"
+            onClick={handleCreateRoom}
+            disabled={creating}
+          >
+            {creating ? "Creating..." : "2) Host a new Room"}
+          </button>
+
           <form className="join-form cli-join" onSubmit={handleJoin}>
-            <label htmlFor="join-code">2) Join existing game</label>
+            <label htmlFor="join-code">3) Join existing game</label>
             <input
               id="join-code"
               value={code}
@@ -315,6 +355,19 @@ function HomePage() {
               aria-label="Room code"
             />
             <button type="submit" className="ghost-btn">Join by Code</button>
+          </form>
+
+          <form className="join-form cli-join" onSubmit={handleJoinRoom}>
+            <label htmlFor="room-code">4) Join Room</label>
+            <input
+              id="room-code"
+              value={roomJoinCode}
+              onChange={(event) => setRoomJoinCode(event.target.value)}
+              placeholder="ROOM-ABCDE"
+              maxLength={11}
+              aria-label="Room code"
+            />
+            <button type="submit" className="ghost-btn">Join Room</button>
           </form>
         </div>
 
@@ -330,16 +383,27 @@ function HomePage() {
 
 function GamePage() {
   const { code = "" } = useParams();
-  return <GamePageContent rawCode={code} />;
+  const [searchParams] = useSearchParams();
+  const from = searchParams.get("from") || "/";
+  return <GamePageContent rawCode={code} from={from} />;
 }
 
 function GamePageContent({
   rawCode,
+  from,
 }: {
   rawCode: string;
+  from: string;
 }) {
   const normalizedCode = rawCode.toUpperCase();
-  const [username, setUsername] = useState("");
+  const navigate = useNavigate();
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem("bingo-identity") || "";
+    } catch {
+      return "";
+    }
+  });
   const [currentUser, setCurrentUser] = useState("");
   const [gameStatus, setGameStatus] = useState("Checking room code...");
   const [error, setError] = useState("");
@@ -369,6 +433,7 @@ function GamePageContent({
   const [showBuzzwordUpload, setShowBuzzwordUpload] = useState(false);
   const [buzzwordUploadError, setBuzzwordUploadError] = useState("");
   const [showGenerate, setShowGenerate] = useState(false);
+  const [editExistingWords, setEditExistingWords] = useState(false);
   const [lobbyReady, setLobbyReady] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const tokenRef = useRef<string>("");
@@ -500,6 +565,12 @@ function GamePageContent({
         setConnected(true);
         const resolvedUser = message.username || name;
         setCurrentUser(resolvedUser);
+        // Save identity to localStorage so it persists across games
+        try {
+          localStorage.setItem("bingo-identity", resolvedUser);
+        } catch {
+          /* ignore */
+        }
         const hostMatch = !!message.host_id && message.player_id === message.host_id;
         setIsHost(hostMatch);
         if (hostMatch) hostIdRef.current = message.host_id ?? "";
@@ -647,6 +718,8 @@ function GamePageContent({
   }
 
   function handleLeave() {
+    tokenRef.current = "";
+    hostIdRef.current = "";
     socketRef.current?.close();
     setConnected(false);
     setBoard(null);
@@ -658,6 +731,7 @@ function GamePageContent({
     setCurrentUser("");
     setIsHost(false);
     setGameStatus(`Game ${normalizedCode} is active`);
+    navigate(from);
   }
 
   function handleSuggest(phrase: string) {
@@ -708,7 +782,19 @@ function GamePageContent({
           <p>{gameStatus}</p>
           {connected && currentUser ? (
             <p className="identity">
-              You are: {currentUser}{isHost ? " 👑 (host)" : ""}
+              You are: {currentUser}{isHost ? " 👑 (host)" : ""}{" "}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  try { localStorage.removeItem("bingo-identity"); } catch { /* */ }
+                  setUsername("");
+                  setCurrentUser("");
+                  handleLeave();
+                }}
+              >
+                change
+              </button>
             </p>
           ) : null}
         </div>
@@ -797,7 +883,7 @@ function GamePageContent({
                 <button
                   type="button"
                   className="action-btn lobby-action-btn"
-                  onClick={() => setShowGenerate(true)}
+                  onClick={() => { setEditExistingWords(false); setShowGenerate(true); }}
                 >
                   <span className="lobby-action-icon">✨</span>
                   <span className="lobby-action-text">
@@ -855,9 +941,14 @@ function GamePageContent({
               {winner !== "" && (
                 <div className="post-game-actions">
                   {isHost && hostConnected && (
-                    <button type="button" className="action-btn restart-btn" onClick={handleRestart}>
-                      Restart Game
-                    </button>
+                    <>
+                      <button type="button" className="action-btn restart-btn" onClick={handleRestart}>
+                        Restart Game
+                      </button>
+                      <button type="button" className="action-btn" onClick={() => { setEditExistingWords(true); setShowGenerate(true); }}>
+                        Edit Word List
+                      </button>
+                    </>
                   )}
                   {!isHost && !hostConnected && (
                     <p className="host-gone">Host has disconnected — game cannot be restarted.</p>
@@ -872,6 +963,9 @@ function GamePageContent({
               )}
               {connected && !winner && (
                 <div className="action-toolbar">
+                  <button type="button" className="toolbar-btn leave-toolbar-btn" onClick={handleLeave}>
+                    🚪 Leave Game
+                  </button>
                   <button type="button" className="toolbar-btn" onClick={() => setShowSuggestModal(true)}>
                     + Suggest Buzzword
                   </button>
@@ -881,6 +975,11 @@ function GamePageContent({
                   <button type="button" className="toolbar-btn" onClick={handleListBuzzwords}>
                     📋 Buzzwords
                   </button>
+                  {isHost && (
+                    <button type="button" className="toolbar-btn" onClick={() => { setEditExistingWords(true); setShowGenerate(true); }}>
+                      ✨ Edit Word List
+                    </button>
+                  )}
                   {isHost && roomCode && (
                     <button type="button" className="toolbar-btn" onClick={() => { setBuzzwordUploadError(""); setShowBuzzwordUpload(true); }}>
                       📤 Upload Word List
@@ -959,8 +1058,16 @@ function GamePageContent({
         )}
         {showGenerate && (
           <GenerateModal
+            mode="edit"
             gameCode={normalizedCode}
             authToken={tokenRef.current}
+            initialWords={
+              editExistingWords
+                ? (buzzwordPool.length > 0
+                    ? buzzwordPool
+                    : Array.from(new Set((board?.cells ?? []).map((c) => c.text).filter(Boolean))))
+                : undefined
+            }
             onApply={async (words) => {
               await setGameBuzzwords(normalizedCode, words, tokenRef.current);
               setShowGenerate(false);
@@ -1011,14 +1118,20 @@ function FollowUpInput({ onSubmit, disabled }: { onSubmit: (msg: string) => void
 }
 
 function GenerateModal({
+  mode = "edit",
   gameCode,
+  roomCode,
   authToken,
+  initialWords,
   onApply,
   onClose,
 }: {
+  mode?: "edit" | "create";
   gameCode: string;
+  roomCode?: string;
   authToken: string;
-  onApply: (words: string[]) => Promise<void>;
+  initialWords?: string[];
+  onApply: (words: string[], title?: string) => Promise<void>;
   onClose: () => void;
 }) {
   type ExclusionReason =
@@ -1056,16 +1169,30 @@ function GenerateModal({
 
   const [topic, setTopic] = useState("");
   const [url, setUrl] = useState("");
+  const [boardTitle, setBoardTitle] = useState("");
   const [messages, setMessages] = useState<Array<{ role: string; content: string }>>([]);
   const [genOpts, setGenOpts] = useState<GenerationOptions>(DEFAULT_GENERATION_OPTIONS);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
-  const [sets, setSets] = useState<WordSet[] | null>(null);
+  const [sets, setSets] = useState<WordSet[] | null>(
+    initialWords && initialWords.length > 0 ? [{ label: "Current Words", words: initialWords }] : null
+  );
   const [wordFeedback, setWordFeedback] = useState<Record<string, WordFeedbackState>>({});
   const [genError, setGenError] = useState("");
   const [applying, setApplying] = useState(false);
+  const [manualWordDrafts, setManualWordDrafts] = useState<Record<number, string>>({});
   const outputRef = useRef<HTMLDivElement>(null);
+
+  function handleAddManualWord(setIndex: number) {
+    const draft = (manualWordDrafts[setIndex] || "").trim();
+    if (!draft) return;
+    setSets((prev) => {
+      if (!prev) return prev;
+      return prev.map((set, i) => (i === setIndex ? { ...set, words: [...set.words, draft] } : set));
+    });
+    setManualWordDrafts((prev) => ({ ...prev, [setIndex]: "" }));
+  }
 
   function feedbackKey(setIndex: number, wordIndex: number): string {
     return `${setIndex}:${wordIndex}`;
@@ -1176,6 +1303,31 @@ function GenerateModal({
     setSets(null);
     setWordFeedback({});
     setGenError("");
+
+    // Use room-level endpoint when no game exists yet (create mode).
+    if (!gameCode && roomCode) {
+      await streamBuzzwords(
+        roomCode,
+        topic,
+        url || undefined,
+        msgs,
+        authToken,
+        (chunk) => {
+          setStreamText((t) => t + chunk);
+          if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        },
+        (newSets) => {
+          setSets(newSets);
+          setStreaming(false);
+        },
+        (err) => {
+          setGenError(formatGenerationError(err));
+          setStreaming(false);
+        },
+      );
+      return;
+    }
+
     await streamGameBuzzwords(
       gameCode,
       topic,
@@ -1265,23 +1417,25 @@ function GenerateModal({
         retrieval_url: state.reason === "too_generic" ? state.retrievalURL.trim() : undefined,
       }));
 
-    try {
-      await submitGameBuzzwordFeedback(gameCode, authToken, {
-        topic: topic.trim(),
-        url: url.trim() || undefined,
-        generation_mode: genOpts.generationMode,
-        set_label: set.label,
-        total_words: set.words.length,
-        included_words: includedWords,
-        excluded: excludedPayload,
-      });
-    } catch {
-      // Non-blocking: keep gameplay smooth even if feedback submission fails.
+    if (gameCode) {
+      try {
+        await submitGameBuzzwordFeedback(gameCode, authToken, {
+          topic: topic.trim(),
+          url: url.trim() || undefined,
+          generation_mode: genOpts.generationMode,
+          set_label: set.label,
+          total_words: set.words.length,
+          included_words: includedWords,
+          excluded: excludedPayload,
+        });
+      } catch {
+        // Non-blocking: keep gameplay smooth even if feedback submission fails.
+      }
     }
 
     setApplying(true);
     try {
-      await onApply(includedWords);
+      await onApply(includedWords, mode === "create" ? boardTitle.trim() || undefined : undefined);
     } catch (err) {
       setGenError(err instanceof Error ? err.message : "Apply failed");
     } finally {
@@ -1338,6 +1492,17 @@ function GenerateModal({
                 maxLength={500}
               />
             </label>
+            {mode === "create" && (
+              <label>
+                Board title
+                <input
+                  value={boardTitle}
+                  onChange={(e) => setBoardTitle(e.target.value)}
+                  placeholder="e.g. Cosplay Bingo"
+                  maxLength={100}
+                />
+              </label>
+            )}
             <label>
               URL (optional — we'll scrape it for context)
               <input
@@ -1544,6 +1709,24 @@ function GenerateModal({
                         );
                       })}
                     </div>
+                    <div className="manual-add-word">
+                      <input
+                        type="text"
+                        value={manualWordDrafts[setIndex] || ""}
+                        onChange={(e) => setManualWordDrafts((prev) => ({ ...prev, [setIndex]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddManualWord(setIndex);
+                          }
+                        }}
+                        placeholder="Add a word manually…"
+                        maxLength={80}
+                      />
+                      <button type="button" className="ghost-btn" onClick={() => handleAddManualWord(setIndex)}>
+                        + Add
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="action-btn"
@@ -1571,8 +1754,8 @@ function GenerateModal({
               />
             )}
 
-            <div className="modal-actions">
-              {(genError || !sets) && (
+              <div className="modal-actions">
+              {!streaming && (genError || !sets) && (
                 <button
                   type="button"
                   className="action-btn"
@@ -1696,6 +1879,348 @@ function OfflineBanner() {
   );
 }
 
+// ─── Phase 12.5: GamesBetsPanel ─────────────────────────────────────────────
+
+function GamesBetsPanel({
+  games,
+  roomCode,
+  authToken,
+  currentUser,
+  onJoin,
+  onDelete,
+}: {
+  games: RoomGameInfo[];
+  roomCode: string;
+  authToken: string;
+  currentUser: string;
+  onJoin: (gameCode: string) => void;
+  onDelete: (gameCode: string) => Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  function statusLabel(game: RoomGameInfo): string {
+    if (game.status === "active") {
+      if (game.winner) return `Winner: ${game.winner}`;
+      return `${game.player_count} player(s)`;
+    }
+    return game.status;
+  }
+
+  return (
+    <section className="panel">
+      <h2>Boards</h2>
+      {games.length === 0 ? (
+        <p className="muted">No boards yet. Create one with the button above.</p>
+      ) : (
+        <ul className="games-list">
+          {games.map((game) => (
+            <li key={game.id} className="game-card">
+              <div className="game-card-info">
+                <strong className="game-card-title">{game.title || game.code}</strong>
+                <span className="game-card-meta">
+                  {game.code} · {statusLabel(game)}
+                  {game.created_at > 0 && (
+                    <> · {new Date(game.created_at * 1000).toLocaleDateString()}</>
+                  )}
+                </span>
+              </div>
+              <div className="game-card-actions">
+                <button
+                  type="button"
+                  className="action-btn"
+                  onClick={() => onJoin(game.code)}
+                  disabled={game.status === "deleted"}
+                >
+                  Join
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn danger"
+                  onClick={async () => {
+                    setDeleting(game.code);
+                    try {
+                      await onDelete(game.code);
+                    } finally {
+                      setDeleting(null);
+                    }
+                  }}
+                  disabled={deleting === game.code || game.status === "deleted"}
+                >
+                  {deleting === game.code ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// ─── Phase 12.5: RoomPage ───────────────────────────────────────────────────
+
+function RoomPage() {
+  const { code = "" } = useParams();
+  const normalizedCode = code.toUpperCase();
+  const navigate = useNavigate();
+
+  const [room, setRoom] = useState<RoomInfo | null>(null);
+  const [games, setGames] = useState<RoomGameInfo[]>([]);
+  const [error, setError] = useState("");
+  const [roomExpired, setRoomExpired] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [authToken, setAuthToken] = useState("");
+
+  // Identity layer: read saved username
+  const [identity, setIdentity] = useState(() => {
+    try {
+      return localStorage.getItem("bingo-identity") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [showIdentityInput, setShowIdentityInput] = useState(false);
+
+  function saveIdentity(name: string) {
+    const trimmed = name.trim();
+    setIdentity(trimmed);
+    try {
+      if (trimmed) {
+        localStorage.setItem("bingo-identity", trimmed);
+      } else {
+        localStorage.removeItem("bingo-identity");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function loadRoom() {
+    setError("");
+    try {
+      const roomInfo = await fetchRoom(normalizedCode);
+      setRoom(roomInfo);
+      setRoomExpired(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load room");
+    }
+  }
+
+  async function loadGames() {
+    try {
+      const roomGames = await fetchRoomGames(normalizedCode);
+      setGames(roomGames);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load games");
+    }
+  }
+
+  useEffect(() => {
+    loadRoom();
+    loadGames();
+    // Refresh games periodically
+    const interval = setInterval(loadGames, 10_000);
+    return () => clearInterval(interval);
+  }, [normalizedCode]);
+
+  // Establish a WebSocket to get a JWT token for this room
+  function connectForToken() {
+    if (!identity.trim()) {
+      setShowIdentityInput(true);
+      return;
+    }
+
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${protocol}://${window.location.host}/ws`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.addEventListener("open", () => {
+      // Send room_login to get a token
+      socket.send(JSON.stringify({
+        action: "room_login",
+        username: identity,
+        room_code: normalizedCode,
+      }));
+    });
+
+    socket.addEventListener("message", (event) => {
+      try {
+        const msg = JSON.parse(event.data) as ServerMessage;
+        if (msg.type === "welcome" || msg.token) {
+          if (msg.token) setAuthToken(msg.token);
+          socket.close();
+          setShowGenerate(true);
+        } else if (msg.type === "error") {
+          setError(msg.message || "Auth failed");
+          socket.close();
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.addEventListener("error", () => {
+      setError("WebSocket connection failed");
+    });
+
+    socket.addEventListener("close", () => {
+      // Cleanup
+    });
+  }
+
+  async function handleJoinGame(gameCode: string) {
+    navigate(`/game/${gameCode}?from=/room/${normalizedCode}`);
+  }
+
+  async function handleDeleteGame(gameCode: string) {
+    if (!authToken) {
+      setError("Not authenticated");
+      return;
+    }
+    await deleteRoomGame(normalizedCode, gameCode, authToken);
+    await loadGames();
+  }
+
+  async function handleCreateGame(words: string[], title?: string) {
+    if (!authToken) {
+      setError("Not authenticated");
+      return;
+    }
+    const newGame = await createRoomGame(normalizedCode, title || "", words, authToken);
+    setShowGenerate(false);
+    await loadGames();
+    navigate(`/game/${newGame.code}?from=/room/${normalizedCode}`);
+  }
+
+  return (
+    <main className="shell">
+      <section className="panel room-header">
+        <div>
+          <p className="eyebrow">room</p>
+          <h1>{normalizedCode}</h1>
+          {room && <p>Host: {room.host_username || "unknown"} · {room.player_count} player(s)</p>}
+        </div>
+        <div className="header-actions">
+          <button onClick={() => navigate("/")} className="ghost-btn" type="button">
+            Home
+          </button>
+          {room && (
+            <button
+              onClick={() => {
+                if (!identity.trim()) {
+                  setShowIdentityInput(true);
+                  return;
+                }
+                connectForToken();
+              }}
+              className="action-btn"
+              type="button"
+            >
+              + New Board
+            </button>
+          )}
+        </div>
+      </section>
+
+      {showIdentityInput && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Set your identity">
+          <div className="modal-panel">
+            <h2>Who are you?</h2>
+            <p>Set your name so other players know who created each board.</p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (identity.trim()) setShowIdentityInput(false);
+              }}
+            >
+              <input
+                autoFocus
+                value={identity}
+                onChange={(e) => saveIdentity(e.target.value)}
+                placeholder="Your name"
+                maxLength={32}
+              />
+              <div className="modal-actions">
+                <button type="submit" className="action-btn" disabled={!identity.trim()}>
+                  Save
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => setShowIdentityInput(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {error && <section className="panel error">{error}</section>}
+
+      {room ? (
+        <>
+          <GamesBetsPanel
+            games={games}
+            roomCode={normalizedCode}
+            authToken={authToken}
+            currentUser={identity}
+            onJoin={handleJoinGame}
+            onDelete={handleDeleteGame}
+          />
+
+          <section className="panel identity-bar">
+            {identity.trim() ? (
+              <p>
+                Playing as <strong>{identity}</strong>{" "}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => setShowIdentityInput(true)}
+                >
+                  change
+                </button>
+              </p>
+            ) : (
+              <form
+                className="identity-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const val = (e.currentTarget.elements.namedItem("name") as HTMLInputElement)?.value.trim();
+                  if (val) saveIdentity(val);
+                }}
+              >
+                <label htmlFor="room-identity">Your name</label>
+                <div className="identity-row">
+                  <input
+                    id="room-identity"
+                    name="name"
+                    defaultValue={identity}
+                    placeholder="Enter your name to play"
+                    maxLength={32}
+                    autoFocus
+                  />
+                  <button type="submit" className="action-btn">Set Name</button>
+                </div>
+              </form>
+            )}
+          </section>
+
+          {showGenerate && (
+            <GenerateModal
+              mode="create"
+              gameCode={room.game_code}
+              roomCode={normalizedCode}
+              authToken={authToken}
+              onApply={async (words, title) => {
+                await handleCreateGame(words, title);
+              }}
+              onClose={() => setShowGenerate(false)}
+            />
+          )}
+        </>
+      ) : null}
+    </main>
+  );
+}
+
 export default function App() {
   return (
     <>
@@ -1703,6 +2228,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/game/:code" element={<GamePage />} />
+        <Route path="/room/:code" element={<RoomPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

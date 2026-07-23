@@ -49,7 +49,7 @@ func TestSQLiteStoreBasics(t *testing.T) {
 
 	// Test game creation
 	gameCode := "ABC123"
-	gameID, err := store.CreateGame(ctx, gameCode, hostID, json.RawMessage(`["item1", "item2", "item3"]`))
+	gameID, err := store.CreateGame(ctx, gameCode, hostID, "", json.RawMessage(`["item1", "item2", "item3"]`))
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestGameExpiration(t *testing.T) {
 	}
 
 	// Create a game
-	gameID, err := store.CreateGame(ctx, "CODE123", hostID, json.RawMessage(`[]`))
+	gameID, err := store.CreateGame(ctx, "CODE123", hostID, "", json.RawMessage(`[]`))
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}

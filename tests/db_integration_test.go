@@ -43,7 +43,7 @@ func TestGameCreationPersistence(t *testing.T) {
 	hostID := "host-persist"
 	buzzwords := json.RawMessage(`["test", "buzzwords"]`)
 
-	gameID, err := store.CreateGame(ctx, gameCode, hostID, buzzwords)
+	gameID, err := store.CreateGame(ctx, gameCode, hostID, "", buzzwords)
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestPlayerJoinPersistence(t *testing.T) {
 	hostID := "host-123"
 	buzzwords := json.RawMessage(`["test1", "test2", "test3"]`)
 
-	gameID, err := store.CreateGame(ctx, gameCode, hostID, buzzwords)
+	gameID, err := store.CreateGame(ctx, gameCode, hostID, "", buzzwords)
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestWinRecording(t *testing.T) {
 	// Create a game
 	gameCode := "GAME-001"
 	hostID := "host-1"
-	_, err = store.CreateGame(ctx, gameCode, hostID, json.RawMessage(`[]`))
+	_, err = store.CreateGame(ctx, gameCode, hostID, "", json.RawMessage(`[]`))
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestAPIGameLookup(t *testing.T) {
 	hostID := "api-host"
 	buzzwords := json.RawMessage(`["test", "api", "game"]`)
 
-	gameID, err := store.CreateGame(ctx, gameCode, hostID, buzzwords)
+	gameID, err := store.CreateGame(ctx, gameCode, hostID, "", buzzwords)
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestGameExpirationCleanup(t *testing.T) {
 	}
 
 	// Create a game (expires 4 days from now)
-	gameID, err := store.CreateGame(ctx, "FUTURE-GAME", "host-1", json.RawMessage(`[]`))
+	gameID, err := store.CreateGame(ctx, "FUTURE-GAME", "host-1", "", json.RawMessage(`[]`))
 	if err != nil {
 		t.Fatalf("failed to create game: %v", err)
 	}
