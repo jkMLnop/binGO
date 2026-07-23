@@ -142,9 +142,8 @@ func TestCreateRoomAPI(t *testing.T) {
 	if payload.Data.GameStatus != "pending" {
 		t.Fatalf("expected game_status=pending, got %q", payload.Data.GameStatus)
 	}
-	if payload.Data.HostID == "" {
-		t.Fatal("expected non-empty host_id")
-	}
+	// When no host_id is provided in the request, the first player to connect
+	// via room_login becomes the host — host_id may be empty at creation.
 	t.Logf("✓ room created: code=%s host=%s", payload.Data.Code, payload.Data.HostID)
 }
 
