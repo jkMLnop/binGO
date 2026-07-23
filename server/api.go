@@ -1254,9 +1254,10 @@ func (s *Server) handleGetRoomGames(w http.ResponseWriter, r *http.Request, code
 		if g.WinnerID != nil {
 			info.Winner = *g.WinnerID
 		}
-		// Check in-memory for player count (falls back to 0 for archived games)
+		// Check in-memory for player count (falls back to 0 for archived games).
+		// Use game code, not DB ID — the in-memory game ID differs from the DB ID.
 		s.GamesMu.RLock()
-		if inMem, ok := s.Games[g.ID]; ok {
+		if inMem, ok := s.CodeToGame[g.Code]; ok {
 			info.PlayerCount = inMem.PlayerCount()
 		}
 		s.GamesMu.RUnlock()
@@ -1282,6 +1283,12 @@ func (s *Server) handleCreateRoomGame(w http.ResponseWriter, r *http.Request, co
 		return
 	}
 
+	// Room must have a host before boards can be created.
+	if room.HostID == "" {
+		writeAPIError(w, http.StatusBadRequest, "room has no host yet — the first player to join will become the host")
+		return
+	}
+
 	// Auth: only room admin (host) can create boards
 	tokenUsername, authErr := s.verifyBearerToken(r, room.HostID)
 	if authErr != "" {
@@ -1298,8 +1305,8 @@ func (s *Server) handleCreateRoomGame(w http.ResponseWriter, r *http.Request, co
 	if body.Title == "" {
 		body.Title = "Untitled Board"
 	}
-	if len(body.Buzzwords) < 1 {
-		writeAPIError(w, http.StatusBadRequest, "buzzwords are required")
+	if len(body.Buzzwords) < 24 {
+		writeAPIError(w, http.StatusBadRequest, "at least 24 buzzwords are required for a board")
 		return
 	}
 
@@ -1314,6 +1321,7 @@ func (s *Server) handleCreateRoomGame(w http.ResponseWriter, r *http.Request, co
 	gameID := fmt.Sprintf("game-%d-%d", len(s.Games)+1, time.Now().UnixNano())
 	newGame := NewGame(gameID, rows, s.Rows, s.Cols)
 	newGame.Title = body.Title
+	newGame.HostID = room.HostID // Board host is the room admin
 	s.Games[gameID] = newGame
 	s.CodeToGame[newGame.Code] = newGame
 	s.GamesMu.Unlock()
