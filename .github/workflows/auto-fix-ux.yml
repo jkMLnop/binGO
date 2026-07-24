@@ -9,10 +9,9 @@ name: auto-fix-ux
 
 on:
   issues:
-    types: [labeled]
-
-# Only respond to the ux-fix label being added (not removed or other labels)
-# The workflow_run trigger isn't suitable here — we want per-issue granularity.
+    # labeled: when someone adds the ux-fix label to an existing issue
+    # opened: when an issue is created with ux-fix already applied (e.g., from template)
+    types: [opened, labeled]
 
 permissions:
   issues: write      # add comments/labels
@@ -22,7 +21,10 @@ permissions:
 jobs:
   assign-copilot:
     name: Assign Copilot to UX Issue
-    if: github.event.label.name == 'ux-fix'
+    # Only run when ux-fix is present: either just labeled with it, or opened with it
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'ux-fix') ||
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'ux-fix'))
     runs-on: ubuntu-latest
     steps:
       - name: Debug issue context
@@ -72,17 +74,22 @@ jobs:
           OWNER="${{ github.repository_owner }}"
           REPO="${{ github.event.repository.name }}"
           
+          # Build body with a heredoc to avoid indentation issues
+          cat <<BODY > /tmp/fallback-body.md
+          > 🤖 **Copilot auto-fix** could not be triggered automatically (API may not be available from CI yet).
+
+          To fix this manually from your desk, tell Copilot:
+          > \`fix issue #${ISSUE_NUMBER}\`
+
+          Or trigger via CLI:
+          \`\`\`bash
+          gh copilot fix issue ${ISSUE_NUMBER}
+          \`\`\`
+          BODY
+
           gh api "repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/comments" \
             --method POST \
-            -f body='> 🤖 **Copilot auto-fix** could not be triggered automatically (API may not be available from CI yet).
-
-            To fix this manually from your desk, tell Copilot:
-            > `fix issue #'"${ISSUE_NUMBER}"'`
-
-            Or trigger via CLI:
-            ```bash
-            gh copilot fix issue '"${ISSUE_NUMBER}"'
-            ```'
+            -F body=@/tmp/fallback-body.md
 
       - name: Add in-progress label on success
         if: steps.copilot.outputs.copilot_assigned == 'true'
