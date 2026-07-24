@@ -1,0 +1,101 @@
+# Auto-Fix UX Workflow — Phase 12.5 Phone-Driven Development
+#
+# When you file a UX bug from your phone (using the ux-bug template),
+# this workflow auto-assigns GitHub Copilot to fix it.
+#
+# Flow: 📱 File issue → 🏷️ Label ux-fix → 🤖 Copilot picks it up → 🔧 PR created
+
+name: auto-fix-ux
+
+on:
+  issues:
+    # labeled: when someone adds the ux-fix label to an existing issue
+    # opened: when an issue is created with ux-fix already applied (e.g., from template)
+    types: [opened, labeled]
+
+permissions:
+  issues: write      # add comments/labels
+  contents: read     # read repo for context
+  pull-requests: write  # in case we need to create PRs manually
+
+jobs:
+  assign-copilot:
+    name: Assign Copilot to UX Issue
+    # Only run when ux-fix is present: either just labeled with it, or opened with it
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'ux-fix') ||
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'ux-fix'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug issue context
+        run: |
+          echo "Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}"
+          echo "Label: ${{ github.event.label.name }}"
+          echo "Author: ${{ github.event.issue.user.login }}"
+
+      - name: Assign Copilot to fix the issue
+        id: copilot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Call the Copilot coding agent API to pick up this issue.
+          # The agent reads the issue body (including screenshots!) and creates a PR.
+          #
+          # If this endpoint doesn't work from CI yet (API may be in beta),
+          # the workflow will fall back to adding a comment.
+          
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          
+          RESPONSE=$(gh api \
+            "repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/copilot" \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            2>&1) || true
+            
+          echo "API response: ${RESPONSE}"
+          
+          if echo "${RESPONSE}" | grep -q '"html_url"'; then
+            echo "copilot_assigned=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Copilot assigned to issue #${ISSUE_NUMBER}"
+          else
+            echo "copilot_assigned=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Copilot API call may have failed: ${RESPONSE}"
+          fi
+        continue-on-error: true
+
+      - name: Fallback — add comment if Copilot API unavailable
+        if: steps.copilot.outputs.copilot_assigned != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+          
+          # Build body with a heredoc to avoid indentation issues
+          cat <<BODY > /tmp/fallback-body.md
+          > 🤖 **Copilot auto-fix** could not be triggered automatically (API may not be available from CI yet).
+
+          To fix this manually from your desk, tell Copilot:
+          > \`fix issue #${ISSUE_NUMBER}\`
+
+          Or trigger via CLI:
+          \`\`\`bash
+          gh copilot fix issue ${ISSUE_NUMBER}
+          \`\`\`
+          BODY
+
+          gh api "repos/${OWNER}/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+            --method POST \
+            -F body=@/tmp/fallback-body.md
+
+      - name: Add in-progress label on success
+        if: steps.copilot.outputs.copilot_assigned == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} \
+            --add-label "copilot-fixing" \
+            --repo "${{ github.repository }}"

@@ -1,0 +1,66 @@
+name: 🐛 UX Bug (from phone)
+description: File a UX bug spotted during phone testing of staging
+title: "[UX] "
+labels: ["ux-fix", "staging"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 📱 Phone UX Bug Report
+        Found something broken or ugly on [staging](https://bingo-server-staging.fly.dev/)? File it here.
+        Screenshots from your phone are especially helpful — Copilot will pick this up automatically.
+
+  - type: input
+    id: page
+    attributes:
+      label: Page / Screen
+      description: Which page were you on? (e.g., game lobby, board, leaderboard)
+      placeholder: "e.g., game board after joining with code BINGO-ABCDE"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what you expected vs what actually happened
+      placeholder: "I tapped 'Create Game' and nothing happened. Expected to see a game code."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to reproduce
+      description: "1. Go to ...\n2. Tap on ...\n3. See ..."
+      placeholder: "1. Open staging on phone\n2. Enter username 'test'\n3. Tap 'Join Game'\n4. See blank screen"
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: "Paste screenshots from your phone's camera roll. Android: tap the 📎 attach button in the toolbar → choose from Photos. iPhone: tap and hold in the text area → Paste."
+    validations:
+      required: false
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - "🔴 Broken — can't play"
+        - "🟡 Ugly / confusing"
+        - "🟢 Cosmetic / nice-to-have"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device & Browser
+      description: "e.g., Pixel 8 Chrome, iPhone 15 Safari"
+      placeholder: "Pixel 8 Chrome"
+    validations:
+      required: false
