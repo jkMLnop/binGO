@@ -814,12 +814,26 @@ func (s *SQLiteStore) ArchiveGame(ctx context.Context, gameID, code, hostID, win
 	return nil
 }
 
-// CleanupOldArchives deletes game_archives records older than 4 days
+// archiveCleanupTTL is the age after which game archive records are eligible for deletion.
+const archiveCleanupTTL = 4 * 24 * time.Hour
+
+// archiveCleanupGrace adds a small buffer beyond the TTL before records are deleted,
+// preventing borderline-age records from being removed due to clock skew or scheduler jitter.
+const archiveCleanupGrace = 2 * time.Second
+
+// CleanupOldArchives deletes game_archives records older than archiveCleanupTTL.
+// A grace buffer is applied so only records clearly beyond the TTL are removed.
 func (s *SQLiteStore) CleanupOldArchives(ctx context.Context) (int, error) {
+	return s.cleanupOldArchivesNow(ctx, time.Now)
+}
+
+// cleanupOldArchivesNow is the testable inner implementation that accepts an
+// injectable time source so unit tests can control the clock.
+func (s *SQLiteStore) cleanupOldArchivesNow(ctx context.Context, now func() time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	cutoff := time.Now().Add(-4 * 24 * time.Hour).Unix()
+	cutoff := now().Add(-archiveCleanupTTL - archiveCleanupGrace).Unix()
 	result, err := s.db.ExecContext(ctx,
 		`DELETE FROM game_archives WHERE ended_at < ?`,
 		cutoff,

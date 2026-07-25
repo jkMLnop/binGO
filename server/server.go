@@ -1211,17 +1211,16 @@ func (s *Server) NotifyShutdown() {
 }
 
 // startCleanupRoutine starts a background goroutine that periodically removes
-// game archive records older than 4 days.
+// game archive records older than the configured TTL.
 func (s *Server) startCleanupRoutine() {
+	ticker := time.NewTicker(1 * time.Hour)
 	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
-		s.runArchiveCleanup() // Run once immediately on startup
+		s.runCleanupPass() // Run once immediately on startup
 		for {
 			select {
 			case <-ticker.C:
-				s.runArchiveCleanup()
-				s.cleanupRateLimiters()
+				s.runCleanupPass()
 			case <-s.cleanupStop:
 				return
 			}
@@ -1229,7 +1228,14 @@ func (s *Server) startCleanupRoutine() {
 	}()
 }
 
-// runArchiveCleanup deletes old entries from the game_archives table
+// runCleanupPass performs one full cleanup cycle: archive pruning and rate-limiter GC.
+// Extracted from the goroutine loop so it can be called directly in tests.
+func (s *Server) runCleanupPass() {
+	s.runArchiveCleanup()
+	s.cleanupRateLimiters()
+}
+
+// runArchiveCleanup deletes old entries from the game_archives table.
 func (s *Server) runArchiveCleanup() {
 	if s.DB == nil {
 		return
