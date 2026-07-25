@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -221,10 +220,10 @@ func drainUntilType(ws *websocket.Conn, wantType string, timeout time.Duration) 
 	}
 }
 
-func TestContainerAdminKeyCustom(t *testing.T) { /* unchanged */ }
-func TestContainerAdminKeyFallback(t *testing.T) { /* unchanged */ }
-func TestContainerSIGTERMNotifiesClients(t *testing.T) { /* unchanged */ }
-func TestContainerOrphanedGame(t *testing.T) { /* unchanged */ }
+func TestContainerAdminKeyCustom(t *testing.T)           { /* unchanged */ }
+func TestContainerAdminKeyFallback(t *testing.T)         { /* unchanged */ }
+func TestContainerSIGTERMNotifiesClients(t *testing.T)   { /* unchanged */ }
+func TestContainerOrphanedGame(t *testing.T)             { /* unchanged */ }
 func TestContainerVolumeArchivePersistence(t *testing.T) { /* unchanged */ }
 
 func TestContainerCleanupGoroutine(t *testing.T) {
