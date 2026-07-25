@@ -592,8 +592,11 @@ function GamePageContent({
         }
 
         setBoard({ rows: message.rows, cols: message.cols, cells });
-        // Lobby flow: host sees setup lobby, non-hosts go straight to board
-        setLobbyReady(!hostMatch || !!existingWinner);
+        // Lobby flow: host sees setup lobby, non-hosts go straight to board.
+        // Skip the lobby entirely when the game already has a custom word list
+        // (e.g. a room board created via "+ New Board" with AI-generated words) —
+        // there is nothing left to set up.
+        setLobbyReady(!hostMatch || !!existingWinner || !!message.board_ready);
         if (!existingWinner) {
           setGameStatus(`Connected to ${message.game_id}`);
         }

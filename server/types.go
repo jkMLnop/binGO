@@ -32,6 +32,7 @@ type ServerMessage struct {
 	ActiveBets          []GameBet    `json:"active_bets,omitempty"`          // Phase 9.5: active player bets
 	FlatBuzzwords       []string     `json:"flat_buzzwords,omitempty"`       // Phase 9.6: flat buzzword pool for list_buzzwords
 	RejectedSuggestions []string     `json:"rejected_suggestions,omitempty"` // Phase 9.6: host-rejected phrases this round
+	BoardReady          bool         `json:"board_ready,omitempty"`          // true when the game already has a custom word list (e.g. room board), so the host setup lobby can be skipped
 }
 
 // Suggestion represents a pending buzzword suggestion from a player

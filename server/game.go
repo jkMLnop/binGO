@@ -61,6 +61,7 @@ type Game struct {
 	CreatedAt           time.Time          // When this game session started
 	EndedAt             time.Time          // When this game session ended (zero if still active)
 	Buzzwords           [][]string         // Buzzword pool for this game (may differ from server defaults)
+	CustomWords         bool               // True when Buzzwords was explicitly set to a custom list (e.g. room board, host upload/profile) rather than the server defaults — lets the client skip the host setup lobby
 	Suggestions         []Suggestion       // Phase 9: pending buzzword suggestions (in-memory only)
 	SuggestionsMu       sync.Mutex         // Protect Suggestions slice
 	RejectedSuggestions []string           // Phase 9.6: phrases rejected by host this round (in-memory)
