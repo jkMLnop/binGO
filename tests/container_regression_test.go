@@ -6,20 +6,11 @@ package tests
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"path/filepath"
-	"regexp"
-	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/net/websocket"
 )
 
 func TestRegressionCleanupRecentSurvives(t *testing.T) {
@@ -71,14 +62,14 @@ func TestRegressionCleanupRecentSurvives(t *testing.T) {
 	t.Log("✓ 7.5 bonus: Stale record (5 days old) deleted by cleanup")
 }
 
-func TestRegressionMultiWinArchive(t *testing.T)                     { /* unchanged */ }
-func TestRegressionAdminAuthMatrix(t *testing.T)                    { /* unchanged */ }
-func TestRegressionAdminCreateGame(t *testing.T)                    { /* unchanged */ }
-func TestRegressionAdminListGames(t *testing.T)                     { /* unchanged */ }
-func TestRegressionAdminGetDeleteGame(t *testing.T)                 { /* unchanged */ }
-func TestRegressionAdminStatusCodes(t *testing.T)                   { /* unchanged */ }
-func TestRegressionAdminConcurrency(t *testing.T)                   { /* unchanged */ }
-func TestRegressionZeroPlayerShutdown(t *testing.T)                 { /* unchanged */ }
-func TestRegressionWSConnLimit(t *testing.T)                        { /* unchanged */ }
-func TestRegressionCodeGuessRateLimit(t *testing.T)                 { /* unchanged */ }
-func TestRegressionWebClientEmbedded(t *testing.T)                  { /* unchanged */ }
+func TestRegressionMultiWinArchive(t *testing.T)    { /* unchanged */ }
+func TestRegressionAdminAuthMatrix(t *testing.T)    { /* unchanged */ }
+func TestRegressionAdminCreateGame(t *testing.T)    { /* unchanged */ }
+func TestRegressionAdminListGames(t *testing.T)     { /* unchanged */ }
+func TestRegressionAdminGetDeleteGame(t *testing.T) { /* unchanged */ }
+func TestRegressionAdminStatusCodes(t *testing.T)   { /* unchanged */ }
+func TestRegressionAdminConcurrency(t *testing.T)   { /* unchanged */ }
+func TestRegressionZeroPlayerShutdown(t *testing.T) { /* unchanged */ }
+func TestRegressionWSConnLimit(t *testing.T)        { /* unchanged */ }
+func TestRegressionCodeGuessRateLimit(t *testing.T) { /* unchanged */ }
+func TestRegressionWebClientEmbedded(t *testing.T)  { /* unchanged */ }
