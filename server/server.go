@@ -624,7 +624,7 @@ func (s *Server) createPlayerInGame(ctx context.Context, game *Game, playerID st
 func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player, token string) error {
 	// Use game-specific buzzwords if set (e.g. custom host upload), else server defaults
 	buzzwords := game.Buzzwords
-	boardReady := game.CustomWords // custom words already set (e.g. room board) — skip the host setup lobby
+	boardReady := game.CustomWords // host already chose a word list (e.g. room board, or a curated profile list) — skip the host setup lobby
 	if len(buzzwords) == 0 {
 		buzzwords = s.Buzzwords
 	}

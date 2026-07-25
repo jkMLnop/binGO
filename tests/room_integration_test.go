@@ -437,6 +437,9 @@ func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
 	if boardReady, ok := hostWelcome["board_ready"].(bool); ok && boardReady {
 		t.Fatal("expected the lazily-created default-words game to have board_ready=false (or omitted)")
 	}
+	if buzzwords, ok := hostWelcome["buzzwords"].([]interface{}); !ok || len(buzzwords) == 0 {
+		t.Fatalf("expected the lazily-created game to still have server-default buzzwords, got %v", hostWelcome["buzzwords"])
+	}
 	hostToken, _ := hostWelcome["token"].(string)
 	if hostToken == "" {
 		t.Fatal("expected non-empty token for room host")
@@ -497,6 +500,9 @@ func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
 	}
 	if boardReady, ok := boardWelcome["board_ready"].(bool); !ok || !boardReady {
 		t.Fatalf("expected board_ready=true for a pre-configured room board, got %v", boardWelcome["board_ready"])
+	}
+	if buzzwords, ok := boardWelcome["buzzwords"].([]interface{}); !ok || len(buzzwords) != len(words) {
+		t.Fatalf("expected %d custom buzzwords on the board's welcome message, got %v", len(words), boardWelcome["buzzwords"])
 	}
 	t.Logf("✓ room board %s reports board_ready=true so the host setup lobby is skipped", createPayload.Data.Code)
 }
