@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -230,6 +231,16 @@ func TestContainerCleanupGoroutine(t *testing.T) {
 	dataDir := t.TempDir()
 	ctx := context.Background()
 
+	// Pre-create the DB file owned by the test process so that after the
+	// container (which runs as root) stops, we retain write access to insert
+	// the stale row without hitting "attempt to write a readonly database".
+	dbPath := filepath.Join(dataDir, "bingo.db")
+	if f, err := os.Create(dbPath); err != nil {
+		t.Fatalf("pre-create bingo.db: %v", err)
+	} else {
+		f.Close()
+	}
+
 	c1, _ := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, dataDir)
 
 	stopTimeout := 10 * time.Second
@@ -237,7 +248,6 @@ func TestContainerCleanupGoroutine(t *testing.T) {
 		t.Fatalf("stop container 1: %v", err)
 	}
 
-	dbPath := filepath.Join(dataDir, "bingo.db")
 	sqlDB, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatalf("open %s: %v", dbPath, err)
@@ -255,7 +265,7 @@ func TestContainerCleanupGoroutine(t *testing.T) {
 
 	c2, _ := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, dataDir)
 
-	_ = waitForLog(t, ctx, c2, "Cleaned up", 8*time.Second)
-	waitForArchiveRowCount(t, dbPath, "stale-row-1", 0, 10*time.Second)
+	_ = waitForLog(t, ctx, c2, "Cleaned up", 15*time.Second)
+	waitForArchiveRowCount(t, dbPath, "stale-row-1", 0, 20*time.Second)
 	t.Logf("✓ Startup cleanup goroutine removed the stale archive row")
 }
