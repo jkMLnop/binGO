@@ -265,6 +265,9 @@ func (s *Server) createGameForHost(ctx context.Context, hostUsername string, cus
 					rows[i] = []string{w}
 				}
 				buzzwords = append(s.Buzzwords, rows...)
+				// The host previously curated this profile word list, so treat the
+				// board as already configured (skip the setup lobby) even though the
+				// final list is layered on top of the server defaults.
 				customWords = true
 			}
 		}

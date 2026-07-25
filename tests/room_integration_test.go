@@ -413,12 +413,13 @@ func TestRoomBuzzwordsTooFew(t *testing.T) {
 // was shown the setup lobby again even though the board's words were
 // already chosen when the board was created.
 func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
-	startTestServerWithDB(t, "9977")
+	const testPort = "9977"
+	startTestServerWithDB(t, testPort)
 
-	roomCode := createRoomForTest(t, "9977")
+	roomCode := createRoomForTest(t, testPort)
 
 	// First player becomes the room host.
-	ws1, err := websocket.Dial("ws://localhost:9977/ws", "", "http://localhost")
+	ws1, err := websocket.Dial(fmt.Sprintf("ws://localhost:%s/ws", testPort), "", "http://localhost")
 	if err != nil {
 		t.Fatalf("failed to connect ws1: %v", err)
 	}
@@ -447,7 +448,7 @@ func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
 		words[i] = fmt.Sprintf("customword%02d", i+1)
 	}
 	body, _ := json.Marshal(CreateRoomGameRequestForTest{Title: "AI Board", Buzzwords: words})
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:9977/api/room/%s/games", roomCode), bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/api/room/%s/games", testPort, roomCode), bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("failed to build create-board request: %v", err)
 	}
@@ -476,7 +477,7 @@ func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
 	}
 
 	// Now join the newly created board's game directly and confirm board_ready=true.
-	ws2, err := websocket.Dial("ws://localhost:9977/ws", "", "http://localhost")
+	ws2, err := websocket.Dial(fmt.Sprintf("ws://localhost:%s/ws", testPort), "", "http://localhost")
 	if err != nil {
 		t.Fatalf("failed to connect ws2: %v", err)
 	}
