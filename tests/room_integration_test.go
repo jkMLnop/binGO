@@ -433,7 +433,7 @@ func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
 	if err := websocket.JSON.Receive(ws1, &hostWelcome); err != nil {
 		t.Fatalf("ws1 welcome receive failed: %v", err)
 	}
-	if hostWelcome["board_ready"] == true {
+	if boardReady, ok := hostWelcome["board_ready"].(bool); ok && boardReady {
 		t.Fatal("expected the lazily-created default-words game to have board_ready=false (or omitted)")
 	}
 	hostToken, _ := hostWelcome["token"].(string)
@@ -494,7 +494,7 @@ func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
 	if boardWelcome["type"] != "welcome" {
 		t.Fatalf("expected welcome, got %v", boardWelcome["type"])
 	}
-	if boardWelcome["board_ready"] != true {
+	if boardReady, ok := boardWelcome["board_ready"].(bool); !ok || !boardReady {
 		t.Fatalf("expected board_ready=true for a pre-configured room board, got %v", boardWelcome["board_ready"])
 	}
 	t.Logf("✓ room board %s reports board_ready=true so the host setup lobby is skipped", createPayload.Data.Code)
