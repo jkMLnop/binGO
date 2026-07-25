@@ -692,6 +692,7 @@ func (s *Server) handleSetGameBuzzwords(w http.ResponseWriter, r *http.Request, 
 		rows = append(rows, []string{w})
 	}
 	game.Buzzwords = rows
+	game.CustomWords = true
 
 	writeAPISuccess(w, map[string]interface{}{"words_saved": len(cleaned)})
 }
@@ -1319,6 +1320,7 @@ func (s *Server) handleCreateRoomGame(w http.ResponseWriter, r *http.Request, co
 	newGame := NewGame(gameID, rows, s.Rows, s.Cols)
 	newGame.Title = body.Title
 	newGame.HostID = room.HostID // Board host is the room admin
+	newGame.CustomWords = true   // custom word list was chosen when the board was created
 	s.Games[gameID] = newGame
 	s.CodeToGame[newGame.Code] = newGame
 	s.GamesMu.Unlock()

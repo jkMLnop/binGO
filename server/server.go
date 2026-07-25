@@ -245,10 +245,12 @@ func (s *Server) ensureActiveGameAvailable() {
 // Custom buzzwords may be provided; if nil the host's DB profile is checked, then server defaults.
 func (s *Server) createGameForHost(ctx context.Context, hostUsername string, customBuzzwords [][]string) (*Game, error) {
 	buzzwords := s.Buzzwords
+	customWords := false
 
 	if len(customBuzzwords) > 0 {
 		// Caller provided an explicit buzzword list — use it
 		buzzwords = customBuzzwords
+		customWords = true
 	} else if s.DB != nil {
 		// Try to load the host's approved buzzword list from their profile
 		dbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -263,6 +265,10 @@ func (s *Server) createGameForHost(ctx context.Context, hostUsername string, cus
 					rows[i] = []string{w}
 				}
 				buzzwords = append(s.Buzzwords, rows...)
+				// The host previously curated this profile word list, so treat the
+				// board as already configured (skip the setup lobby) even though the
+				// final list is layered on top of the server defaults.
+				customWords = true
 			}
 		}
 	}
@@ -272,6 +278,7 @@ func (s *Server) createGameForHost(ctx context.Context, hostUsername string, cus
 
 	gameID := fmt.Sprintf("game-%d-%d", len(s.Games)+1, time.Now().UnixNano())
 	newGame := NewGame(gameID, buzzwords, s.Rows, s.Cols)
+	newGame.CustomWords = customWords
 	s.Games[gameID] = newGame
 	s.CodeToGame[newGame.Code] = newGame
 
@@ -617,6 +624,7 @@ func (s *Server) createPlayerInGame(ctx context.Context, game *Game, playerID st
 func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Player, token string) error {
 	// Use game-specific buzzwords if set (e.g. custom host upload), else server defaults
 	buzzwords := game.Buzzwords
+	boardReady := game.CustomWords // host already chose a word list (e.g. room board, or a curated profile list) — skip the host setup lobby
 	if len(buzzwords) == 0 {
 		buzzwords = s.Buzzwords
 	}
@@ -641,6 +649,7 @@ func (s *Server) sendWelcomeMessage(ws *websocket.Conn, game *Game, player *Play
 		Players:        game.GetPlayerList(),
 		Winner:         game.Winner,
 		Message:        fmt.Sprintf("Welcome %s! Players in game: %d", player.ID, game.PlayerCount()),
+		BoardReady:     boardReady,
 	}
 
 	if err := websocket.JSON.Send(ws, welcomeMsg); err != nil {
