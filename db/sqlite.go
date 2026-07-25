@@ -817,8 +817,11 @@ func (s *SQLiteStore) ArchiveGame(ctx context.Context, gameID, code, hostID, win
 // archiveCleanupTTL is the age after which game archive records are eligible for deletion.
 const archiveCleanupTTL = 4 * 24 * time.Hour
 
-// archiveCleanupGrace adds a small buffer beyond the TTL before records are deleted,
-// preventing borderline-age records from being removed due to clock skew or scheduler jitter.
+// archiveCleanupGrace adds a small buffer beyond the TTL before records are deleted.
+// 2 seconds is intentionally modest: the goal is sub-second boundary precision (preventing
+// a record created at t=0 from being deleted at t=TTL due to tick scheduling jitter), not
+// meaningful clock-drift compensation. For clock-skew concerns, TTL itself (4 days) already
+// provides ample margin.
 const archiveCleanupGrace = 2 * time.Second
 
 // CleanupOldArchives deletes game_archives records older than archiveCleanupTTL.

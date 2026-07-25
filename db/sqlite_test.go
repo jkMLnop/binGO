@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -335,8 +336,7 @@ func TestCleanupOldArchives(t *testing.T) {
 // TestCleanupOldArchivesGracePeriod verifies the injectable time source and grace period:
 // a record exactly at the TTL boundary is NOT deleted, while a record past TTL+grace IS.
 func TestCleanupOldArchivesGracePeriod(t *testing.T) {
-	tmpFile := "/tmp/test_bingo_cleanup_grace.db"
-	defer os.Remove(tmpFile)
+	tmpFile := filepath.Join(t.TempDir(), "test_bingo_cleanup_grace.db")
 
 	store, err := NewSQLiteStore(context.Background(), tmpFile)
 	if err != nil {

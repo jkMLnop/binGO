@@ -1213,8 +1213,8 @@ func (s *Server) NotifyShutdown() {
 // startCleanupRoutine starts a background goroutine that periodically removes
 // game archive records older than the configured TTL.
 func (s *Server) startCleanupRoutine() {
-	ticker := time.NewTicker(1 * time.Hour)
 	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		s.runCleanupPass() // Run once immediately on startup
 		for {
