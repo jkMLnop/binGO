@@ -101,7 +101,7 @@ func execSQLInContainer(t *testing.T, ctx context.Context, c tc.Container, dbPat
 	t.Helper()
 
 	containerID := c.GetContainerID()
-	cmd := exec.Command("docker", "exec", containerID, "sqlite3", dbPath, sql)
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "sqlite3", dbPath, sql)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker exec sqlite3 %s: %v\noutput: %s", dbPath, err, string(output))
