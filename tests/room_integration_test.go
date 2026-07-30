@@ -405,6 +405,114 @@ func TestRoomBuzzwordsTooFew(t *testing.T) {
 	t.Log("✓ too-few buzzwords correctly rejected with 400")
 }
 
+// TestRoomBoardCreatedGameSkipsSetupLobby verifies that a game created via
+// POST /api/room/:code/games (the "+ New Board" flow) already has its
+// custom word list attached, so the welcome message tells the client the
+// board is ready (board_ready=true) and the redundant "set up your bingo
+// board" lobby can be skipped. Regression test for the issue where the host
+// was shown the setup lobby again even though the board's words were
+// already chosen when the board was created.
+func TestRoomBoardCreatedGameSkipsSetupLobby(t *testing.T) {
+	const testPort = "9977"
+	startTestServerWithDB(t, testPort)
+
+	roomCode := createRoomForTest(t, testPort)
+
+	// First player becomes the room host.
+	ws1, err := websocket.Dial(fmt.Sprintf("ws://localhost:%s/ws", testPort), "", "http://localhost")
+	if err != nil {
+		t.Fatalf("failed to connect ws1: %v", err)
+	}
+	defer ws1.Close()
+	ws1.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := websocket.JSON.Send(ws1, map[string]interface{}{
+		"action": "room_login", "username": "RoomHost", "room_code": roomCode,
+	}); err != nil {
+		t.Fatalf("ws1 room_login send failed: %v", err)
+	}
+	var hostWelcome map[string]interface{}
+	if err := websocket.JSON.Receive(ws1, &hostWelcome); err != nil {
+		t.Fatalf("ws1 welcome receive failed: %v", err)
+	}
+	if boardReady, ok := hostWelcome["board_ready"].(bool); ok && boardReady {
+		t.Fatal("expected the lazily-created default-words game to have board_ready=false (or omitted)")
+	}
+	if buzzwords, ok := hostWelcome["buzzwords"].([]interface{}); !ok || len(buzzwords) == 0 {
+		t.Fatalf("expected the lazily-created game to still have server-default buzzwords, got %v", hostWelcome["buzzwords"])
+	}
+	hostToken, _ := hostWelcome["token"].(string)
+	if hostToken == "" {
+		t.Fatal("expected non-empty token for room host")
+	}
+
+	// Host creates a new board with a custom word list (simulating the AI-generated flow).
+	words := make([]string, 24)
+	for i := range words {
+		words[i] = fmt.Sprintf("customword%02d", i+1)
+	}
+	body, _ := json.Marshal(CreateRoomGameRequestForTest{Title: "AI Board", Buzzwords: words})
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%s/api/room/%s/games", testPort, roomCode), bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to build create-board request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+hostToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/room/:code/games failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating room board, got %d", resp.StatusCode)
+	}
+
+	var createPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Code string `json:"code"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createPayload); err != nil {
+		t.Fatalf("decode create-board response failed: %v", err)
+	}
+	if !createPayload.Success || createPayload.Data.Code == "" {
+		t.Fatal("expected a game code back from board creation")
+	}
+
+	// Now join the newly created board's game directly and confirm board_ready=true.
+	ws2, err := websocket.Dial(fmt.Sprintf("ws://localhost:%s/ws", testPort), "", "http://localhost")
+	if err != nil {
+		t.Fatalf("failed to connect ws2: %v", err)
+	}
+	defer ws2.Close()
+	ws2.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := websocket.JSON.Send(ws2, map[string]interface{}{
+		"action": "login", "username": "RoomHost", "code": createPayload.Data.Code,
+	}); err != nil {
+		t.Fatalf("ws2 login send failed: %v", err)
+	}
+	var boardWelcome map[string]interface{}
+	if err := websocket.JSON.Receive(ws2, &boardWelcome); err != nil {
+		t.Fatalf("ws2 welcome receive failed: %v", err)
+	}
+	if boardWelcome["type"] != "welcome" {
+		t.Fatalf("expected welcome, got %v", boardWelcome["type"])
+	}
+	if boardReady, ok := boardWelcome["board_ready"].(bool); !ok || !boardReady {
+		t.Fatalf("expected board_ready=true for a pre-configured room board, got %v", boardWelcome["board_ready"])
+	}
+	if buzzwords, ok := boardWelcome["buzzwords"].([]interface{}); !ok || len(buzzwords) != len(words) {
+		t.Fatalf("expected %d custom buzzwords on the board's welcome message, got %v", len(words), boardWelcome["buzzwords"])
+	}
+	t.Logf("✓ room board %s reports board_ready=true so the host setup lobby is skipped", createPayload.Data.Code)
+}
+
+// CreateRoomGameRequestForTest mirrors server.CreateRoomGameRequest for the test's JSON body.
+type CreateRoomGameRequestForTest struct {
+	Title     string   `json:"title"`
+	Buzzwords []string `json:"buzzwords"`
+}
+
 // TestRoomLeaderboard verifies that GET /api/room/:code/leaderboard returns an
 // empty list for a fresh room with no wins recorded.
 func TestRoomLeaderboard(t *testing.T) {

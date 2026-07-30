@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -330,6 +331,45 @@ func TestCleanupOldArchives(t *testing.T) {
 	}
 
 	t.Log("✓ CleanupOldArchives correctly removed old record and kept recent one")
+}
+
+// TestCleanupOldArchivesGracePeriod verifies the injectable time source and grace period:
+// a record exactly at the TTL boundary is NOT deleted, while a record past TTL+grace IS.
+func TestCleanupOldArchivesGracePeriod(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "test_bingo_cleanup_grace.db")
+
+	store, err := NewSQLiteStore(context.Background(), tmpFile)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close(context.Background())
+
+	ctx := context.Background()
+	if err := store.Init(ctx); err != nil {
+		t.Fatalf("failed to init: %v", err)
+	}
+
+	fakeNow := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	exactBoundary := fakeNow.Add(-archiveCleanupTTL) // exactly 4 days old: should survive (within grace)
+	clearlyStale := fakeNow.Add(-archiveCleanupTTL - archiveCleanupGrace - time.Second) // past TTL+grace: must be deleted
+
+	if err := store.ArchiveGame(ctx, "boundary-game", "BINGO-BNDRY", "host-b", "winner-b", 2,
+		exactBoundary.Add(-30*time.Minute), exactBoundary); err != nil {
+		t.Fatalf("failed to insert boundary archive: %v", err)
+	}
+	if err := store.ArchiveGame(ctx, "stale-game", "BINGO-STALE", "host-s", "winner-s", 2,
+		clearlyStale.Add(-30*time.Minute), clearlyStale); err != nil {
+		t.Fatalf("failed to insert stale archive: %v", err)
+	}
+
+	deleted, err := store.cleanupOldArchivesNow(ctx, func() time.Time { return fakeNow })
+	if err != nil {
+		t.Fatalf("cleanupOldArchivesNow failed: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("expected 1 record deleted (clearly stale), got %d", deleted)
+	}
+	t.Log("✓ Grace period preserved boundary record; only clearly-stale record was removed")
 }
 
 // ---------------------------------------------------------------------------

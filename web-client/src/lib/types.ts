@@ -67,4 +67,5 @@ export type ServerMessage = {
   active_bets?: GameBet[];
   flat_buzzwords?: string[];
   rejected_suggestions?: string[];
+  board_ready?: boolean; // true when the game already has a custom word list (e.g. room board), skip the host setup lobby
 };

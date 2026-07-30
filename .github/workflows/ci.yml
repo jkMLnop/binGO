@@ -53,7 +53,7 @@ jobs:
       - name: Run container regression tests
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: go test -tags=container -count=1 -timeout=10m -v ./tests 2>&1 | tee /tmp/container-test-output.log
+        run: go test -tags=container -count=1 -timeout=15m -v ./tests 2>&1 | tee /tmp/container-test-output.log
       - name: Dump last 100 lines on failure
         if: failure()
         run: cat /tmp/container-test-output.log
