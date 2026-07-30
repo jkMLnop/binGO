@@ -5,7 +5,7 @@ package tests
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,39 +30,29 @@ func TestRegressionCleanupRecentSurvives(t *testing.T) {
 
 	c1, _ := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, dataDir)
 
-	stopTimeout := 10 * time.Second
-	if err := c1.Stop(ctx, &stopTimeout); err != nil {
-		t.Fatalf("stop container 1: %v", err)
-	}
-
-	sqlDB, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		t.Fatalf("open %s: %v", dbPath, err)
-	}
+	// Phase 2: Insert a recent row (2 hours old — under the 4-day threshold)
+	// and a stale row (5 days old — over the threshold) via sqlite3 inside the
+	// running container. We exec into the container rather than writing to the
+	// SQLite file from the host because bind-mounted files may have different
+	// ownership on CI runners (container runs as root; host is non-root).
 
 	// Use a timestamp well inside the safe window: 2 hours old is comfortably
 	// within the 4-day TTL and far from any boundary even with clock skew.
 	twoHoursAgo := time.Now().Add(-2 * time.Hour).Unix()
 	fiveDaysAgo := time.Now().Add(-5 * 24 * time.Hour).Unix()
 
-	_, err = sqlDB.Exec(
-		`INSERT INTO game_archives(id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
-		 VALUES (?,?,?,?,?,?,?,?)`,
-		"recent-row", "g-recent", "BINGO-RECNT", "host-r", "winner-r", 2, twoHoursAgo, twoHoursAgo,
-	)
-	if err != nil {
-		t.Fatalf("insert recent row: %v", err)
-	}
+	execSQLInContainer(t, ctx, c1, "/app/data/bingo.db",
+		fmt.Sprintf(`INSERT INTO game_archives(id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
+		 VALUES ('recent-row','g-recent','BINGO-RECNT','host-r','winner-r',2,%d,%d)`, twoHoursAgo, twoHoursAgo))
 
-	_, err = sqlDB.Exec(
-		`INSERT INTO game_archives(id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
-		 VALUES (?,?,?,?,?,?,?,?)`,
-		"stale-row", "g-stale", "BINGO-STALE", "host-s", "winner-s", 2, fiveDaysAgo, fiveDaysAgo,
-	)
-	if err != nil {
-		t.Fatalf("insert stale row: %v", err)
+	execSQLInContainer(t, ctx, c1, "/app/data/bingo.db",
+		fmt.Sprintf(`INSERT INTO game_archives(id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
+		 VALUES ('stale-row','g-stale','BINGO-STALE','host-s','winner-s',2,%d,%d)`, fiveDaysAgo, fiveDaysAgo))
+
+	stopTimeout := 10 * time.Second
+	if err := c1.Stop(ctx, &stopTimeout); err != nil {
+		t.Fatalf("stop container 1: %v", err)
 	}
-	sqlDB.Close()
 
 	c2, _ := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, dataDir)
 

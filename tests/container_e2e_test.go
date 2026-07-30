@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,6 +91,21 @@ func startBingoServer(t *testing.T, ctx context.Context, env map[string]string, 
 	}
 
 	return c, fmt.Sprintf("http://%s:%s", host, port.Port())
+}
+
+// execSQLInContainer runs a SQLite command inside a running container via docker exec.
+// The container must have the sqlite3 CLI installed (the bingo Dockerfile includes it).
+// We use this instead of opening the SQLite file from the host because bind-mounted
+// files on CI runners may have root ownership that prevents host-side writes.
+func execSQLInContainer(t *testing.T, ctx context.Context, c tc.Container, dbPath, sql string) {
+	t.Helper()
+
+	containerID := c.GetContainerID()
+	cmd := exec.CommandContext(ctx, "docker", "exec", containerID, "sqlite3", dbPath, sql)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker exec sqlite3 %s: %v\noutput: %s", dbPath, err, string(output))
+	}
 }
 
 func adminCreateGame(t *testing.T, baseURL, adminKey string) string {
@@ -243,25 +259,22 @@ func TestContainerCleanupGoroutine(t *testing.T) {
 
 	c1, _ := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, dataDir)
 
+	// ── Phase 2: Insert a 5-day-old archive row via sqlite3 inside the container.
+	// We exec into the running container rather than writing to the SQLite file
+	// from the host because bind-mounted files may have different ownership on
+	// CI runners (container runs as root; host is non-root). ──────────────────
+
+	fiveDaysAgo := time.Now().Add(-5 * 24 * time.Hour).Unix()
+	execSQLInContainer(t, ctx, c1, "/app/data/bingo.db",
+		fmt.Sprintf(`INSERT INTO game_archives(id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
+		 VALUES ('stale-row-1','g-stale','BINGO-STALE','host-st','winner-st',2,%d,%d)`, fiveDaysAgo, fiveDaysAgo))
+
 	stopTimeout := 10 * time.Second
 	if err := c1.Stop(ctx, &stopTimeout); err != nil {
 		t.Fatalf("stop container 1: %v", err)
 	}
 
-	sqlDB, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		t.Fatalf("open %s: %v", dbPath, err)
-	}
-	fiveDaysAgo := time.Now().Add(-5 * 24 * time.Hour).Unix()
-	_, err = sqlDB.Exec(
-		`INSERT INTO game_archives(id, game_id, code, host_id, winner_id, player_count, created_at, ended_at)
-		 VALUES (?,?,?,?,?,?,?,?)`,
-		"stale-row-1", "g-stale", "BINGO-STALE", "host-st", "winner-st", 2, fiveDaysAgo, fiveDaysAgo,
-	)
-	sqlDB.Close()
-	if err != nil {
-		t.Fatalf("insert stale row: %v", err)
-	}
+	// ── Phase 3: Fresh container on same volume; cleanup runs at startup ──────
 
 	c2, _ := startBingoServer(t, ctx, map[string]string{"ADMIN_API_KEY": ctDefaultKey}, dataDir)
 
